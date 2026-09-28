@@ -44,8 +44,10 @@ struct TimecodeTests {
         #expect(Timecode("00:10:00;00", rate: .fps29_97DropFrame) != nil)
     }
 
-    @Test func parsingAcceptsCommonSeparatorsAndRejectsOutOfRangeFields() {
-        #expect(Timecode("01:02:03:04", rate: .fps25)?.frameNumber == ((62 * 60) + 3) * 25 + 4)
+    @Test func parsingAcceptsCommonSeparatorsAndRejectsOutOfRangeFields() throws {
+        let parsed = try #require(Timecode("01:02:03:04", rate: .fps25))
+        let expectedFrame: Int64 = ((62 * 60) + 3) * 25 + 4
+        #expect(parsed.frameNumber == expectedFrame)
         #expect(Timecode("01.02.03.04", rate: .fps25) == Timecode("01:02:03:04", rate: .fps25))
         #expect(Timecode("00:00:00:25", rate: .fps25) == nil)
         #expect(Timecode("00:60:00:00", rate: .fps25) == nil)
