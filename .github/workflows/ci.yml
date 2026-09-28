@@ -36,11 +36,11 @@ jobs:
             -scheme Spotline \
             -destination 'platform=macOS' \
             -resultBundlePath build/UITests.xcresult
-      - name: Show app and window server logs
+      - name: Show app logs
         if: failure()
         run: |
           log show --last 15m --style compact \
-            --predicate 'process == "Spotline" OR (process == "WindowServer" AND eventMessage CONTAINS "Spotline")' \
+            --predicate 'process == "Spotline" AND NOT subsystem == "com.apple.dt.xctest"' \
             | tail -n 300
           ls ~/Library/Logs/DiagnosticReports | grep -i spotline || true
       - name: Upload test results

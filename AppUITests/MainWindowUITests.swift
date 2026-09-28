@@ -44,16 +44,16 @@ final class MainWindowUITests: XCTestCase {
         app.launchArguments += ["-UITestMode", "-ApplePersistenceIgnoreState", "YES"]
         app.launch()
         app.activate()
+        // On GitHub's macOS runners the app starts with no window (menus only) until
+        // one is requested, so ask for one with New Window rather than depend on it.
         let window = app.windows.firstMatch
-        if !window.waitForExistence(timeout: 15) {
-            // Diagnostic: does an explicitly requested window appear?
+        if !window.waitForExistence(timeout: 5) {
             app.typeKey("n", modifierFlags: .command)
-            let appearedOnRequest = window.waitForExistence(timeout: 10)
-            XCTFail(
-                "Main window did not appear at launch (appeared after Cmd-N: \(appearedOnRequest)). "
-                    + "Accessibility hierarchy:\n\(app.debugDescription)"
-            )
         }
+        XCTAssertTrue(
+            window.waitForExistence(timeout: 15),
+            "No editor window. Accessibility hierarchy:\n\(app.debugDescription)"
+        )
         return app
     }
 }

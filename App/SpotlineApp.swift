@@ -6,8 +6,8 @@ struct SpotlineApp: App {
     @State private var editor = EditorState()
 
     var body: some Scene {
-        // A WindowGroup, not a single Window scene: on CI runners the single
-        // Window scene never opened at launch. Documents replace this in M2.
+        // WindowGroup gives File > New Window, which UI tests use on CI runners
+        // where no window opens at launch. Document windows replace this in M2.
         WindowGroup("Spotline", id: "main") {
             MainWindowView(editor: editor)
         }
