@@ -74,20 +74,19 @@ final class TimelineUITests: XCTestCase {
     func testSwitchingAudioTracksRedrawsTheWaveform() throws {
         let app = launchApp(media: "two-tracks.mkv")
         let timeline = app.descendants(matching: .any)[AccessibilityID.Timeline.root]
-        let picker = app.popUpButtons[AccessibilityID.Transport.audioTrack]
         waitForValue(of: timeline, toEqual: "Waveform: all channels mixed")
-        XCTAssertTrue((picker.value as? String)?.contains("Original") == true, "\(picker.value ?? "nil")")
 
-        // Pick the second track from the pop-up while the video plays: the
-        // playhead must not redraw (and break) the open menu.
+        // Pick the second track from Playback › Audio Track while the video
+        // plays: the playhead must not redraw (and break) the open menu.
         button(EditorCommand.togglePlay, in: app).click()
-        picker.click()
-        app.menuItems.matching(NSPredicate(format: "title CONTAINS 'Arabic dub'")).firstMatch.click()
+        app.menuBars.menuBarItems["Playback"].click()
+        app.menuItems["Audio Track"].hover()
+        let arabic = app.menuItems.matching(NSPredicate(format: "title CONTAINS 'Arabic dub'")).firstMatch
+        XCTAssertTrue(arabic.waitForExistence(timeout: 5))
+        arabic.click()
         waitForValue(of: timeline, toEqual: "Waveform: center channel (dialogue)")
-        XCTAssertTrue((picker.value as? String)?.contains("Arabic dub") == true, "\(picker.value ?? "nil")")
 
         app.typeKey("a", modifierFlags: [.command, .option])
         waitForValue(of: timeline, toEqual: "Waveform: all channels mixed")
-        XCTAssertTrue((picker.value as? String)?.contains("Original") == true, "\(picker.value ?? "nil")")
     }
 }

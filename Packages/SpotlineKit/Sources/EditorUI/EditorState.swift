@@ -317,9 +317,8 @@ public final class EditorState {
 
     // MARK: - Audio tracks
 
-    /// Copies of the player's track list and selection, kept apart from
-    /// `status` (which changes every frame) so views showing them only redraw
-    /// when they change. A pop-up menu redrawn while open stops working.
+    /// Copies of the player's track list and selection, so the Audio Track
+    /// menu only redraws when they change.
     public private(set) var audioTracks: [AudioTrack] = []
     public private(set) var selectedAudioTrackID: Int?
 

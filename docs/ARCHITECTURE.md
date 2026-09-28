@@ -147,7 +147,7 @@ Round-trip tests for every format live in `SubtitleFormats` with golden files.
 - Drags move in whole frames and snap within 8 points to shot changes, the playhead and other cues' edges (exactly, even when those are off-frame times from SRT). The drag previews live and lands as one undoable edit (`EditorState.setTiming`). The math lives in `CueDrag` and is unit tested.
 - Accessibility: the timeline exposes the playhead, each shot change and each cue with its in/out handles as `NSAccessibilityElement`s (IDs in `AccessibilityID.Timeline`); handles support increment/decrement by one frame.
 - New commands: Go to Previous/Next Shot Change (⌥← / ⌥→), Zoom In/Out (⌘= / ⌘-), and the "Snap to Shot Changes and Cues" toggle.
-- Audio tracks: `PlaybackStatus` lists the media's audio tracks (language, title, channels, FFmpeg stream) from mpv's `track-list`; a picker in the transport bar and Playback › Audio Track choose one (`EditorState.selectAudioTrack`), and Next Audio Track (⌥⌘A) cycles. The waveform follows the playing track.
+- Audio tracks: `PlaybackStatus` lists the media's audio tracks (language, title, channels, FFmpeg stream) from mpv's `track-list`; Playback › Audio Track chooses one (`EditorState.selectAudioTrack`), and Next Audio Track (⌥⌘A) cycles. The waveform follows the playing track.
 
 ## 7. Pro workflow features (backlog, roughly in order)
 

@@ -21,8 +21,6 @@ public enum AccessibilityID {
         public static let frameRate = "transport.frameRate"
         /// Media analysis state: "Analyzing 40%", or the number of shot changes found.
         public static let analysis = "transport.analysis"
-        /// The audio track picker; its value is the playing track's name.
-        public static let audioTrack = "transport.audioTrack"
     }
 
     public enum Timeline {
