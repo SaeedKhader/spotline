@@ -154,6 +154,7 @@ Round-trip tests for every format live in `SubtitleFormats` with golden files.
 - A third background job, `MediaAnalyzer.speech`, feeds the same mono (or center-channel) audio to Apple's on-device sound classifier (SoundAnalysis, `SNClassifySoundRequest(.version1)`) in 1 s windows every 0.5 s, and keeps windows scoring at least 0.5 for "speech" as `SpeechRegion`s. It runs about 200× faster than real time (roughly 30 s for a 2-hour film), streams partial results like the other jobs and is cached per audio track. This is also the speech-detection step of the M6 audio pipeline.
 - The timeline draws speech in mint and dims everything else; Timeline › Highlight Speech in Waveform turns it off. True dialogue/music separation (e.g. Demucs) stays with the M6 AI tools.
 - Tests generate speech at run time with macOS `say` rather than committing synthesized recordings.
+- Status (Saeed, 2026-09-29): good enough for now, not perfect; revisit later (e.g. per-scene tuning or source separation).
 
 ## 7. Pro workflow features (backlog, roughly in order)
 
