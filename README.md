@@ -7,7 +7,7 @@ A native macOS subtitle editor for professional movie and TV workflows: timing (
 - Built for automation from day one: stable accessibility IDs, one command layer shared by menus, shortcuts, UI tests and AI agents
 - AI tools (planned): transcription with timestamps, translation, profanity removal and line shortening, always reviewed as a diff before applying
 
-Status: early development (milestone M1, playback). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
+Status: early development (milestone M2, basic editing). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
 ## Requirements
 
@@ -30,6 +30,8 @@ swift test --package-path Packages/SpotlineKit
 
 Open a file with File > Open Media… (Command-O) or by dropping it on the video. `-OpenMedia <path>` opens one at launch.
 
+Import SRT or WebVTT subtitles with File > Import Subtitles… (Shift-Command-O) or `-OpenSubtitles <path>` at launch, and export with File > Export Subtitles… (Shift-Command-E). In the Cue menu: Add Cue at Playhead (Shift-Command-N), Set In/Out at Playhead (I / O), Delete Cue (Command-Delete), previous/next cue (Command-Up/Down).
+
 Run the UI tests:
 
 ```sh
@@ -43,12 +45,13 @@ xcodebuild test -project Spotline.xcodeproj -scheme Spotline -destination 'platf
 | `App/` | App entry point, scenes and menus |
 | `AppUITests/` | XCUITest suite, launched with `-UITestMode` |
 | `Packages/SpotlineKit/Sources/SubtitleCore` | Time, frame rates, SMPTE timecode, cues. No UI. |
+| `Packages/SpotlineKit/Sources/SubtitleFormats` | SRT and WebVTT import/export, with golden-file tests |
 | `Packages/SpotlineKit/Sources/EditorCommands` | Every user action as a named command |
 | `Packages/SpotlineKit/Sources/SpotlineAccessibility` | Accessibility identifier catalog |
 | `Packages/SpotlineKit/Sources/PlaybackCore` | The playback engine interface, plus a simulated engine for tests |
 | `Packages/SpotlineKit/Sources/MPVPlayer` | libmpv player, OpenGL render layer and video view |
 | `Packages/SpotlineKit/Sources/EditorUI` | Editor views and state |
-| `Fixtures/` | Short test clips used by the player and UI tests |
+| `Fixtures/` | Short test clips and subtitles used by the player and UI tests |
 
 ## License
 

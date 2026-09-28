@@ -12,7 +12,10 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
     public enum Category: String, Sendable, CaseIterable {
         case file
         case playback
+        /// Undo and redo.
         case editing
+        /// Creating and changing cues.
+        case cue
         case navigation
     }
 
@@ -28,6 +31,46 @@ extension EditorCommand {
     public static let openMedia = EditorCommand(
         id: "file.openMedia", title: "Open Media…", category: .file,
         defaultShortcut: KeyShortcut(.character("o"), modifiers: .command)
+    )
+    public static let importSubtitles = EditorCommand(
+        id: "file.importSubtitles", title: "Import Subtitles…", category: .file,
+        defaultShortcut: KeyShortcut(.character("o"), modifiers: [.command, .shift])
+    )
+    public static let exportSubtitles = EditorCommand(
+        id: "file.exportSubtitles", title: "Export Subtitles…", category: .file,
+        defaultShortcut: KeyShortcut(.character("e"), modifiers: [.command, .shift])
+    )
+    public static let undo = EditorCommand(
+        id: "editing.undo", title: "Undo", category: .editing,
+        defaultShortcut: KeyShortcut(.character("z"), modifiers: .command)
+    )
+    public static let redo = EditorCommand(
+        id: "editing.redo", title: "Redo", category: .editing,
+        defaultShortcut: KeyShortcut(.character("z"), modifiers: [.command, .shift])
+    )
+    public static let addCue = EditorCommand(
+        id: "cue.addAtPlayhead", title: "Add Cue at Playhead", category: .cue,
+        defaultShortcut: KeyShortcut(.character("n"), modifiers: [.command, .shift])
+    )
+    public static let deleteCue = EditorCommand(
+        id: "cue.delete", title: "Delete Cue", category: .cue,
+        defaultShortcut: KeyShortcut(.delete, modifiers: .command)
+    )
+    public static let setIn = EditorCommand(
+        id: "cue.setInAtPlayhead", title: "Set In at Playhead", category: .cue,
+        defaultShortcut: KeyShortcut(.character("i"))
+    )
+    public static let setOut = EditorCommand(
+        id: "cue.setOutAtPlayhead", title: "Set Out at Playhead", category: .cue,
+        defaultShortcut: KeyShortcut(.character("o"))
+    )
+    public static let previousCue = EditorCommand(
+        id: "navigation.previousCue", title: "Select Previous Cue", category: .navigation,
+        defaultShortcut: KeyShortcut(.upArrow, modifiers: .command)
+    )
+    public static let nextCue = EditorCommand(
+        id: "navigation.nextCue", title: "Select Next Cue", category: .navigation,
+        defaultShortcut: KeyShortcut(.downArrow, modifiers: .command)
     )
     public static let togglePlay = EditorCommand(
         id: "playback.togglePlay", title: "Play/Pause", category: .playback,
@@ -47,7 +90,13 @@ extension EditorCommand {
     )
 
     /// Every command the app knows, in menu order.
-    public static let all: [EditorCommand] = [openMedia, togglePlay, stepBackward, stepForward, goToStart]
+    public static let all: [EditorCommand] = [
+        openMedia, importSubtitles, exportSubtitles,
+        undo, redo,
+        addCue, deleteCue, setIn, setOut,
+        previousCue, nextCue,
+        togglePlay, stepBackward, stepForward, goToStart,
+    ]
 
     public static func named(_ id: String) -> EditorCommand? {
         all.first { $0.id == id }
@@ -84,5 +133,16 @@ public struct KeyShortcut: Hashable, Sendable {
     public init(_ key: Key, modifiers: Modifiers = []) {
         self.key = key
         self.modifiers = modifiers
+    }
+
+    /// True when a text field uses this key for typing or moving the cursor
+    /// (letters, Space, arrows, Delete, including with Command). Menus turn
+    /// these shortcuts off while the user edits text, so typing "i" inserts
+    /// an "i" instead of setting the in-point.
+    public var conflictsWithTextEditing: Bool {
+        switch key {
+        case .leftArrow, .rightArrow, .upArrow, .downArrow, .delete: true
+        case .character, .space, .returnKey, .escape: modifiers.isDisjoint(with: [.command, .control])
+        }
     }
 }

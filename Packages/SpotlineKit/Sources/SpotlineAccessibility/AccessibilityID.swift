@@ -11,6 +11,8 @@ public enum AccessibilityID {
 
     public enum Video {
         public static let surface = "video.surface"
+        /// The subtitle shown over the video; its value is the cue's visible text.
+        public static let subtitle = "video.subtitle"
     }
 
     public enum Transport {
@@ -26,9 +28,22 @@ public enum AccessibilityID {
     public enum CueList {
         public static let root = "cueList"
         public static func row(_ cueID: UUID) -> String { "cueList.row.\(cueID.uuidString)" }
+        /// One cell of a cue's row, e.g. `cueList.row.<id>.text`.
+        public static func cell(_ cueID: UUID, _ column: Column) -> String { "\(row(cueID)).\(column.rawValue)" }
+
+        public enum Column: String, CaseIterable, Sendable {
+            case number, inPoint = "in", outPoint = "out", duration, text
+        }
     }
 
     public enum Inspector {
         public static let root = "inspector"
+        /// The selected cue's text editor.
+        public static let text = "inspector.text"
+        public static let inPoint = "inspector.in"
+        public static let outPoint = "inspector.out"
+        public static let duration = "inspector.duration"
+        /// Characters per line against the guideline, e.g. "38/42 · 12/42".
+        public static let lineLengths = "inspector.lineLengths"
     }
 }

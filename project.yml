@@ -23,6 +23,8 @@ targets:
     dependencies:
       - package: SpotlineKit
         product: EditorUI
+      - package: SpotlineKit
+        product: EditorCommands
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.saeedkhader.spotline
@@ -39,6 +41,8 @@ targets:
     sources:
       - AppUITests
       - path: Fixtures/testsrc-23.976.mp4
+        buildPhase: resources
+      - path: Fixtures/testsrc-23.976.srt
         buildPhase: resources
     dependencies:
       - target: Spotline

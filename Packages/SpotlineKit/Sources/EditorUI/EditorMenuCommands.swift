@@ -13,6 +13,16 @@ public struct EditorMenuCommands: Commands {
         CommandGroup(after: .newItem) {
             buttons(for: .file)
         }
+        // The editor's undo stack also covers typing in the cue text editor,
+        // so it replaces the text system's Undo and Redo.
+        CommandGroup(replacing: .undoRedo) {
+            buttons(for: .editing)
+        }
+        CommandMenu("Cue") {
+            buttons(for: .cue)
+            Divider()
+            buttons(for: .navigation)
+        }
         CommandMenu("Playback") {
             buttons(for: .playback)
         }
@@ -22,7 +32,7 @@ public struct EditorMenuCommands: Commands {
         ForEach(EditorCommand.all.filter { $0.category == category }) { command in
             Button(command.title) { editor.perform(command) }
                 .keyboardShortcut(command.defaultShortcut?.keyboardShortcut)
-                .disabled(!editor.canPerform(command))
+                .disabled(!editor.isShortcutEnabled(for: command))
         }
     }
 }

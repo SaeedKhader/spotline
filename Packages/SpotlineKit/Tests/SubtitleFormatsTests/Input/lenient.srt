@@ -1,0 +1,14 @@
+
+
+00:00:01.5 --> 00:00:02,25
+No cue number, dot and short fractions.
+7
+00:00:03,000 --> 00:00:04,000 X1:100 X2:200 Y1:10 Y2:20
+Wrong number, coordinates,
+and no blank line before the next cue.
+8
+00:00:05,000 --> 00:00:06,000
+Trailing blank lines.
+
+
+

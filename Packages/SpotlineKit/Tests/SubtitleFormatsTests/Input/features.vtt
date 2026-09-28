@@ -1,0 +1,23 @@
+WEBVTT - Spotline test file
+Kind: captions
+Language: en
+
+STYLE
+::cue { color: white; }
+
+REGION
+id:top width:40%
+
+NOTE This comment
+spans two lines.
+
+intro
+00:01.000 --> 00:02.500 align:start line:10%
+Short timestamps, an identifier and settings.
+
+NOTE
+Another note
+
+2
+00:00:03.000 --> 00:00:04.000 position:10%,line-left
+Arrows --&gt; stay escaped.

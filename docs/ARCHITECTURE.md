@@ -108,6 +108,14 @@ struct SubtitleProject { var media: MediaReference; var frameRate: FrameRate; va
 - Every mutation goes through `SubtitleCore` operations that register undo, so undo works identically from UI, commands and tests.
 - Project file: a `.mtproj` package (JSON manifest + one file per track + cached waveform), with the media as a security-scoped bookmark plus path fallback for relinking.
 
+As built in M2:
+- `SubtitleFormats` reads and writes SRT and WebVTT. Cue text is kept as written (inline tags and entities included), times are exact rationals (an SRT `00:00:01,5` is 3/2 s), so import then export changes only layout. Reading is lenient (missing cue numbers, `.` separators, CRLF, BOM, UTF-16, Windows-1252); writing is canonical UTF-8. WebVTT cue identifiers and settings are dropped until cues gain positioning (M4).
+- Undo: `EditorState` owns an `UndoManager` and snapshots the track per edit (import, add, delete, set in/out, text). Keystrokes in one typing session on one cue undo as one step. The editor's Undo/Redo commands replace the text system's, so there is one undo stack.
+- Shortcuts that are typing keys (I, O, Space, arrows, ⌘⌫) are disabled in the menus while the cue text editor has focus (`KeyShortcut.conflictsWithTextEditing`), so typing never triggers them. Escape leaves the text editor.
+- Parameterized edits (`select`, `setText`) are `EditorState` methods that share the same undo path; they become command arguments with the agent bridge (M7).
+- Cue in/out are shown as the first frame showing the cue and the first frame without it (`MediaTime.firstFrame(at:)`); selecting a cue seeks to its first frame.
+- There is no project file yet: the app keeps a single AppKit-owned window, shows the subtitle file's name and an edited dot, and asks to export unsaved changes on quit. NSDocument arrives with the `.mtproj` project format.
+
 ### Formats (priority order)
 1. SRT, WebVTT (import/export) — M2
 2. ASS/SSA (styles preserved) — M4
