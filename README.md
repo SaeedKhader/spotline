@@ -11,8 +11,8 @@ Status: early development (milestone M1, playback). See [docs/ARCHITECTURE.md](d
 
 ## Requirements
 
-- macOS 15 or later
-- Xcode 16 or later
+- macOS 26 or later
+- Xcode 26 or later
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) and libmpv: `brew install xcodegen mpv`
 
 ## Build

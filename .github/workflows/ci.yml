@@ -12,7 +12,7 @@ concurrency:
 jobs:
   packages:
     name: Package tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - run: xcodebuild -version && swift --version
@@ -23,7 +23,7 @@ jobs:
 
   app:
     name: App build and UI tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen and libmpv

@@ -24,7 +24,7 @@ Confirmed by Saeed (2026-09-28): yes, AI automation, plus AI tools that work on 
 
 | Choice | Decision | Why |
 |---|---|---|
-| Min macOS | 15 (Sequoia) | `@Observable`, modern SwiftUI table/inspector APIs (confirmed by Saeed, 2026-09-28) |
+| Min macOS | 26 (Tahoe) | Matches the Homebrew libmpv we link; raised from 15 by Saeed, 2026-09-28 |
 | Language | Swift 6, strict concurrency | mpv calls back on arbitrary threads; the compiler should police it |
 | UI | SwiftUI shell, AppKit for video, timeline, big text tables | SwiftUI `Table` struggles with 2,000+ editable rows; `NSTableView` does not |
 | Document model | `NSDocument` subclass with AppKit-owned windows hosting SwiftUI | Free undo manager, autosave, versions, tabs, recent files; AppKit opens windows deterministically at launch, which SwiftUI scenes did not under UI tests |
@@ -197,7 +197,7 @@ Some target languages (Arabic first; also Hebrew, French, Spanish, etc.) change 
 - `SubtitleCore`, `SubtitleFormats`, `QualityControl`: Swift Testing unit tests, no app needed, run in seconds.
 - `MPVPlayer`: integration tests with fixture clips asserting exact frame after seek/step.
 - `AppUITests`: XCUITest using the accessibility IDs and `-UITestMode` (see 1). First tests: open fixture, play/pause, step 10 frames and read timecode, add cue at playhead, edit text, undo.
-- CI: GitHub Actions `macos-15` runner, `xcodebuild test` for packages and UI tests.
+- CI: GitHub Actions `macos-26` runner, `xcodebuild test` for packages and UI tests.
 
 ## 9. Milestones
 

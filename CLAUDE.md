@@ -8,7 +8,7 @@ Native macOS subtitle editor (SwiftUI + AppKit, libmpv playback). Design and roa
 - `swift test --package-path Packages/SpotlineKit` runs the unit tests (Swift Testing).
 - `xcodegen generate` creates `Spotline.xcodeproj` from `project.yml`. Never commit the `.xcodeproj`; change `project.yml` instead.
 - UI tests: `xcodebuild test -project Spotline.xcodeproj -scheme Spotline -destination 'platform=macOS'`.
-- CI (`.github/workflows/ci.yml`) runs both on `macos-15`.
+- CI (`.github/workflows/ci.yml`) runs both on `macos-26`.
 
 ## Rules
 
