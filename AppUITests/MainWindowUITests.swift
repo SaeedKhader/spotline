@@ -45,10 +45,15 @@ final class MainWindowUITests: XCTestCase {
         app.launch()
         app.activate()
         let window = app.windows.firstMatch
-        XCTAssertTrue(
-            window.waitForExistence(timeout: 15),
-            "Main window did not appear. Accessibility hierarchy:\n\(app.debugDescription)"
-        )
+        if !window.waitForExistence(timeout: 15) {
+            // Diagnostic: does an explicitly requested window appear?
+            app.typeKey("n", modifierFlags: .command)
+            let appearedOnRequest = window.waitForExistence(timeout: 10)
+            XCTFail(
+                "Main window did not appear at launch (appeared after Cmd-N: \(appearedOnRequest)). "
+                    + "Accessibility hierarchy:\n\(app.debugDescription)"
+            )
+        }
         return app
     }
 }
