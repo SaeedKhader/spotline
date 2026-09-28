@@ -16,8 +16,9 @@ struct TimelineStateTests {
     func makeEditor() async throws -> EditorState {
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
         let cuts = [f(40), f(75)]
+        let halfway = f(50)
         editor.analyzeMedia = { _, progress in
-            progress(0.5)
+            progress(MediaAnalyzer.Progress(fraction: 0.5, analyzedUntil: halfway, partial: nil))
             return MediaAnalysis(waveform: Waveform(peaks: [10, 20]), shotChanges: cuts)
         }
         editor.open(URL(fileURLWithPath: "/tmp/cuts.mov"))
@@ -33,6 +34,37 @@ struct TimelineStateTests {
         #expect(editor.analysisProgress == nil)
         #expect(editor.timelineContent.shotChanges == [40, 75])
         #expect(editor.timelineContent.waveform?.peaks == [10, 20])
+    }
+
+    @Test func partialResultsShowBeforeTheEnd() async throws {
+        let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
+        let (reports, continuation) = AsyncStream<MediaAnalyzer.Progress>.makeStream()
+        let finish = AsyncStream<Void>.makeStream()
+        let first = MediaAnalysis(waveform: Waveform(peaks: [1]), shotChanges: [f(40)])
+        let final = MediaAnalysis(waveform: Waveform(peaks: [1, 2, 3]), shotChanges: [f(40), f(75)])
+        editor.analyzeMedia = { _, progress in
+            for await report in reports { progress(report) }
+            for await _ in finish.stream { break }
+            return final
+        }
+        editor.open(URL(fileURLWithPath: "/tmp/cuts.mov"))
+
+        continuation.yield(MediaAnalyzer.Progress(fraction: 0.5, analyzedUntil: f(50), partial: first))
+        // A stale report arriving late is ignored.
+        continuation.yield(MediaAnalyzer.Progress(fraction: 0.2, analyzedUntil: f(20), partial: MediaAnalysis(waveform: nil, shotChanges: [])))
+        continuation.finish()
+        for _ in 0..<100 where editor.analysisProgress != 0.5 { await Task.yield() }
+        for _ in 0..<20 { await Task.yield() }
+        #expect(editor.analysis == first)
+        #expect(editor.analyzedUntil == f(50))
+        #expect(editor.shotChangeFrames == [40])
+        #expect(editor.canPerform(.nextShotChange), "Partial cuts are usable")
+
+        finish.continuation.yield()
+        for _ in 0..<100 where editor.analysisProgress != nil { await Task.yield() }
+        #expect(editor.analysis == final)
+        #expect(editor.analyzedUntil == nil)
+        #expect(editor.timelineContent.analyzedUntil == nil)
     }
 
     @Test func shotChangeNavigation() async throws {

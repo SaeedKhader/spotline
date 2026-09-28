@@ -15,6 +15,8 @@ struct TimelineContent: Equatable {
     var frameRate: FrameRate = .fps23_976
     var shotChanges: [Int64] = []
     var waveform: Waveform?
+    /// While analysis runs, the time it has reached; later media is drawn as pending.
+    var analyzedUntil: MediaTime?
     /// Points per second.
     var scale: Double = 100
 }
@@ -162,6 +164,7 @@ final class TimelineView: NSView {
         NSColor.controlBackgroundColor.setFill()
         bounds.fill()
         drawWaveform()
+        drawPendingAnalysis()
         drawShotChanges()
         drawCues()
         drawRuler()
@@ -216,6 +219,32 @@ final class TimelineView: NSView {
             NSRect(x: column, y: middle - height, width: 1, height: height * 2).fill()
             column += 1
         }
+    }
+
+    /// Hatches the part of the lane the analysis has not reached yet.
+    private func drawPendingAnalysis() {
+        guard let analyzedUntil = content.analyzedUntil else { return }
+        let lane = laneRect
+        let left = max(x(for: analyzedUntil), 0)
+        guard left < bounds.width else { return }
+        let pending = NSRect(x: left, y: lane.minY, width: bounds.width - left, height: lane.height)
+        NSColor.secondaryLabelColor.withAlphaComponent(0.06).setFill()
+        pending.fill()
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: pending).addClip()
+        let stripes = NSBezierPath()
+        var stripeX = left - lane.height
+        while stripeX < bounds.width {
+            stripes.move(to: NSPoint(x: stripeX, y: lane.maxY))
+            stripes.line(to: NSPoint(x: stripeX + lane.height, y: lane.minY))
+            stripeX += 10
+        }
+        NSColor.secondaryLabelColor.withAlphaComponent(0.12).setStroke()
+        stripes.lineWidth = 1
+        stripes.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+        NSColor.secondaryLabelColor.withAlphaComponent(0.5).setFill()
+        NSRect(x: left, y: lane.minY, width: 1, height: lane.height).fill()
     }
 
     private func drawShotChanges() {

@@ -10,8 +10,27 @@ public enum MediaAnalyzer {
         /// Scene score (0 to 1) above which a frame starts a new shot. FFmpeg's
         /// `scene` filter uses the same score; 0.3 to 0.4 are common thresholds.
         public var sceneThreshold = 0.3
+        /// How often `progress` receives what was found so far.
+        public var partialResultInterval: Duration = .milliseconds(250)
 
         public init() {}
+    }
+
+    /// How far an analysis has got.
+    public struct Progress: Sendable {
+        /// 0 to 1.
+        public var fraction: Double
+        /// Media before this time has been read.
+        public var analyzedUntil: MediaTime
+        /// The waveform and shot changes found so far. Set at most every
+        /// `partialResultInterval`, and always with the last report.
+        public var partial: MediaAnalysis?
+
+        public init(fraction: Double, analyzedUntil: MediaTime, partial: MediaAnalysis?) {
+            self.fraction = fraction
+            self.analyzedUntil = analyzedUntil
+            self.partial = partial
+        }
     }
 
     public enum Error: Swift.Error, CustomStringConvertible {
@@ -26,11 +45,12 @@ public enum MediaAnalyzer {
         }
     }
 
-    /// Analyzes `url`. `progress` receives 0 to 1 and returns false to cancel.
+    /// Analyzes `url`, reporting as it reads so callers can show results
+    /// before the end. `progress` returns false to cancel.
     public static func analyze(
         _ url: URL,
         options: Options = Options(),
-        progress: (Double) -> Bool = { _ in true }
+        progress: (Progress) -> Bool = { _ in true }
     ) throws -> MediaAnalysis {
         var format: UnsafeMutablePointer<AVFormatContext>?
         guard avformat_open_input(&format, url.path, nil, nil) == 0, let format else {
@@ -54,7 +74,18 @@ public enum MediaAnalyzer {
         let duration = format.pointee.duration > 0 ? Double(format.pointee.duration) / Double(AV_TIME_BASE) : 0
         var packet = av_packet_alloc()
         defer { av_packet_free(&packet) }
-        var lastReport = -1.0
+
+        func result() -> MediaAnalysis {
+            MediaAnalysis(
+                waveform: audio.map { Waveform(bucketsPerSecond: options.bucketsPerSecond, peaks: $0.peaks) },
+                shotChanges: video?.shotChanges ?? []
+            )
+        }
+
+        let clock = ContinuousClock()
+        var lastPartial = clock.now
+        var lastFraction = -1.0
+        var analyzedUntil = MediaTime.zero
 
         while av_read_frame(format, packet) >= 0 {
             defer { av_packet_unref(packet) }
@@ -63,25 +94,27 @@ public enum MediaAnalyzer {
                 audio?.decode(packet)
             } else if index == videoIndex {
                 video?.decode(packet)
-                if duration > 0, packet!.pointee.pts != Int64.min {
-                    let timeBase = streams[Int(index)]!.pointee.time_base
-                    let seconds = Double(packet!.pointee.pts) * Double(timeBase.num) / Double(timeBase.den)
-                    let fraction = min(max(seconds / duration, 0), 1)
-                    if fraction - lastReport >= 0.01 {
-                        lastReport = fraction
-                        if !progress(fraction) { throw Error.cancelled }
-                    }
-                }
+            } else {
+                continue
             }
+            let pts = packet!.pointee.pts
+            guard pts != Int64.min else { continue }
+            let timeBase = streams[Int(index)]!.pointee.time_base
+            analyzedUntil = max(analyzedUntil, MediaTime(value: pts * Int64(timeBase.num), timescale: Int64(timeBase.den)))
+            let fraction = duration > 0 ? min(max(analyzedUntil.seconds / duration, 0), 1) : 0
+            let partialDue = clock.now - lastPartial >= options.partialResultInterval
+            guard partialDue || fraction - lastFraction >= 0.01 else { continue }
+            lastFraction = fraction
+            if partialDue { lastPartial = clock.now }
+            let report = Progress(fraction: fraction, analyzedUntil: analyzedUntil, partial: partialDue ? result() : nil)
+            if !progress(report) { throw Error.cancelled }
         }
         audio?.decode(nil)
         video?.decode(nil)
-        _ = progress(1)
 
-        return MediaAnalysis(
-            waveform: audio.map { Waveform(bucketsPerSecond: options.bucketsPerSecond, peaks: $0.peaks) },
-            shotChanges: video?.shotChanges ?? []
-        )
+        let analysis = result()
+        _ = progress(Progress(fraction: 1, analyzedUntil: analyzedUntil, partial: analysis))
+        return analysis
     }
 }
 

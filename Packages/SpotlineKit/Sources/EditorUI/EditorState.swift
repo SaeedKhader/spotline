@@ -39,10 +39,14 @@ public final class EditorState {
     public private(set) var analysis: MediaAnalysis?
     /// 0 to 1 while the media is being analyzed, nil otherwise.
     public private(set) var analysisProgress: Double?
+    /// While analysis runs, how far into the media it has read. `analysis`
+    /// holds what was found before this point, so the timeline fills in as it goes.
+    public private(set) var analyzedUntil: MediaTime?
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
     /// Reads waveform and shot changes off the main actor. Tests replace it.
-    @ObservationIgnored public var analyzeMedia: @Sendable (URL, @escaping @Sendable (Double) -> Void) async throws -> MediaAnalysis =
-        EditorState.analyzeWithCache
+    @ObservationIgnored public var analyzeMedia:
+        @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress) -> Void) async throws -> MediaAnalysis =
+        EditorState.analyzer(cache: .standard)
 
     /// Timeline zoom in points per second of media.
     public private(set) var timelineScale: Double = 100
@@ -82,6 +86,7 @@ public final class EditorState {
         // One undo step per edit, also where no run loop groups events (unit tests).
         undoManager.groupsByEvent = false
         playback.onStatusChange = { [weak self] status in self?.playbackDidChange(status) }
+        if !launchOptions.usesAnalysisCache { analyzeMedia = Self.analyzer(cache: nil) }
         if let url = launchOptions.mediaURL { open(url) }
         if let url = launchOptions.subtitlesURL {
             importSubtitles(from: url)
@@ -457,45 +462,56 @@ public final class EditorState {
         analysisTask?.cancel()
         analysis = nil
         analysisProgress = nil
+        analyzedUntil = nil
         guard let url = status.mediaURL else { return }
         analysisProgress = 0
+        analyzedUntil = .zero
         let analyze = analyzeMedia
-        let report: @Sendable (Double) -> Void = { [weak self] fraction in
+        let report: @Sendable (MediaAnalyzer.Progress) -> Void = { [weak self] progress in
             guard let editor = self else { return }
-            Task { @MainActor in editor.analysisDidProgress(fraction, for: url) }
+            Task { @MainActor in editor.analysisDidProgress(progress, for: url) }
         }
         analysisTask = Task { [weak self] in
             let result = try? await analyze(url, report)
             guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
             self.analysis = result
             self.analysisProgress = nil
+            self.analyzedUntil = nil
         }
     }
 
-    private func analysisDidProgress(_ fraction: Double, for url: URL) {
-        guard status.mediaURL == url, analysisProgress != nil else { return }
-        analysisProgress = fraction
+    /// Shows partial results. Reports can arrive out of order, so older ones are ignored.
+    private func analysisDidProgress(_ progress: MediaAnalyzer.Progress, for url: URL) {
+        guard status.mediaURL == url, analysisProgress != nil,
+              let current = analyzedUntil, progress.analyzedUntil >= current
+        else { return }
+        analysisProgress = progress.fraction
+        if let partial = progress.partial {
+            analysis = partial
+            analyzedUntil = progress.analyzedUntil
+        }
     }
 
-    /// The analysis from the cache, or else from decoding the file (then cached).
-    private nonisolated static func analyzeWithCache(
-        _ url: URL, progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> MediaAnalysis {
-        let cache = AnalysisCache.standard
-        if let cached = cache.analysis(for: url) { return cached }
-        let task = Task.detached(priority: .utility) {
-            try MediaAnalyzer.analyze(url) { fraction in
-                progress(fraction)
-                return !Task.isCancelled
+    /// Analyzes media off the main actor, reading and filling `cache` when given.
+    private nonisolated static func analyzer(
+        cache: AnalysisCache?
+    ) -> @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress) -> Void) async throws -> MediaAnalysis {
+        { url, progress in
+            if let cached = cache?.analysis(for: url) { return cached }
+            let task = Task.detached(priority: .utility) {
+                try MediaAnalyzer.analyze(url) { report in
+                    progress(report)
+                    return !Task.isCancelled
+                }
             }
+            let analysis = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            cache?.store(analysis, for: url)
+            return analysis
         }
-        let analysis = try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: {
-            task.cancel()
-        }
-        cache.store(analysis, for: url)
-        return analysis
     }
 }
 

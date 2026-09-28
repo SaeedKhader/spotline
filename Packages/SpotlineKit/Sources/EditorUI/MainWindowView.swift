@@ -173,12 +173,11 @@ struct AnalysisStatusView: View {
     let editor: EditorState
 
     var body: some View {
+        let found = editor.analysis.map { $0.shotChanges.count == 1 ? "1 shot change" : "\($0.shotChanges.count) shot changes" }
         let text: String? = if let progress = editor.analysisProgress {
-            "Analyzing \(Int((progress * 100).rounded()))%"
-        } else if let analysis = editor.analysis {
-            analysis.shotChanges.count == 1 ? "1 shot change" : "\(analysis.shotChanges.count) shot changes"
+            "Analyzing \(Int((progress * 100).rounded()))%" + (found.map { " · \($0)" } ?? "")
         } else {
-            nil
+            found
         }
         if let text {
             Text(text)
@@ -203,6 +202,7 @@ extension EditorState {
             frameRate: frameRate,
             shotChanges: shotChangeFrames,
             waveform: analysis?.waveform,
+            analyzedUntil: analyzedUntil,
             scale: timelineScale
         )
     }

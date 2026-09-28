@@ -32,13 +32,32 @@ struct MediaAnalyzerTests {
     @Test func reportsProgressAndCancels() throws {
         var reports: [Double] = []
         #expect(throws: MediaAnalyzer.Error.self) {
-            try MediaAnalyzer.analyze(Self.fixtures.appending(path: "cuts-25.mp4")) { fraction in
-                reports.append(fraction)
-                return fraction < 0.5
+            try MediaAnalyzer.analyze(Self.fixtures.appending(path: "cuts-25.mp4")) { progress in
+                reports.append(progress.fraction)
+                return progress.fraction < 0.5
             }
         }
         #expect(reports.last! >= 0.5)
         #expect(reports == reports.sorted())
+    }
+
+    @Test func partialResultsGrowInOrder() throws {
+        var options = MediaAnalyzer.Options()
+        options.partialResultInterval = .zero
+        var partials: [(until: MediaTime, analysis: MediaAnalysis)] = []
+        let final = try MediaAnalyzer.analyze(Self.fixtures.appending(path: "cuts-25.mp4"), options: options) { progress in
+            if let partial = progress.partial { partials.append((progress.analyzedUntil, partial)) }
+            return true
+        }
+        #expect(partials.count > 10)
+        #expect(partials.last?.analysis == final)
+        // Every shot change reported so far lies in the part already read, and none disappear later.
+        for (index, entry) in partials.enumerated() {
+            #expect(entry.analysis.shotChanges.allSatisfy { $0 <= entry.until })
+            #expect(final.shotChanges.starts(with: entry.analysis.shotChanges), "\(index)")
+        }
+        #expect(partials.first!.analysis.shotChanges.isEmpty)
+        #expect((partials.first!.analysis.waveform?.peaks.count ?? 0) < final.waveform!.peaks.count)
     }
 
     @Test func missingFileThrows() {
