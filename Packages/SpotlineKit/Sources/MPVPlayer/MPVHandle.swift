@@ -70,8 +70,10 @@ final class MPVHandle: @unchecked Sendable {
     }
 
     deinit {
+        // No flush of `eventQueue` here: the last reference can drop inside a
+        // drain block on that queue, and syncing onto it from there traps.
+        // Queued drains hold the handle weakly, so they find nil once it is gone.
         mpv_set_wakeup_callback(raw, nil, nil)
-        eventQueue.sync {}
         mpv_terminate_destroy(raw)
     }
 
