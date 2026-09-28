@@ -43,6 +43,12 @@ final class MainWindowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-UITestMode", "-ApplePersistenceIgnoreState", "YES"]
         app.launch()
+        app.activate()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(
+            window.waitForExistence(timeout: 15),
+            "Main window did not appear. Accessibility hierarchy:\n\(app.debugDescription)"
+        )
         return app
     }
 }
