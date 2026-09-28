@@ -3,19 +3,17 @@ import SwiftUI
 
 @main
 struct SpotlineApp: App {
-    @State private var editor = EditorState()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("Spotline", id: "main") {
-            MainWindowView(editor: editor)
+        // The editor window is owned by AppKit (see AppDelegate); SwiftUI supplies
+        // the menus and the Settings window.
+        Settings {
+            Text("No settings yet.")
+                .padding()
         }
-        .defaultSize(width: 1000, height: 700)
-        // Without this, SwiftUI waits for the system's "open application" event before
-        // showing the window, which never comes (or comes late) when the app is started
-        // by UI tests, scripts or login items: the app ran with menus but no window.
-        .defaultLaunchBehavior(.presented)
         .commands {
-            EditorMenuCommands(editor: editor)
+            EditorMenuCommands(editor: appDelegate.editor)
         }
     }
 }

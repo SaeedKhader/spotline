@@ -24,10 +24,10 @@ Confirmed by Saeed (2026-09-28): yes, AI automation, plus AI tools that work on 
 
 | Choice | Decision | Why |
 |---|---|---|
-| Min macOS | 15 (Sequoia) | `@Observable`, modern SwiftUI table/inspector APIs, `defaultLaunchBehavior` so the editor window reliably opens at launch |
+| Min macOS | 15 (Sequoia) | `@Observable`, modern SwiftUI table/inspector APIs (confirmed by Saeed, 2026-09-28) |
 | Language | Swift 6, strict concurrency | mpv calls back on arbitrary threads; the compiler should police it |
 | UI | SwiftUI shell, AppKit for video, timeline, big text tables | SwiftUI `Table` struggles with 2,000+ editable rows; `NSTableView` does not |
-| Document model | `NSDocument` subclass (via `ReferenceFileDocument` or plain AppKit) | Free undo manager, autosave, versions, tabs, recent files |
+| Document model | `NSDocument` subclass with AppKit-owned windows hosting SwiftUI | Free undo manager, autosave, versions, tabs, recent files; AppKit opens windows deterministically at launch, which SwiftUI scenes did not under UI tests |
 | Packages | Local Swift packages in one Xcode workspace | Core logic testable without the app or libmpv |
 | Playback | libmpv render API | Frame-accurate, plays anything ffmpeg does (MKV, ProRes, DNxHR, MXF) |
 
