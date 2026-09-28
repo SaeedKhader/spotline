@@ -1,0 +1,12 @@
+1
+00:00:00,500 --> 00:00:02,000
+Where are we going?
+
+2
+00:00:02,250 --> 00:00:04,125
+Somewhere quieter,
+where nobody knows us.
+
+3
+00:00:04,209 --> 00:00:04,959
+Now.

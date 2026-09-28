@@ -16,7 +16,7 @@ public struct MainWindowView: View {
             HSplitView {
                 VideoSurfaceView(editor: editor)
                     .frame(minWidth: 480, minHeight: 270)
-                InspectorPlaceholderView()
+                InspectorView(editor: editor)
                     .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
             }
             VStack(spacing: 0) {
@@ -24,7 +24,7 @@ public struct MainWindowView: View {
                 Divider()
                 TimelinePlaceholderView()
                 Divider()
-                CueListView(cues: editor.track.cues, frameRate: editor.frameRate)
+                CueListView(editor: editor)
             }
             .frame(minHeight: 240)
         }
@@ -44,6 +44,9 @@ struct VideoSurfaceView: View {
             Color.black
             if let videoView = editor.playback.videoView() {
                 HostedVideoView(view: videoView)
+            }
+            if let cue = editor.cueAtPlayhead {
+                SubtitleOverlay(cue: cue)
             }
             if !editor.hasMedia {
                 VStack(spacing: 12) {
@@ -73,22 +76,6 @@ struct HostedVideoView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView { view }
     func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-struct InspectorPlaceholderView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Inspector")
-                .font(.headline)
-            Text("Select a cue to edit its text and timing.")
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(AccessibilityID.Inspector.root)
-    }
 }
 
 struct TransportBar: View {
@@ -122,20 +109,27 @@ struct TransportBar: View {
     }
 }
 
-/// A toolbar-style button that runs an editor command and is findable by its command ID.
+/// A button that runs an editor command and is findable by its command ID:
+/// a borderless icon when given `systemImage`, else a titled button.
 struct CommandButton: View {
     let command: EditorCommand
-    let systemImage: String
+    var systemImage: String?
     let editor: EditorState
 
     var body: some View {
-        Button {
-            editor.perform(command)
-        } label: {
-            Label(command.title, systemImage: systemImage)
-                .labelStyle(.iconOnly)
+        Group {
+            if let systemImage {
+                Button {
+                    editor.perform(command)
+                } label: {
+                    Label(command.title, systemImage: systemImage)
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+            } else {
+                Button(command.title) { editor.perform(command) }
+            }
         }
-        .buttonStyle(.borderless)
         .help(command.title)
         .disabled(!editor.canPerform(command))
         .accessibilityIdentifier(AccessibilityID.command(command.id))
@@ -153,32 +147,32 @@ struct TimelinePlaceholderView: View {
     }
 }
 
-struct CueListView: View {
-    let cues: [Cue]
-    let frameRate: FrameRate
+/// The cue under the playhead, drawn over the bottom of the video.
+struct SubtitleOverlay: View {
+    let cue: Cue
 
     var body: some View {
-        Group {
-            if cues.isEmpty {
-                ContentUnavailableView(
-                    "No Subtitles",
-                    systemImage: "captions.bubble",
-                    description: Text("Import a subtitle file or add a cue at the playhead.")
-                )
-            } else {
-                Table(cues) {
-                    TableColumn("In") { cue in
-                        Text(Timecode(time: cue.start, rate: frameRate).description).monospacedDigit()
-                    }
-                    TableColumn("Out") { cue in
-                        Text(Timecode(time: cue.end, rate: frameRate).description).monospacedDigit()
-                    }
-                    TableColumn("Text", value: \.text)
+        let text = SubtitleText.visibleLines(of: cue.text).joined(separator: "\n")
+        GeometryReader { geometry in
+            VStack {
+                Spacer()
+                if !text.isEmpty {
+                    Text(text)
+                        .font(.system(size: max(12, geometry.size.height * 0.05), weight: .medium))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .shadow(color: .black, radius: 2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 4))
+                        .padding(.bottom, geometry.size.height * 0.06)
+                        .accessibilityLabel("Subtitle")
+                        .accessibilityValue(text)
+                        .accessibilityIdentifier(AccessibilityID.Video.subtitle)
                 }
             }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(AccessibilityID.CueList.root)
+        .allowsHitTesting(false)
     }
 }

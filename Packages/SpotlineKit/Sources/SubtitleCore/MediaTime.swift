@@ -32,6 +32,13 @@ public struct MediaTime: Hashable, Comparable, Sendable, Codable, CustomStringCo
         floorDivide(value * Int64(rate.numerator), timescale * Int64(rate.denominator))
     }
 
+    /// The first frame that starts at or after this time: for a cue's start,
+    /// the first frame showing it; for its (exclusive) end, the first frame without it.
+    public func firstFrame(at rate: FrameRate) -> Int64 {
+        let frame = frame(at: rate)
+        return MediaTime(frame: frame, rate: rate) < self ? frame + 1 : frame
+    }
+
     /// The frame whose start is closest to this time at `rate`.
     ///
     /// Use this for timestamps read from media: containers round frame times

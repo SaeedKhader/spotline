@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "SubtitleCore", targets: ["SubtitleCore"]),
+        .library(name: "SubtitleFormats", targets: ["SubtitleFormats"]),
         .library(name: "SpotlineAccessibility", targets: ["SpotlineAccessibility"]),
         .library(name: "EditorCommands", targets: ["EditorCommands"]),
         .library(name: "PlaybackCore", targets: ["PlaybackCore"]),
@@ -15,6 +16,8 @@ let package = Package(
     targets: [
         // Pure model: time, frame rates, timecode, cues. No AppKit, no mpv.
         .target(name: "SubtitleCore"),
+        // Subtitle file formats (SRT, WebVTT), read and written losslessly.
+        .target(name: "SubtitleFormats", dependencies: ["SubtitleCore"]),
         // Stable accessibility identifiers shared by the app and UI tests.
         .target(name: "SpotlineAccessibility"),
         // Every user action as a named command (menus, shortcuts, tests, agents).
@@ -32,12 +35,19 @@ let package = Package(
         ),
         .target(
             name: "EditorUI",
-            dependencies: ["SubtitleCore", "SpotlineAccessibility", "EditorCommands", "PlaybackCore", "MPVPlayer"]
+            dependencies: [
+                "SubtitleCore", "SubtitleFormats", "SpotlineAccessibility", "EditorCommands", "PlaybackCore", "MPVPlayer",
+            ]
         ),
         .testTarget(name: "SubtitleCoreTests", dependencies: ["SubtitleCore"]),
+        .testTarget(
+            name: "SubtitleFormatsTests",
+            dependencies: ["SubtitleFormats"],
+            resources: [.copy("Golden"), .copy("Input")]
+        ),
         .testTarget(name: "EditorCommandsTests", dependencies: ["EditorCommands"]),
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore"]),
         .testTarget(name: "MPVPlayerTests", dependencies: ["MPVPlayer"]),
-        .testTarget(name: "EditorStateTests", dependencies: ["EditorUI"]),
+        .testTarget(name: "EditorStateTests", dependencies: ["EditorUI", "SubtitleFormats"]),
     ]
 )

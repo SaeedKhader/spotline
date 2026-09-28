@@ -16,4 +16,13 @@ struct EditorCommandTests {
         let shortcuts = EditorCommand.all.compactMap(\.defaultShortcut)
         #expect(Set(shortcuts).count == shortcuts.count)
     }
+
+    @Test func typingKeysConflictWithTextEditing() {
+        #expect(EditorCommand.setIn.defaultShortcut!.conflictsWithTextEditing)
+        #expect(EditorCommand.togglePlay.defaultShortcut!.conflictsWithTextEditing)
+        #expect(EditorCommand.nextCue.defaultShortcut!.conflictsWithTextEditing)
+        #expect(EditorCommand.deleteCue.defaultShortcut!.conflictsWithTextEditing)
+        #expect(!EditorCommand.undo.defaultShortcut!.conflictsWithTextEditing)
+        #expect(!EditorCommand.addCue.defaultShortcut!.conflictsWithTextEditing)
+    }
 }
