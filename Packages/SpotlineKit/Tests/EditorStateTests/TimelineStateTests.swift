@@ -12,82 +12,114 @@ struct TimelineStateTests {
     let rate = FrameRate.fps25
     func f(_ n: Int64) -> MediaTime { MediaTime(frame: n, rate: rate) }
 
+    typealias WaveformProgress = MediaAnalyzer.Progress<AudioAnalysis>
+    typealias ShotProgress = MediaAnalyzer.Progress<[MediaTime]>
+
     /// An editor whose media "analysis" finds cuts at frames 40 and 75.
     func makeEditor() async throws -> EditorState {
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
         let cuts = [f(40), f(75)]
         let halfway = f(50)
-        editor.analyzeMedia = { _, _, progress in
-            progress(MediaAnalyzer.Progress(fraction: 0.5, analyzedUntil: halfway, partial: nil))
-            return MediaAnalysis(waveform: Waveform(peaks: [10, 20]), shotChanges: cuts)
+        editor.analyzeWaveform = { _, _, _ in
+            AudioAnalysis(waveform: Waveform(peaks: [10, 20]), audioStreamIndex: 1)
+        }
+        editor.analyzeShotChanges = { _, progress in
+            progress(ShotProgress(fraction: 0.5, analyzedUntil: halfway, partial: nil))
+            return cuts
         }
         editor.open(URL(fileURLWithPath: "/tmp/cuts.mov"))
-        #expect(editor.analysisProgress == 0)
-        for _ in 0..<100 where editor.analysis == nil { await Task.yield() }
-        try #require(editor.analysis != nil)
+        #expect(editor.waveformJob == AnalysisJob())
+        #expect(editor.shotChangesJob == AnalysisJob())
+        for _ in 0..<100 where editor.waveformJob != nil || editor.shotChangesJob != nil { await Task.yield() }
+        try #require(editor.shotChanges != nil && editor.audioAnalysis != nil)
         return editor
     }
 
     @Test func analysisRunsWhenMediaOpens() async throws {
         let editor = try await makeEditor()
         #expect(editor.shotChangeFrames == [40, 75])
-        #expect(editor.analysisProgress == nil)
+        #expect(editor.analyzedUntil == nil)
         #expect(editor.timelineContent.shotChanges == [40, 75])
         #expect(editor.timelineContent.waveform?.peaks == [10, 20])
+        #expect(editor.analysis?.audioStreamIndex == 1)
     }
 
-    @Test func partialResultsShowBeforeTheEnd() async throws {
+    @Test func theWaveformDoesNotWaitForShotChanges() async throws {
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
-        let (reports, continuation) = AsyncStream<MediaAnalyzer.Progress>.makeStream()
+        let finishShots = AsyncStream<Void>.makeStream()
+        editor.analyzeWaveform = { _, _, _ in AudioAnalysis(waveform: Waveform(peaks: [1, 2]), audioStreamIndex: 1) }
+        editor.analyzeShotChanges = { _, _ in
+            for await _ in finishShots.stream { break }
+            return []
+        }
+        editor.open(URL(fileURLWithPath: "/tmp/cuts.mov"))
+        for _ in 0..<100 where editor.waveformJob != nil { await Task.yield() }
+        #expect(editor.audioAnalysis?.waveform.peaks == [1, 2])
+        #expect(editor.shotChangesJob != nil, "Shot changes are still running")
+        #expect(editor.analyzedUntil == .zero)
+
+        finishShots.continuation.yield()
+        for _ in 0..<100 where editor.shotChangesJob != nil { await Task.yield() }
+        #expect(editor.shotChanges == [])
+    }
+
+    @Test func partialShotChangesShowBeforeTheEnd() async throws {
+        let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
+        let (reports, continuation) = AsyncStream<ShotProgress>.makeStream()
         let finish = AsyncStream<Void>.makeStream()
-        let first = MediaAnalysis(waveform: Waveform(peaks: [1]), shotChanges: [f(40)])
-        let final = MediaAnalysis(waveform: Waveform(peaks: [1, 2, 3]), shotChanges: [f(40), f(75)])
-        editor.analyzeMedia = { _, _, progress in
+        let final = [f(40), f(75)]
+        editor.analyzeWaveform = { _, _, _ in AudioAnalysis(waveform: Waveform(peaks: [1]), audioStreamIndex: 1) }
+        editor.analyzeShotChanges = { _, progress in
             for await report in reports { progress(report) }
             for await _ in finish.stream { break }
             return final
         }
         editor.open(URL(fileURLWithPath: "/tmp/cuts.mov"))
 
-        continuation.yield(MediaAnalyzer.Progress(fraction: 0.5, analyzedUntil: f(50), partial: first))
+        continuation.yield(ShotProgress(fraction: 0.5, analyzedUntil: f(50), partial: [f(40)]))
         // A stale report arriving late is ignored.
-        continuation.yield(MediaAnalyzer.Progress(fraction: 0.2, analyzedUntil: f(20), partial: MediaAnalysis(waveform: nil, shotChanges: [])))
+        continuation.yield(ShotProgress(fraction: 0.2, analyzedUntil: f(20), partial: []))
         continuation.finish()
-        for _ in 0..<100 where editor.analysisProgress != 0.5 { await Task.yield() }
+        for _ in 0..<100 where editor.shotChangesJob?.fraction != 0.5 { await Task.yield() }
+        for _ in 0..<100 where editor.waveformJob != nil { await Task.yield() }
         for _ in 0..<20 { await Task.yield() }
-        #expect(editor.analysis == first)
+        #expect(editor.shotChanges == [f(40)])
         #expect(editor.analyzedUntil == f(50))
-        #expect(editor.shotChangeFrames == [40])
         #expect(editor.canPerform(.nextShotChange), "Partial cuts are usable")
 
         finish.continuation.yield()
-        for _ in 0..<100 where editor.analysisProgress != nil { await Task.yield() }
-        #expect(editor.analysis == final)
+        for _ in 0..<100 where editor.shotChangesJob != nil { await Task.yield() }
+        #expect(editor.shotChanges == final)
         #expect(editor.analyzedUntil == nil)
         #expect(editor.timelineContent.analyzedUntil == nil)
     }
 
-    @Test func switchingAudioTracksAnalyzesThatTrack() async throws {
+    @Test func switchingAudioTracksRedoesOnlyTheWaveform() async throws {
         let engine = SimulatedPlaybackEngine(frameRate: rate)
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: engine)
         let requests = Requests()
-        editor.analyzeMedia = { _, stream, _ in
+        editor.analyzeWaveform = { _, stream, _ in
             await requests.append(stream)
-            return MediaAnalysis(waveform: Waveform(peaks: [1]), shotChanges: [], audioStreamIndex: stream ?? 1)
+            return AudioAnalysis(waveform: Waveform(peaks: [1]), audioStreamIndex: stream ?? 1)
+        }
+        editor.analyzeShotChanges = { _, _ in
+            await requests.append(-1)
+            return []
         }
         editor.open(URL(fileURLWithPath: "/tmp/tracks.mkv"))
-        for _ in 0..<100 where editor.analysis == nil { await Task.yield() }
-        #expect(editor.analysis?.audioStreamIndex == 1)
+        for _ in 0..<100 where editor.waveformJob != nil || editor.shotChangesJob != nil { await Task.yield() }
+        #expect(editor.audioAnalysis?.audioStreamIndex == 1)
 
-        // The player reports the track the analysis already used: nothing to redo.
+        // The player reports the track the waveform already used: nothing to redo.
         engine.selectAudioStream(1)
         for _ in 0..<50 { await Task.yield() }
-        #expect(await requests.all == [nil])
+        #expect(await Set(requests.all) == [nil, -1])
 
         engine.selectAudioStream(2)
-        for _ in 0..<100 where editor.analysis?.audioStreamIndex != 2 { await Task.yield() }
-        #expect(editor.analysis?.audioStreamIndex == 2)
-        #expect(await requests.all == [nil, 2])
+        for _ in 0..<100 where editor.audioAnalysis?.audioStreamIndex != 2 { await Task.yield() }
+        #expect(editor.audioAnalysis?.audioStreamIndex == 2)
+        let all = await requests.all
+        #expect(all.count == 3 && all.last == 2, "Only the waveform ran again: \(all)")
     }
 
     @Test func shotChangeNavigation() async throws {

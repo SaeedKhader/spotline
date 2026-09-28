@@ -448,7 +448,7 @@ final class TimelineView: NSView {
         if content.hasMedia {
             let playheadX = x(for: content.playhead)
             children.append(TimelineElement(
-                parent: self, role: .valueIndicator, identifier: AccessibilityID.Timeline.playhead,
+                parent: self, parentHeight: bounds.height, role: .valueIndicator, identifier: AccessibilityID.Timeline.playhead,
                 label: "Playhead", value: label(content.playhead),
                 rect: NSRect(x: playheadX - 2, y: 0, width: 4, height: bounds.height)
             ))
@@ -457,7 +457,7 @@ final class TimelineView: NSView {
             let lineX = x(forFrame: frame)
             guard lineX >= 0, lineX <= bounds.width else { continue }
             children.append(TimelineElement(
-                parent: self, role: .splitter, identifier: AccessibilityID.Timeline.shotChange(index),
+                parent: self, parentHeight: bounds.height, role: .splitter, identifier: AccessibilityID.Timeline.shotChange(index),
                 label: "Shot change", value: Timecode(frameNumber: frame, rate: rate).description,
                 rect: NSRect(x: lineX - 2, y: laneRect.minY, width: 4, height: laneRect.height)
             ))
@@ -467,7 +467,7 @@ final class TimelineView: NSView {
             guard rect.maxX >= 0, rect.minX <= bounds.width else { continue }
             let id = cue.id
             let element = TimelineElement(
-                parent: self, role: .group, identifier: AccessibilityID.Timeline.cue(id),
+                parent: self, parentHeight: bounds.height, role: .group, identifier: AccessibilityID.Timeline.cue(id),
                 label: SubtitleText.visibleLines(of: cue.text).joined(separator: " "),
                 value: "\(label(cue.start)) – \(label(cue.end))",
                 rect: rect
@@ -475,13 +475,13 @@ final class TimelineView: NSView {
             element.onPress = { [weak self] in self?.editor.select(id) }
             let handleWidth = min(Self.edgeGrabWidth * 2, rect.width / 2)
             let inHandle = TimelineElement(
-                parent: self, role: .handle, identifier: AccessibilityID.Timeline.inHandle(id),
+                parent: self, parentHeight: bounds.height, role: .handle, identifier: AccessibilityID.Timeline.inHandle(id),
                 label: "In", value: label(cue.start),
                 rect: NSRect(x: rect.minX - handleWidth / 2, y: rect.minY, width: handleWidth, height: rect.height)
             )
             inHandle.onAdjust = { [weak self] frames in self?.nudge(id, part: .inPoint, by: frames) }
             let outHandle = TimelineElement(
-                parent: self, role: .handle, identifier: AccessibilityID.Timeline.outHandle(id),
+                parent: self, parentHeight: bounds.height, role: .handle, identifier: AccessibilityID.Timeline.outHandle(id),
                 label: "Out", value: label(cue.end),
                 rect: NSRect(x: rect.maxX - handleWidth / 2, y: rect.minY, width: handleWidth, height: rect.height)
             )
@@ -507,11 +507,11 @@ private final class TimelineElement: NSAccessibilityElement {
     var onPress: (() -> Void)?
     var onAdjust: ((Int64) -> Void)?
 
-    init(parent: NSView, role: NSAccessibility.Role, identifier: String, label: String, value: String, rect: NSRect) {
+    init(parent: NSView, parentHeight: CGFloat, role: NSAccessibility.Role, identifier: String, label: String, value: String, rect: NSRect) {
         super.init()
         setAccessibilityParent(parent)
         // The frame is in unflipped view coordinates; the timeline view is flipped.
-        setAccessibilityFrameInParentSpace(NSRect(x: rect.minX, y: parent.bounds.height - rect.maxY, width: rect.width, height: rect.height))
+        setAccessibilityFrameInParentSpace(NSRect(x: rect.minX, y: parentHeight - rect.maxY, width: rect.width, height: rect.height))
         setAccessibilityRole(role)
         setAccessibilityIdentifier(identifier)
         setAccessibilityLabel(label)

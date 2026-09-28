@@ -172,10 +172,16 @@ struct SubtitleOverlay: View {
 struct AnalysisStatusView: View {
     let editor: EditorState
 
+    private func percent(_ job: AnalysisJob) -> String {
+        "\(Int((job.fraction * 100).rounded()))%"
+    }
+
     var body: some View {
-        let found = editor.analysis.map { $0.shotChanges.count == 1 ? "1 shot change" : "\($0.shotChanges.count) shot changes" }
-        let text: String? = if let progress = editor.analysisProgress {
-            "Analyzing \(Int((progress * 100).rounded()))%" + (found.map { " · \($0)" } ?? "")
+        let found = editor.shotChanges.map { $0.count == 1 ? "1 shot change" : "\($0.count) shot changes" }
+        let text: String? = if let job = editor.waveformJob {
+            "Reading audio \(percent(job))"
+        } else if let job = editor.shotChangesJob {
+            "Finding shot changes \(percent(job))" + (editor.shotChanges.map { " · \($0.count) so far" } ?? "")
         } else {
             found
         }
@@ -201,7 +207,7 @@ extension EditorState {
             duration: status.duration,
             frameRate: frameRate,
             shotChanges: shotChangeFrames,
-            waveform: analysis?.waveform,
+            waveform: audioAnalysis?.waveform,
             analyzedUntil: analyzedUntil,
             scale: timelineScale
         )

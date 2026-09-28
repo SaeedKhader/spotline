@@ -56,7 +56,7 @@ struct MediaAnalyzerTests {
     @Test func reportsProgressAndCancels() throws {
         var reports: [Double] = []
         #expect(throws: MediaAnalyzer.Error.self) {
-            try MediaAnalyzer.analyze(Self.fixtures.appending(path: "cuts-25.mp4")) { progress in
+            try MediaAnalyzer.shotChanges(in: Self.fixtures.appending(path: "cuts-25.mp4")) { progress in
                 reports.append(progress.fraction)
                 return progress.fraction < 0.5
             }
@@ -65,23 +65,36 @@ struct MediaAnalyzerTests {
         #expect(reports == reports.sorted())
     }
 
-    @Test func partialResultsGrowInOrder() throws {
+    @Test func shotChangesArriveInOrder() throws {
         var options = MediaAnalyzer.Options()
         options.partialResultInterval = .zero
-        var partials: [(until: MediaTime, analysis: MediaAnalysis)] = []
-        let final = try MediaAnalyzer.analyze(Self.fixtures.appending(path: "cuts-25.mp4"), options: options) { progress in
+        var partials: [(until: MediaTime, cuts: [MediaTime])] = []
+        let final = try MediaAnalyzer.shotChanges(in: Self.fixtures.appending(path: "cuts-25.mp4"), options: options) { progress in
             if let partial = progress.partial { partials.append((progress.analyzedUntil, partial)) }
             return true
         }
         #expect(partials.count > 10)
-        #expect(partials.last?.analysis == final)
-        // Every shot change reported so far lies in the part already read, and none disappear later.
+        #expect(partials.last?.cuts == final)
+        // Every cut reported so far lies in the part already read, and none disappear later.
         for (index, entry) in partials.enumerated() {
-            #expect(entry.analysis.shotChanges.allSatisfy { $0 <= entry.until })
-            #expect(final.shotChanges.starts(with: entry.analysis.shotChanges), "\(index)")
+            #expect(entry.cuts.allSatisfy { $0 <= entry.until })
+            #expect(final.starts(with: entry.cuts), "\(index)")
         }
-        #expect(partials.first!.analysis.shotChanges.isEmpty)
-        #expect((partials.first!.analysis.waveform?.peaks.count ?? 0) < final.waveform!.peaks.count)
+        #expect(partials.first!.cuts.isEmpty)
+    }
+
+    @Test func waveformGrowsAsItIsRead() throws {
+        var options = MediaAnalyzer.Options()
+        options.partialResultInterval = .zero
+        var sizes: [Int] = []
+        let final = try MediaAnalyzer.waveform(of: Self.fixtures.appending(path: "cuts-25.mp4"), options: options) { progress in
+            if let partial = progress.partial { sizes.append(partial.waveform.peaks.count) }
+            return true
+        }
+        #expect(sizes.count > 10)
+        #expect(sizes == sizes.sorted())
+        #expect(sizes.last == final.waveform.peaks.count)
+        #expect(final.audioStreamIndex == 1)
     }
 
     @Test func missingFileThrows() {
@@ -108,16 +121,18 @@ struct AnalysisCacheTests {
         try Data([1, 2, 3]).write(to: media)
 
         let cache = AnalysisCache(directory: directory.appending(path: "cache"))
-        #expect(cache.analysis(for: media) == nil)
-        let analysis = MediaAnalysis(
-            waveform: Waveform(bucketsPerSecond: 100, peaks: [1, 2, 3]),
-            shotChanges: [MediaTime(frame: 40, rate: .fps25)]
-        )
-        cache.store(analysis, for: media)
-        #expect(cache.analysis(for: media) == analysis)
-        #expect(cache.analysis(for: media, audioStream: 2) == nil, "Another audio stream is another entry")
+        #expect(cache.waveform(for: media, audioStream: nil) == nil)
+        #expect(cache.shotChanges(for: media) == nil)
+        let audio = AudioAnalysis(waveform: Waveform(bucketsPerSecond: 100, peaks: [1, 2, 3]), audioStreamIndex: 1)
+        let cuts = [MediaTime(frame: 40, rate: .fps25)]
+        cache.store(audio, for: media, audioStream: nil)
+        cache.store(shotChanges: cuts, for: media)
+        #expect(cache.waveform(for: media, audioStream: nil) == audio)
+        #expect(cache.shotChanges(for: media) == cuts)
+        #expect(cache.waveform(for: media, audioStream: 2) == nil, "Another audio stream is another entry")
 
         try Data([1, 2, 3, 4]).write(to: media)
-        #expect(cache.analysis(for: media) == nil)
+        #expect(cache.waveform(for: media, audioStream: nil) == nil)
+        #expect(cache.shotChanges(for: media) == nil)
     }
 }

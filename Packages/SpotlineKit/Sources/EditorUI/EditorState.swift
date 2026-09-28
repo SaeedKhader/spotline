@@ -35,20 +35,25 @@ public final class EditorState {
     /// Increments when the text editor should take keyboard focus (after adding a cue).
     public private(set) var textFocusRequest = 0
 
-    /// Waveform and shot changes of the open media, once analyzed.
-    public private(set) var analysis: MediaAnalysis?
-    /// 0 to 1 while the media is being analyzed, nil otherwise.
-    public private(set) var analysisProgress: Double?
-    /// While analysis runs, how far into the media it has read. `analysis`
-    /// holds what was found before this point, so the timeline fills in as it goes.
-    public private(set) var analyzedUntil: MediaTime?
-    @ObservationIgnored private var analysisTask: Task<Void, Never>?
-    /// The audio stream the running or finished analysis reads, once known.
+    /// The open media's waveform, filled in while it is being read.
+    public private(set) var audioAnalysis: AudioAnalysis?
+    /// The open media's shot changes, filled in while they are being found.
+    public private(set) var shotChanges: [MediaTime]?
+    /// The two analysis jobs while they run, nil once done. They run side by
+    /// side: the waveform takes seconds, shot changes take minutes on a feature.
+    public private(set) var waveformJob: AnalysisJob?
+    public private(set) var shotChangesJob: AnalysisJob?
+    @ObservationIgnored private var waveformTask: Task<Void, Never>?
+    @ObservationIgnored private var shotChangesTask: Task<Void, Never>?
+    /// The audio stream the running or finished waveform reads, once known.
     @ObservationIgnored private var analyzedAudioStream: Int?
-    /// Reads waveform and shot changes off the main actor. Tests replace it.
-    @ObservationIgnored public var analyzeMedia:
-        @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress) -> Void) async throws -> MediaAnalysis =
-        EditorState.analyzer(cache: .standard)
+    /// Read a waveform and find shot changes off the main actor. Tests replace them.
+    @ObservationIgnored public var analyzeWaveform:
+        @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress<AudioAnalysis>) -> Void) async throws -> AudioAnalysis =
+        EditorState.waveformAnalyzer(cache: .standard)
+    @ObservationIgnored public var analyzeShotChanges:
+        @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void) async throws -> [MediaTime] =
+        EditorState.shotChangeAnalyzer(cache: .standard)
 
     /// Timeline zoom in points per second of media.
     public private(set) var timelineScale: Double = 100
@@ -88,7 +93,10 @@ public final class EditorState {
         // One undo step per edit, also where no run loop groups events (unit tests).
         undoManager.groupsByEvent = false
         playback.onStatusChange = { [weak self] status in self?.playbackDidChange(status) }
-        if !launchOptions.usesAnalysisCache { analyzeMedia = Self.analyzer(cache: nil) }
+        if !launchOptions.usesAnalysisCache {
+            analyzeWaveform = Self.waveformAnalyzer(cache: nil)
+            analyzeShotChanges = Self.shotChangeAnalyzer(cache: nil)
+        }
         if let url = launchOptions.mediaURL { open(url) }
         if let url = launchOptions.subtitlesURL {
             importSubtitles(from: url)
@@ -304,7 +312,7 @@ public final class EditorState {
 
     /// Shot changes as frame numbers at the current rate.
     public var shotChangeFrames: [Int64] {
-        (analysis?.shotChanges ?? []).map { $0.nearestFrame(at: frameRate) }
+        (shotChanges ?? []).map { $0.nearestFrame(at: frameRate) }
     }
 
     private func shotChangeFrame(before frame: Int64) -> Int64? {
@@ -457,71 +465,151 @@ public final class EditorState {
         self.status = status
         // Analyze again when the player switches to another audio track than the waveform shows.
         let audioTrackChanged = status.audioStreamIndex.map { $0 != analyzedAudioStream } ?? false
-        if mediaChanged || audioTrackChanged { analyzeCurrentMedia() }
+        if mediaChanged {
+            startWaveformAnalysis()
+            startShotChangeAnalysis()
+        } else if audioTrackChanged {
+            startWaveformAnalysis()
+        }
     }
 
     // MARK: - Media analysis
 
-    private func analyzeCurrentMedia() {
-        analysisTask?.cancel()
-        analysis = nil
-        analysisProgress = nil
-        analyzedUntil = nil
+    /// Waveform and shot changes together, nil before either has results.
+    public var analysis: MediaAnalysis? {
+        guard audioAnalysis != nil || shotChanges != nil else { return nil }
+        return MediaAnalysis(
+            waveform: audioAnalysis?.waveform,
+            shotChanges: shotChanges ?? [],
+            audioStreamIndex: audioAnalysis?.audioStreamIndex
+        )
+    }
+
+    /// While analysis runs, how far into the media every running job has read.
+    public var analyzedUntil: MediaTime? {
+        [waveformJob, shotChangesJob].compactMap { $0?.analyzedUntil }.min()
+    }
+
+    private func startWaveformAnalysis() {
+        waveformTask?.cancel()
+        audioAnalysis = nil
+        waveformJob = nil
         analyzedAudioStream = status.audioStreamIndex
         guard let url = status.mediaURL else { return }
-        analysisProgress = 0
-        analyzedUntil = .zero
-        let analyze = analyzeMedia
-        let audioStream = status.audioStreamIndex
-        let report: @Sendable (MediaAnalyzer.Progress) -> Void = { [weak self] progress in
+        waveformJob = AnalysisJob()
+        let analyze = analyzeWaveform
+        let stream = status.audioStreamIndex
+        let report: @Sendable (MediaAnalyzer.Progress<AudioAnalysis>) -> Void = { [weak self] progress in
             guard let editor = self else { return }
-            Task { @MainActor in editor.analysisDidProgress(progress, for: url) }
+            Task { @MainActor in editor.waveformDidProgress(progress, for: url) }
         }
-        analysisTask = Task { [weak self] in
-            let result = try? await analyze(url, audioStream, report)
+        waveformTask = Task { [weak self] in
+            let result = try? await analyze(url, stream, report)
             guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
-            if let stream = result?.audioStreamIndex { self.analyzedAudioStream = stream }
-            self.analysis = result
-            self.analysisProgress = nil
-            self.analyzedUntil = nil
+            if let result {
+                self.audioAnalysis = result
+                self.analyzedAudioStream = result.audioStreamIndex
+            }
+            self.waveformJob = nil
+        }
+    }
+
+    private func startShotChangeAnalysis() {
+        shotChangesTask?.cancel()
+        shotChanges = nil
+        shotChangesJob = nil
+        guard let url = status.mediaURL else { return }
+        shotChangesJob = AnalysisJob()
+        let analyze = analyzeShotChanges
+        let report: @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void = { [weak self] progress in
+            guard let editor = self else { return }
+            Task { @MainActor in editor.shotChangesDidProgress(progress, for: url) }
+        }
+        shotChangesTask = Task { [weak self] in
+            let result = try? await analyze(url, report)
+            guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
+            if let result { self.shotChanges = result }
+            self.shotChangesJob = nil
         }
     }
 
     /// Shows partial results. Reports can arrive out of order, so older ones are ignored.
-    private func analysisDidProgress(_ progress: MediaAnalyzer.Progress, for url: URL) {
-        guard status.mediaURL == url, analysisProgress != nil,
-              let current = analyzedUntil, progress.analyzedUntil >= current
-        else { return }
-        analysisProgress = progress.fraction
+    private func waveformDidProgress(_ progress: MediaAnalyzer.Progress<AudioAnalysis>, for url: URL) {
+        guard status.mediaURL == url, let job = waveformJob, let next = job.advanced(by: progress) else { return }
+        waveformJob = next
         if let partial = progress.partial {
-            if let stream = partial.audioStreamIndex { analyzedAudioStream = stream }
-            analysis = partial
-            analyzedUntil = progress.analyzedUntil
+            audioAnalysis = partial
+            analyzedAudioStream = partial.audioStreamIndex
         }
     }
 
-    /// Analyzes media off the main actor, reading and filling `cache` when given.
-    private nonisolated static func analyzer(
+    private func shotChangesDidProgress(_ progress: MediaAnalyzer.Progress<[MediaTime]>, for url: URL) {
+        guard status.mediaURL == url, let job = shotChangesJob, let next = job.advanced(by: progress) else { return }
+        shotChangesJob = next
+        if let partial = progress.partial { shotChanges = partial }
+    }
+
+    private nonisolated static func waveformAnalyzer(
         cache: AnalysisCache?
-    ) -> @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress) -> Void) async throws -> MediaAnalysis {
-        { url, audioStream, progress in
-            if let cached = cache?.analysis(for: url, audioStream: audioStream) { return cached }
+    ) -> @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress<AudioAnalysis>) -> Void) async throws -> AudioAnalysis {
+        { url, stream, progress in
+            if let cached = cache?.waveform(for: url, audioStream: stream) { return cached }
             var options = MediaAnalyzer.Options()
-            options.audioStreamIndex = audioStream
-            let task = Task.detached(priority: .utility) { [options] in
-                try MediaAnalyzer.analyze(url, options: options) { report in
+            options.audioStreamIndex = stream
+            let result = try await runDetached { [options] in
+                try MediaAnalyzer.waveform(of: url, options: options) { report in
                     progress(report)
                     return !Task.isCancelled
                 }
             }
-            let analysis = try await withTaskCancellationHandler {
-                try await task.value
-            } onCancel: {
-                task.cancel()
-            }
-            cache?.store(analysis, for: url, audioStream: audioStream)
-            return analysis
+            cache?.store(result, for: url, audioStream: stream)
+            return result
         }
+    }
+
+    private nonisolated static func shotChangeAnalyzer(
+        cache: AnalysisCache?
+    ) -> @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void) async throws -> [MediaTime] {
+        { url, progress in
+            if let cached = cache?.shotChanges(for: url) { return cached }
+            let result = try await runDetached {
+                try MediaAnalyzer.shotChanges(in: url) { report in
+                    progress(report)
+                    return !Task.isCancelled
+                }
+            }
+            cache?.store(shotChanges: result, for: url)
+            return result
+        }
+    }
+
+    /// Runs blocking work on a background thread, cancelling it with the caller.
+    private nonisolated static func runDetached<Result: Sendable>(
+        _ work: @escaping @Sendable () throws -> Result
+    ) async throws -> Result {
+        let task = Task.detached(priority: .utility, operation: work)
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+}
+
+/// How far a running analysis job has got.
+public struct AnalysisJob: Equatable, Sendable {
+    /// 0 to 1.
+    public var fraction: Double = 0
+    /// Results cover the media before this time.
+    public var analyzedUntil: MediaTime = .zero
+
+    /// The job after `progress`, or nil when the report is older than what is shown.
+    func advanced<Partial>(by progress: MediaAnalyzer.Progress<Partial>) -> AnalysisJob? {
+        guard progress.analyzedUntil >= analyzedUntil else { return nil }
+        return AnalysisJob(
+            fraction: progress.fraction,
+            analyzedUntil: progress.partial != nil ? progress.analyzedUntil : analyzedUntil
+        )
     }
 }
 

@@ -2,8 +2,10 @@ import CFFmpeg
 import Foundation
 import SubtitleCore
 
-/// Reads a media file once, decoding its audio into waveform peaks and its
-/// video into shot changes. Runs synchronously; call it off the main actor.
+/// Reads waveform peaks and shot changes from media files. The two are
+/// separate jobs that callers can run side by side: audio decodes in seconds
+/// even for a feature film, while shot detection decodes every video frame.
+/// Both run synchronously; call them off the main actor.
 public enum MediaAnalyzer {
     public struct Options: Sendable {
         public var bucketsPerSecond = Waveform.defaultBucketsPerSecond
@@ -19,17 +21,17 @@ public enum MediaAnalyzer {
         public init() {}
     }
 
-    /// How far an analysis has got.
-    public struct Progress: Sendable {
+    /// How far a job has got.
+    public struct Progress<Partial: Sendable>: Sendable {
         /// 0 to 1.
         public var fraction: Double
         /// Media before this time has been read.
         public var analyzedUntil: MediaTime
-        /// The waveform and shot changes found so far. Set at most every
-        /// `partialResultInterval`, and always with the last report.
-        public var partial: MediaAnalysis?
+        /// What was found so far. Set at most every `partialResultInterval`,
+        /// and always with the last report.
+        public var partial: Partial?
 
-        public init(fraction: Double, analyzedUntil: MediaTime, partial: MediaAnalysis?) {
+        public init(fraction: Double, analyzedUntil: MediaTime, partial: Partial?) {
             self.fraction = fraction
             self.analyzedUntil = analyzedUntil
             self.partial = partial
@@ -38,57 +40,119 @@ public enum MediaAnalyzer {
 
     public enum Error: Swift.Error, CustomStringConvertible {
         case cannotOpen(String)
+        case noStream
         case cancelled
 
         public var description: String {
             switch self {
             case .cannotOpen(let reason): "Cannot read the media: \(reason)"
+            case .noStream: "The media has no stream of that kind"
             case .cancelled: "Cancelled"
             }
         }
     }
 
-    /// Analyzes `url`, reporting as it reads so callers can show results
-    /// before the end. `progress` returns false to cancel.
-    public static func analyze(
-        _ url: URL,
+    /// The waveform of one audio stream. `progress` returns false to cancel.
+    public static func waveform(
+        of url: URL,
         options: Options = Options(),
-        progress: (Progress) -> Bool = { _ in true }
-    ) throws -> MediaAnalysis {
-        var format: UnsafeMutablePointer<AVFormatContext>?
-        guard avformat_open_input(&format, url.path, nil, nil) == 0, let format else {
-            throw Error.cannotOpen("unsupported or missing file")
-        }
-        defer {
-            var context: UnsafeMutablePointer<AVFormatContext>? = format
-            avformat_close_input(&context)
-        }
-        guard avformat_find_stream_info(format, nil) >= 0 else { throw Error.cannotOpen("no stream information") }
-
-        let streams = UnsafeBufferPointer(start: format.pointee.streams, count: Int(format.pointee.nb_streams))
-        for stream in streams { stream?.pointee.discard = AVDISCARD_ALL }
-        let requestedAudio = options.audioStreamIndex.flatMap { index in
-            streams.indices.contains(index) && streams[index]?.pointee.codecpar.pointee.codec_type == AVMEDIA_TYPE_AUDIO
+        progress: (Progress<AudioAnalysis>) -> Bool = { _ in true }
+    ) throws -> AudioAnalysis {
+        let file = try MediaFile(url)
+        let requested = options.audioStreamIndex.flatMap { index in
+            file.streams.indices.contains(index) && file.streams[index]?.pointee.codecpar.pointee.codec_type == AVMEDIA_TYPE_AUDIO
                 ? Int32(index) : nil
         }
-        let audioIndex = requestedAudio ?? av_find_best_stream(format, AVMEDIA_TYPE_AUDIO, -1, -1, nil, 0)
-        let videoIndex = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1, nil, 0)
-
-        let audio = audioIndex >= 0 ? try? AudioPeaks(stream: streams[Int(audioIndex)]!, bucketsPerSecond: options.bucketsPerSecond) : nil
-        let video = videoIndex >= 0 ? try? ShotDetector(stream: streams[Int(videoIndex)]!, threshold: options.sceneThreshold) : nil
-        guard audio != nil || video != nil else { throw Error.cannotOpen("no audio or video stream") }
-
-        let duration = format.pointee.duration > 0 ? Double(format.pointee.duration) / Double(AV_TIME_BASE) : 0
-        var packet = av_packet_alloc()
-        defer { av_packet_free(&packet) }
-
-        func result() -> MediaAnalysis {
-            MediaAnalysis(
-                waveform: audio.map { Waveform(bucketsPerSecond: options.bucketsPerSecond, peaks: $0.peaks, source: $0.source) },
-                shotChanges: video?.shotChanges ?? [],
-                audioStreamIndex: audio != nil ? Int(audioIndex) : nil
+        let index = requested ?? av_find_best_stream(file.format, AVMEDIA_TYPE_AUDIO, -1, -1, nil, 0)
+        guard index >= 0 else { throw Error.noStream }
+        let audio = try AudioPeaks(stream: file.streams[Int(index)]!, bucketsPerSecond: options.bucketsPerSecond)
+        return try file.read(stream: index, options: options, progress: progress, decode: audio.decode) {
+            AudioAnalysis(
+                waveform: Waveform(bucketsPerSecond: options.bucketsPerSecond, peaks: audio.peaks, source: audio.source),
+                audioStreamIndex: Int(index)
             )
         }
+    }
+
+    /// The times where new shots start, in order. `progress` returns false to cancel.
+    public static func shotChanges(
+        in url: URL,
+        options: Options = Options(),
+        progress: (Progress<[MediaTime]>) -> Bool = { _ in true }
+    ) throws -> [MediaTime] {
+        let file = try MediaFile(url)
+        let index = av_find_best_stream(file.format, AVMEDIA_TYPE_VIDEO, -1, -1, nil, 0)
+        guard index >= 0 else { throw Error.noStream }
+        let video = try ShotDetector(stream: file.streams[Int(index)]!, threshold: options.sceneThreshold)
+        return try file.read(stream: index, options: options, progress: progress, decode: video.decode) {
+            video.shotChanges
+        }
+    }
+
+    /// Both jobs, one after the other. A file without audio or video gives
+    /// an empty result for that part.
+    public static func analyze(_ url: URL, options: Options = Options()) throws -> MediaAnalysis {
+        let audio: AudioAnalysis?
+        do { audio = try waveform(of: url, options: options) } catch Error.noStream { audio = nil }
+        let shots: [MediaTime]
+        do { shots = try shotChanges(in: url, options: options) } catch Error.noStream { shots = [] }
+        return MediaAnalysis(waveform: audio?.waveform, shotChanges: shots, audioStreamIndex: audio?.audioStreamIndex)
+    }
+}
+
+/// The waveform of one audio stream and which stream it came from.
+public struct AudioAnalysis: Sendable, Codable, Equatable {
+    public var waveform: Waveform
+    /// The FFmpeg index of the audio stream.
+    public var audioStreamIndex: Int
+
+    public init(waveform: Waveform, audioStreamIndex: Int) {
+        self.waveform = waveform
+        self.audioStreamIndex = audioStreamIndex
+    }
+}
+
+// MARK: - Reading
+
+/// An open media file.
+private final class MediaFile {
+    let format: UnsafeMutablePointer<AVFormatContext>
+    let streams: UnsafeBufferPointer<UnsafeMutablePointer<AVStream>?>
+
+    init(_ url: URL) throws {
+        var format: UnsafeMutablePointer<AVFormatContext>?
+        guard avformat_open_input(&format, url.path, nil, nil) == 0, let format else {
+            throw MediaAnalyzer.Error.cannotOpen("unsupported or missing file")
+        }
+        self.format = format
+        guard avformat_find_stream_info(format, nil) >= 0 else {
+            var context: UnsafeMutablePointer<AVFormatContext>? = format
+            avformat_close_input(&context)
+            throw MediaAnalyzer.Error.cannotOpen("no stream information")
+        }
+        streams = UnsafeBufferPointer(start: format.pointee.streams, count: Int(format.pointee.nb_streams))
+        // Decoders turn their own stream back on.
+        for stream in streams { stream?.pointee.discard = AVDISCARD_ALL }
+    }
+
+    deinit {
+        var context: UnsafeMutablePointer<AVFormatContext>? = format
+        avformat_close_input(&context)
+    }
+
+    /// Feeds every packet of `stream` to `decode`, reporting progress with
+    /// `result()` as the partial result at most every `partialResultInterval`.
+    func read<Result: Sendable>(
+        stream index: Int32,
+        options: MediaAnalyzer.Options,
+        progress: (MediaAnalyzer.Progress<Result>) -> Bool,
+        decode: (UnsafeMutablePointer<AVPacket>?) -> Void,
+        result: () -> Result
+    ) throws -> Result {
+        let duration = format.pointee.duration > 0 ? Double(format.pointee.duration) / Double(AV_TIME_BASE) : 0
+        let timeBase = streams[Int(index)]!.pointee.time_base
+        var packet = av_packet_alloc()
+        defer { av_packet_free(&packet) }
 
         let clock = ContinuousClock()
         var lastPartial = clock.now
@@ -97,32 +161,23 @@ public enum MediaAnalyzer {
 
         while av_read_frame(format, packet) >= 0 {
             defer { av_packet_unref(packet) }
-            let index = packet!.pointee.stream_index
-            if index == audioIndex {
-                audio?.decode(packet)
-            } else if index == videoIndex {
-                video?.decode(packet)
-            } else {
-                continue
-            }
+            guard packet!.pointee.stream_index == index else { continue }
+            decode(packet)
             let pts = packet!.pointee.pts
             guard pts != Int64.min else { continue }
-            let timeBase = streams[Int(index)]!.pointee.time_base
             analyzedUntil = max(analyzedUntil, MediaTime(value: pts * Int64(timeBase.num), timescale: Int64(timeBase.den)))
             let fraction = duration > 0 ? min(max(analyzedUntil.seconds / duration, 0), 1) : 0
             let partialDue = clock.now - lastPartial >= options.partialResultInterval
             guard partialDue || fraction - lastFraction >= 0.01 else { continue }
             lastFraction = fraction
             if partialDue { lastPartial = clock.now }
-            let report = Progress(fraction: fraction, analyzedUntil: analyzedUntil, partial: partialDue ? result() : nil)
-            if !progress(report) { throw Error.cancelled }
+            let report = MediaAnalyzer.Progress(fraction: fraction, analyzedUntil: analyzedUntil, partial: partialDue ? result() : nil)
+            if !progress(report) { throw MediaAnalyzer.Error.cancelled }
         }
-        audio?.decode(nil)
-        video?.decode(nil)
-
-        let analysis = result()
-        _ = progress(Progress(fraction: 1, analyzedUntil: analyzedUntil, partial: analysis))
-        return analysis
+        decode(nil)
+        let final = result()
+        _ = progress(MediaAnalyzer.Progress(fraction: 1, analyzedUntil: analyzedUntil, partial: final))
+        return final
     }
 }
 
