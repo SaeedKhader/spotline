@@ -74,7 +74,7 @@ final class TimelineUITests: XCTestCase {
     func testSwitchingAudioTracksRedrawsTheWaveform() throws {
         let app = launchApp(media: "two-tracks.mkv")
         let timeline = app.descendants(matching: .any)[AccessibilityID.Timeline.root]
-        waitForValue(of: timeline, toEqual: "Waveform: all channels mixed")
+        waitForValue(of: timeline, toEqual: "Waveform: all channels mixed, speech highlighted")
 
         // Pick the second track from Playback › Audio Track while the video
         // plays: the playhead must not redraw (and break) the open menu.
@@ -84,9 +84,9 @@ final class TimelineUITests: XCTestCase {
         let arabic = app.menuItems.matching(NSPredicate(format: "title CONTAINS 'Arabic dub'")).firstMatch
         XCTAssertTrue(arabic.waitForExistence(timeout: 5))
         arabic.click()
-        waitForValue(of: timeline, toEqual: "Waveform: center channel (dialogue)")
+        waitForValue(of: timeline, toEqual: "Waveform: center channel (dialogue), speech highlighted")
 
         app.typeKey("a", modifierFlags: [.command, .option])
-        waitForValue(of: timeline, toEqual: "Waveform: all channels mixed")
+        waitForValue(of: timeline, toEqual: "Waveform: all channels mixed, speech highlighted")
     }
 }

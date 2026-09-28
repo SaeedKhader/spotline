@@ -148,6 +148,31 @@ struct TimelineStateTests {
         #expect(editor.selectedAudioTrack?.id == 1, "Unknown tracks are ignored")
     }
 
+    @Test func speechIsDetectedPerTrackAndCanBeHidden() async throws {
+        let tracks = [AudioTrack(id: 1, streamIndex: 1), AudioTrack(id: 2, streamIndex: 2)]
+        let editor = EditorState(
+            launchOptions: LaunchOptions(isUITestMode: true),
+            playback: SimulatedPlaybackEngine(frameRate: rate, audioTracks: tracks)
+        )
+        let region = SpeechRegion(start: f(10), end: f(30), confidence: 0.9)
+        editor.analyzeWaveform = { _, stream, _ in AudioAnalysis(waveform: Waveform(peaks: [1]), audioStreamIndex: stream ?? 1) }
+        editor.analyzeShotChanges = { _, _ in [] }
+        editor.analyzeSpeech = { _, stream, _ in stream == 2 ? [] : [region] }
+        editor.open(URL(fileURLWithPath: "/tmp/tracks.mkv"))
+        for _ in 0..<100 where editor.speechJob != nil || editor.speech == nil { await Task.yield() }
+        #expect(editor.speech == [region])
+        #expect(editor.timelineContent.speech == [region])
+
+        editor.perform(.toggleSpeechHighlight)
+        #expect(editor.isOn(.toggleSpeechHighlight) == false)
+        #expect(editor.timelineContent.speech == nil)
+        editor.perform(.toggleSpeechHighlight)
+
+        editor.perform(.nextAudioTrack)
+        for _ in 0..<100 where editor.speech != [] { await Task.yield() }
+        #expect(editor.speech == [], "Detected again for the new track")
+    }
+
     @Test func trackNames() {
         #expect(AudioTrack(id: 3).displayName == "Track 3")
         #expect(AudioTrack(id: 1, language: "xx-private", title: "Commentary", channelCount: 2).displayName.hasSuffix("Commentary · Stereo"))

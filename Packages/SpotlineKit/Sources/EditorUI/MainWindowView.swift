@@ -196,6 +196,8 @@ struct AnalysisStatusView: View {
         let found = editor.shotChanges.map { $0.count == 1 ? "1 shot change" : "\($0.count) shot changes" }
         let text: String? = if let job = editor.waveformJob {
             "Reading audio \(percent(job))"
+        } else if let job = editor.speechJob {
+            "Detecting speech \(percent(job))"
         } else if let job = editor.shotChangesJob {
             "Finding shot changes \(percent(job))" + (editor.shotChanges.map { " · \($0.count) so far" } ?? "")
         } else {
@@ -224,6 +226,8 @@ extension EditorState {
             frameRate: frameRate,
             shotChanges: shotChangeFrames,
             waveform: audioAnalysis?.waveform,
+            speech: isSpeechHighlighted ? speech : nil,
+            speechAnalyzedUntil: speechJob?.analyzedUntil,
             analyzedUntil: analyzedUntil,
             scale: timelineScale
         )

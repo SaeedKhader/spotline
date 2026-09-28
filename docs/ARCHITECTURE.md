@@ -149,6 +149,12 @@ Round-trip tests for every format live in `SubtitleFormats` with golden files.
 - New commands: Go to Previous/Next Shot Change (⌥← / ⌥→), Zoom In/Out (⌘= / ⌘-), and the "Snap to Shot Changes and Cues" toggle.
 - Audio tracks: `PlaybackStatus` lists the media's audio tracks (language, title, channels, FFmpeg stream) from mpv's `track-list`; Playback › Audio Track chooses one (`EditorState.selectAudioTrack`), and Next Audio Track (⌥⌘A) cycles. The waveform follows the playing track.
 
+### As built in M3b (speech-aware waveform)
+- Waveform peaks are taken after a voice-band filter (`VoiceBandFilter`: 150 Hz to 4 kHz, 24 dB/octave Butterworth biquads), so bass, rumble and hiss no longer hide speech.
+- A third background job, `MediaAnalyzer.speech`, feeds the same mono (or center-channel) audio to Apple's on-device sound classifier (SoundAnalysis, `SNClassifySoundRequest(.version1)`) in 1 s windows every 0.5 s, and keeps windows scoring at least 0.5 for "speech" as `SpeechRegion`s. It runs about 200× faster than real time (roughly 30 s for a 2-hour film), streams partial results like the other jobs and is cached per audio track. This is also the speech-detection step of the M6 audio pipeline.
+- The timeline draws speech in mint and dims everything else; Timeline › Highlight Speech in Waveform turns it off. True dialogue/music separation (e.g. Demucs) stays with the M6 AI tools.
+- Tests generate speech at run time with macOS `say` rather than committing synthesized recordings.
+
 ## 7. Pro workflow features (backlog, roughly in order)
 
 - J/K/L shuttle, frame step, set in/out at playhead, "snap to shot change", nudge by frame, split/merge cues, ripple.
@@ -223,6 +229,7 @@ Some target languages (Arabic first; also Hebrew, French, Spanish, etc.) change 
 | M1 | Playback | libmpv in SwiftUI window, frame-accurate seek/step, SMPTE timecode display, UI test drives it |
 | M2 | Basic editing | Import/export SRT + WebVTT, cue list, text editor, set in/out at playhead, undo |
 | M3 | Timeline | Waveform, cue blocks draggable, shot changes, snapping |
+| M3b | Speech-aware waveform | Waveform filtered to the voice band; on-device speech detection draws speech brightly and dims music and effects |
 | M4 | Pro formats + QC | ASS, TTML/IMSC, QC engine with presets, live issues panel |
 | M5 | Translation | Source/target mode, glossary, translation memory, EBU STL |
 | M6 | AI tools | Audio preparation pipeline, transcription with timestamps → segmented cues, AI translation, profanity/cleanup transforms, review-as-diff |

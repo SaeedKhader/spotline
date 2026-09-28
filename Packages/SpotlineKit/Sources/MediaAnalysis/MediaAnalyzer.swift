@@ -59,12 +59,7 @@ public enum MediaAnalyzer {
         progress: (Progress<AudioAnalysis>) -> Bool = { _ in true }
     ) throws -> AudioAnalysis {
         let file = try MediaFile(url)
-        let requested = options.audioStreamIndex.flatMap { index in
-            file.streams.indices.contains(index) && file.streams[index]?.pointee.codecpar.pointee.codec_type == AVMEDIA_TYPE_AUDIO
-                ? Int32(index) : nil
-        }
-        let index = requested ?? av_find_best_stream(file.format, AVMEDIA_TYPE_AUDIO, -1, -1, nil, 0)
-        guard index >= 0 else { throw Error.noStream }
+        let index = try file.audioStream(requested: options.audioStreamIndex)
         let audio = try AudioPeaks(stream: file.streams[Int(index)]!, bucketsPerSecond: options.bucketsPerSecond)
         return try file.read(stream: index, options: options, progress: progress, decode: audio.decode) {
             AudioAnalysis(
@@ -115,7 +110,7 @@ public struct AudioAnalysis: Sendable, Codable, Equatable {
 // MARK: - Reading
 
 /// An open media file.
-private final class MediaFile {
+final class MediaFile {
     let format: UnsafeMutablePointer<AVFormatContext>
     let streams: UnsafeBufferPointer<UnsafeMutablePointer<AVStream>?>
 
@@ -138,6 +133,17 @@ private final class MediaFile {
     deinit {
         var context: UnsafeMutablePointer<AVFormatContext>? = format
         avformat_close_input(&context)
+    }
+
+    /// The requested audio stream when it is one, else the main audio stream.
+    func audioStream(requested: Int?) throws -> Int32 {
+        let valid = requested.flatMap { index in
+            streams.indices.contains(index) && streams[index]?.pointee.codecpar.pointee.codec_type == AVMEDIA_TYPE_AUDIO
+                ? Int32(index) : nil
+        }
+        let index = valid ?? av_find_best_stream(format, AVMEDIA_TYPE_AUDIO, -1, -1, nil, 0)
+        guard index >= 0 else { throw MediaAnalyzer.Error.noStream }
+        return index
     }
 
     /// Feeds every packet of `stream` to `decode`, reporting progress with
@@ -184,7 +190,7 @@ private final class MediaFile {
 // MARK: - Decoding
 
 /// A decoder for one stream that hands each decoded frame to `onFrame`.
-private final class StreamDecoder {
+final class StreamDecoder {
     let context: UnsafeMutablePointer<AVCodecContext>
     let timeBase: AVRational
     private var frame: UnsafeMutablePointer<AVFrame>?
@@ -231,26 +237,25 @@ private final class StreamDecoder {
     }
 }
 
-/// Mixes audio to mono float and keeps the loudest sample of each bucket.
-private final class AudioPeaks {
+/// Decodes one audio stream to mono float samples: the center channel of
+/// surround mixes (where dialogue lives), else a mix of all channels.
+final class MonoAudio {
     private let decoder: StreamDecoder
-    private let bucketsPerSecond: Int
     private var resampler: OpaquePointer?
     private var buffer: [Float] = []
-    private var levels: [Float] = []
-    /// Where the next sample goes when frames carry no timestamp.
+    /// Where the next samples go when frames carry no timestamp.
     private var nextSampleTime = 0.0
 
-    /// Which channels the peaks come from.
     let source: Waveform.Source
+    let sampleRate: Double
 
-    init(stream: UnsafeMutablePointer<AVStream>, bucketsPerSecond: Int) throws {
+    init(stream: UnsafeMutablePointer<AVStream>) throws {
         decoder = try StreamDecoder(stream: stream)
-        self.bucketsPerSecond = bucketsPerSecond
         var mono = AVChannelLayout()
         av_channel_layout_default(&mono, 1)
         let context = decoder.context
         let rate = context.pointee.sample_rate
+        sampleRate = Double(rate)
         guard swr_alloc_set_opts2(
             &resampler, &mono, AV_SAMPLE_FMT_FLT, rate,
             &context.pointee.ch_layout, context.pointee.sample_fmt, rate, 0, nil
@@ -276,13 +281,17 @@ private final class AudioPeaks {
         }
     }
 
-    var peaks: [UInt8] {
-        levels.map { UInt8((min(max($0, 0), 1) * 255).rounded()) }
+    deinit {
+        swr_free(&resampler)
     }
 
-    func decode(_ packet: UnsafeMutablePointer<AVPacket>?) {
+    /// Decodes a packet (nil to flush), passing each frame's samples and start time in seconds.
+    func decode(_ packet: UnsafeMutablePointer<AVPacket>?, onSamples: ([Float], Double) -> Void) {
         decoder.decode(packet) { frame in
-            add(convert(frame), at: decoder.time(of: frame)?.seconds)
+            let samples = convert(frame)
+            let start = decoder.time(of: frame)?.seconds ?? nextSampleTime
+            nextSampleTime = start + Double(samples.count) / sampleRate
+            onSamples(samples, start)
         }
     }
 
@@ -297,12 +306,34 @@ private final class AudioPeaks {
         }
         return converted > 0 ? Array(buffer[0..<Int(converted)]) : []
     }
+}
 
-    private func add(_ samples: [Float], at startTime: Double?) {
-        let rate = Double(decoder.context.pointee.sample_rate)
-        let start = startTime ?? nextSampleTime
-        nextSampleTime = start + Double(samples.count) / rate
-        let perBucket = rate / Double(bucketsPerSecond)
+/// Keeps the loudest sample of each bucket, after filtering to the voice band
+/// so rumble, bass and hiss do not hide speech.
+private final class AudioPeaks {
+    private let audio: MonoAudio
+    private let bucketsPerSecond: Int
+    private var filter: VoiceBandFilter
+    private var levels: [Float] = []
+
+    var source: Waveform.Source { audio.source }
+
+    init(stream: UnsafeMutablePointer<AVStream>, bucketsPerSecond: Int) throws {
+        audio = try MonoAudio(stream: stream)
+        self.bucketsPerSecond = bucketsPerSecond
+        filter = VoiceBandFilter(sampleRate: audio.sampleRate)
+    }
+
+    var peaks: [UInt8] {
+        levels.map { UInt8((min(max($0, 0), 1) * 255).rounded()) }
+    }
+
+    func decode(_ packet: UnsafeMutablePointer<AVPacket>?) {
+        audio.decode(packet) { samples, start in add(filter.process(samples), at: start) }
+    }
+
+    private func add(_ samples: [Float], at start: Double) {
+        let perBucket = audio.sampleRate / Double(bucketsPerSecond)
         for (offset, sample) in samples.enumerated() {
             let position = start * Double(bucketsPerSecond) + Double(offset) / perBucket
             guard position >= 0 else { continue }  // encoder priming before time zero
@@ -310,10 +341,6 @@ private final class AudioPeaks {
             if bucket >= levels.count { levels.append(contentsOf: repeatElement(0, count: bucket - levels.count + 1)) }
             levels[bucket] = max(levels[bucket], abs(sample))
         }
-    }
-
-    deinit {
-        swr_free(&resampler)
     }
 }
 

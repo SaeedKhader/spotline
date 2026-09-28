@@ -98,6 +98,10 @@ extension EditorCommand {
         id: "playback.nextAudioTrack", title: "Next Audio Track", category: .playback,
         defaultShortcut: KeyShortcut(.character("a"), modifiers: [.command, .option])
     )
+    /// A toggle: see `EditorState.isOn(_:)`.
+    public static let toggleSpeechHighlight = EditorCommand(
+        id: "timeline.toggleSpeechHighlight", title: "Highlight Speech in Waveform", category: .timeline
+    )
     public static let togglePlay = EditorCommand(
         id: "playback.togglePlay", title: "Play/Pause", category: .playback,
         defaultShortcut: KeyShortcut(.space)
@@ -121,7 +125,7 @@ extension EditorCommand {
         undo, redo,
         addCue, deleteCue, setIn, setOut,
         previousCue, nextCue, previousShotChange, nextShotChange,
-        zoomIn, zoomOut, toggleSnapping,
+        zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, stepBackward, stepForward, goToStart, nextAudioTrack,
     ]
 

@@ -32,7 +32,7 @@ Open a file with File > Open Media… (Command-O) or by dropping it on the video
 
 Import SRT or WebVTT subtitles with File > Import Subtitles… (Shift-Command-O) or `-OpenSubtitles <path>` at launch, and export with File > Export Subtitles… (Shift-Command-E). In the Cue menu: Add Cue at Playhead (Shift-Command-N), Set In/Out at Playhead (I / O), Delete Cue (Command-Delete), previous/next cue (Command-Up/Down).
 
-The timeline shows the waveform, shot changes (found automatically when media opens) and cue blocks: drag a block to move it, drag its edges to trim, with snapping to shot changes, the playhead and other cues. Option-Left/Right jump between shot changes; Command-= and Command-- zoom. Choose the audio track in Playback › Audio Track (Option-Command-A cycles); the waveform shows the center (dialogue) channel of surround tracks.
+The timeline shows the waveform, shot changes (found automatically when media opens) and cue blocks: drag a block to move it, drag its edges to trim, with snapping to shot changes, the playhead and other cues. Option-Left/Right jump between shot changes; Command-= and Command-- zoom. Choose the audio track in Playback › Audio Track (Option-Command-A cycles); the waveform shows the center (dialogue) channel of surround tracks. The waveform is filtered to the voice band, and speech (detected on-device) is highlighted while music and effects are dimmed.
 
 Run the UI tests:
 
