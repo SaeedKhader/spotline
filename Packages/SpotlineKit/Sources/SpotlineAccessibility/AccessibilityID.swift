@@ -19,10 +19,21 @@ public enum AccessibilityID {
         public static let root = "transport"
         public static let timecode = "transport.timecode"
         public static let frameRate = "transport.frameRate"
+        /// Media analysis state: "Analyzing 40%", or the number of shot changes found.
+        public static let analysis = "transport.analysis"
     }
 
     public enum Timeline {
         public static let root = "timeline"
+        /// Its value is the playhead's timecode.
+        public static let playhead = "timeline.playhead"
+        /// A cue block; its value is "<in> – <out>".
+        public static func cue(_ cueID: UUID) -> String { "timeline.cue.\(cueID.uuidString)" }
+        /// Draggable, adjustable edges of a cue block (increment moves one frame later).
+        public static func inHandle(_ cueID: UUID) -> String { "\(cue(cueID)).inHandle" }
+        public static func outHandle(_ cueID: UUID) -> String { "\(cue(cueID)).outHandle" }
+        /// The n-th shot change marker (0-based); its value is its timecode.
+        public static func shotChange(_ index: Int) -> String { "timeline.shotChange.\(index)" }
     }
 
     public enum CueList {

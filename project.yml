@@ -44,6 +44,10 @@ targets:
         buildPhase: resources
       - path: Fixtures/testsrc-23.976.srt
         buildPhase: resources
+      - path: Fixtures/cuts-25.mp4
+        buildPhase: resources
+      - path: Fixtures/cuts-25.srt
+        buildPhase: resources
     dependencies:
       - target: Spotline
       - package: SpotlineKit

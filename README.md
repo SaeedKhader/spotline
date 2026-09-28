@@ -7,7 +7,7 @@ A native macOS subtitle editor for professional movie and TV workflows: timing (
 - Built for automation from day one: stable accessibility IDs, one command layer shared by menus, shortcuts, UI tests and AI agents
 - AI tools (planned): transcription with timestamps, translation, profanity removal and line shortening, always reviewed as a diff before applying
 
-Status: early development (milestone M2, basic editing). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
+Status: early development (milestone M3, timeline). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
 ## Requirements
 
@@ -46,6 +46,7 @@ xcodebuild test -project Spotline.xcodeproj -scheme Spotline -destination 'platf
 | `AppUITests/` | XCUITest suite, launched with `-UITestMode` |
 | `Packages/SpotlineKit/Sources/SubtitleCore` | Time, frame rates, SMPTE timecode, cues. No UI. |
 | `Packages/SpotlineKit/Sources/SubtitleFormats` | SRT and WebVTT import/export, with golden-file tests |
+| `Packages/SpotlineKit/Sources/MediaAnalysis` | Waveform peaks and shot changes via FFmpeg, cached |
 | `Packages/SpotlineKit/Sources/EditorCommands` | Every user action as a named command |
 | `Packages/SpotlineKit/Sources/SpotlineAccessibility` | Accessibility identifier catalog |
 | `Packages/SpotlineKit/Sources/PlaybackCore` | The playback engine interface, plus a simulated engine for tests |

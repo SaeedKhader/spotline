@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "EditorCommands", targets: ["EditorCommands"]),
         .library(name: "PlaybackCore", targets: ["PlaybackCore"]),
         .library(name: "MPVPlayer", targets: ["MPVPlayer"]),
+        .library(name: "MediaAnalysis", targets: ["MediaAnalysis"]),
         .library(name: "EditorUI", targets: ["EditorUI"]),
     ],
     targets: [
@@ -33,10 +34,15 @@ let package = Package(
             // OpenGL is deprecated but is libmpv's only macOS render API (docs/ARCHITECTURE.md, section 4).
             swiftSettings: [.unsafeFlags(["-Xcc", "-DGL_SILENCE_DEPRECATION"])]
         ),
+        // FFmpeg headers and link flags (Homebrew's ffmpeg, a dependency of mpv).
+        .systemLibrary(name: "CFFmpeg", pkgConfig: "libavformat", providers: [.brew(["ffmpeg"])]),
+        // Waveform peaks and shot changes, read from media once and cached.
+        .target(name: "MediaAnalysis", dependencies: ["CFFmpeg", "SubtitleCore"]),
         .target(
             name: "EditorUI",
             dependencies: [
                 "SubtitleCore", "SubtitleFormats", "SpotlineAccessibility", "EditorCommands", "PlaybackCore", "MPVPlayer",
+                "MediaAnalysis",
             ]
         ),
         .testTarget(name: "SubtitleCoreTests", dependencies: ["SubtitleCore"]),
@@ -48,6 +54,7 @@ let package = Package(
         .testTarget(name: "EditorCommandsTests", dependencies: ["EditorCommands"]),
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore"]),
         .testTarget(name: "MPVPlayerTests", dependencies: ["MPVPlayer"]),
+        .testTarget(name: "MediaAnalysisTests", dependencies: ["MediaAnalysis"]),
         .testTarget(name: "EditorStateTests", dependencies: ["EditorUI", "SubtitleFormats"]),
     ]
 )

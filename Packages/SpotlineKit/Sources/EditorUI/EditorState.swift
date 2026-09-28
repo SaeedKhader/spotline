@@ -4,6 +4,7 @@ import MPVPlayer
 import Observation
 import PlaybackCore
 import SubtitleCore
+import MediaAnalysis
 import SubtitleFormats
 
 /// The editor's observable state and the single place commands are executed.
@@ -33,6 +34,21 @@ public final class EditorState {
     }
     /// Increments when the text editor should take keyboard focus (after adding a cue).
     public private(set) var textFocusRequest = 0
+
+    /// Waveform and shot changes of the open media, once analyzed.
+    public private(set) var analysis: MediaAnalysis?
+    /// 0 to 1 while the media is being analyzed, nil otherwise.
+    public private(set) var analysisProgress: Double?
+    @ObservationIgnored private var analysisTask: Task<Void, Never>?
+    /// Reads waveform and shot changes off the main actor. Tests replace it.
+    @ObservationIgnored public var analyzeMedia: @Sendable (URL, @escaping @Sendable (Double) -> Void) async throws -> MediaAnalysis =
+        EditorState.analyzeWithCache
+
+    /// Timeline zoom in points per second of media.
+    public private(set) var timelineScale: Double = 100
+    public static let timelineScaleRange: ClosedRange<Double> = 0.5...2_000
+    /// Whether timeline drags snap to shot changes, the playhead and other cues' edges.
+    public private(set) var isSnappingEnabled = true
 
     @ObservationIgnored public let undoManager: UndoManager
     public private(set) var canUndo = false
@@ -125,6 +141,16 @@ public final class EditorState {
             hasMedia && selectedCue.map { $0.start != currentTime } ?? false
         case EditorCommand.setOut.id:
             hasMedia && selectedCue.map { $0.end != currentTime && $0.start < currentTime } ?? false
+        case EditorCommand.previousShotChange.id:
+            hasMedia && shotChangeFrame(before: currentFrame) != nil
+        case EditorCommand.nextShotChange.id:
+            hasMedia && shotChangeFrame(after: currentFrame) != nil
+        case EditorCommand.zoomIn.id:
+            timelineScale < Self.timelineScaleRange.upperBound
+        case EditorCommand.zoomOut.id:
+            timelineScale > Self.timelineScaleRange.lowerBound
+        case EditorCommand.toggleSnapping.id:
+            true
         case EditorCommand.previousCue.id:
             selectedCueIndex.map { $0 > 0 } ?? !track.cues.isEmpty
         case EditorCommand.nextCue.id:
@@ -143,6 +169,11 @@ public final class EditorState {
     public func isShortcutEnabled(for command: EditorCommand) -> Bool {
         guard canPerform(command) else { return false }
         return !(isEditingText && command.defaultShortcut?.conflictsWithTextEditing == true)
+    }
+
+    /// The on/off state of a toggle command, nil for other commands.
+    public func isOn(_ command: EditorCommand) -> Bool? {
+        command.id == EditorCommand.toggleSnapping.id ? isSnappingEnabled : nil
     }
 
     /// Runs `command`. Returns false when it is unknown or not currently possible.
@@ -172,6 +203,16 @@ public final class EditorState {
             setInAtPlayhead()
         case EditorCommand.setOut.id:
             setOutAtPlayhead()
+        case EditorCommand.previousShotChange.id:
+            if let frame = shotChangeFrame(before: currentFrame) { seek(toFrame: frame) }
+        case EditorCommand.nextShotChange.id:
+            if let frame = shotChangeFrame(after: currentFrame) { seek(toFrame: frame) }
+        case EditorCommand.zoomIn.id:
+            setTimelineScale(timelineScale * 1.5)
+        case EditorCommand.zoomOut.id:
+            setTimelineScale(timelineScale / 1.5)
+        case EditorCommand.toggleSnapping.id:
+            isSnappingEnabled.toggle()
         case EditorCommand.previousCue.id:
             selectNeighbour(offset: -1)
         case EditorCommand.nextCue.id:
@@ -242,7 +283,54 @@ public final class EditorState {
         select(track.cues[index].id)
     }
 
+    // MARK: - Playhead and timeline
+
+    /// Pauses nothing; shows `frame` at the media's rate.
+    public func seek(toFrame frame: Int64) {
+        guard hasMedia else { return }
+        playback.seek(toFrame: max(frame, 0), rate: frameRate)
+    }
+
+    public func setTimelineScale(_ scale: Double) {
+        timelineScale = min(max(scale, Self.timelineScaleRange.lowerBound), Self.timelineScaleRange.upperBound)
+    }
+
+    /// Shot changes as frame numbers at the current rate.
+    public var shotChangeFrames: [Int64] {
+        (analysis?.shotChanges ?? []).map { $0.nearestFrame(at: frameRate) }
+    }
+
+    private func shotChangeFrame(before frame: Int64) -> Int64? {
+        shotChangeFrames.last { $0 < frame }
+    }
+
+    private func shotChangeFrame(after frame: Int64) -> Int64? {
+        shotChangeFrames.first { $0 > frame }
+    }
+
+    /// Times a dragged cue edge snaps to: shot changes, the playhead and the
+    /// edges of every other cue.
+    public func snapTargets(excluding cueID: Cue.ID?) -> [MediaTime] {
+        guard isSnappingEnabled else { return [] }
+        var targets = shotChangeFrames.map { MediaTime(frame: $0, rate: frameRate) }
+        if hasMedia { targets.append(currentTime) }
+        for cue in track.cues where cue.id != cueID {
+            targets.append(cue.start)
+            targets.append(cue.end)
+        }
+        return targets
+    }
+
     // MARK: - Editing
+
+    /// Sets a cue's start and end in one undoable step (a timeline drag or nudge).
+    public func setTiming(start: MediaTime, end: MediaTime, forCue id: Cue.ID, actionName: String) {
+        guard start < end, start >= .zero, let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
+        edit(actionName) { track in
+            track.cues[index].start = start
+            track.cues[index].end = end
+        }
+    }
 
     /// Changes the text of a cue. Consecutive changes to the same cue while
     /// typing undo as one step.
@@ -358,7 +446,56 @@ public final class EditorState {
         if let rate = status.frameRate, rate != self.status.frameRate {
             frameRate = rate
         }
+        let mediaChanged = status.mediaURL != self.status.mediaURL
         self.status = status
+        if mediaChanged { analyzeCurrentMedia() }
+    }
+
+    // MARK: - Media analysis
+
+    private func analyzeCurrentMedia() {
+        analysisTask?.cancel()
+        analysis = nil
+        analysisProgress = nil
+        guard let url = status.mediaURL else { return }
+        analysisProgress = 0
+        let analyze = analyzeMedia
+        let report: @Sendable (Double) -> Void = { [weak self] fraction in
+            guard let editor = self else { return }
+            Task { @MainActor in editor.analysisDidProgress(fraction, for: url) }
+        }
+        analysisTask = Task { [weak self] in
+            let result = try? await analyze(url, report)
+            guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
+            self.analysis = result
+            self.analysisProgress = nil
+        }
+    }
+
+    private func analysisDidProgress(_ fraction: Double, for url: URL) {
+        guard status.mediaURL == url, analysisProgress != nil else { return }
+        analysisProgress = fraction
+    }
+
+    /// The analysis from the cache, or else from decoding the file (then cached).
+    private nonisolated static func analyzeWithCache(
+        _ url: URL, progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> MediaAnalysis {
+        let cache = AnalysisCache.standard
+        if let cached = cache.analysis(for: url) { return cached }
+        let task = Task.detached(priority: .utility) {
+            try MediaAnalyzer.analyze(url) { fraction in
+                progress(fraction)
+                return !Task.isCancelled
+            }
+        }
+        let analysis = try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        cache.store(analysis, for: url)
+        return analysis
     }
 }
 
