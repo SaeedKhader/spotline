@@ -139,6 +139,11 @@ final class TimelineView: NSView {
         if content.selectedCueID != old.selectedCueID, let cue = content.cues.first(where: { $0.id == content.selectedCueID }) {
             keepVisible(cue.start.seconds)
         }
+        toolTip = switch content.waveform?.source {
+        case .centerChannel: "Waveform: center channel (dialogue)"
+        case .mix: "Waveform: all channels mixed"
+        case nil: nil
+        }
         clampOrigin()
         needsDisplay = true
         invalidateAccessibility()

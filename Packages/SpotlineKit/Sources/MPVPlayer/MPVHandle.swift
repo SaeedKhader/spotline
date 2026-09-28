@@ -24,6 +24,7 @@ enum MPVValue: Sendable {
     case unavailable
     case flag(Bool)
     case double(Double)
+    case integer(Int64)
 }
 
 /// Owns an initialized `mpv_handle`.
@@ -44,6 +45,7 @@ final class MPVHandle: @unchecked Sendable {
         ("duration", MPV_FORMAT_DOUBLE),
         ("container-fps", MPV_FORMAT_DOUBLE),
         ("eof-reached", MPV_FORMAT_FLAG),
+        ("current-tracks/audio/ff-index", MPV_FORMAT_INT64),
     ]
 
     init(options: KeyValuePairs<String, String>, onEvents: @escaping @Sendable ([MPVEvent]) -> Void) throws {
@@ -117,6 +119,7 @@ final class MPVHandle: @unchecked Sendable {
         switch property.format {
         case MPV_FORMAT_FLAG: return .flag(data.load(as: Int32.self) != 0)
         case MPV_FORMAT_DOUBLE: return .double(data.load(as: Double.self))
+        case MPV_FORMAT_INT64: return .integer(data.load(as: Int64.self))
         default: return .unavailable
         }
     }

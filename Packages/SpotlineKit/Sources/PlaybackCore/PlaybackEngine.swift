@@ -13,6 +13,8 @@ public struct PlaybackStatus: Equatable, Sendable {
     public var frameRate: FrameRate?
     /// True while paused on the last frame after playback reached the end.
     public var isAtEnd: Bool
+    /// FFmpeg's index of the audio stream being played, nil when none or unknown.
+    public var audioStreamIndex: Int?
 
     public init(
         mediaURL: URL? = nil,
@@ -20,7 +22,8 @@ public struct PlaybackStatus: Equatable, Sendable {
         position: MediaTime = .zero,
         duration: MediaTime? = nil,
         frameRate: FrameRate? = nil,
-        isAtEnd: Bool = false
+        isAtEnd: Bool = false,
+        audioStreamIndex: Int? = nil
     ) {
         self.mediaURL = mediaURL
         self.isPaused = isPaused
@@ -28,6 +31,7 @@ public struct PlaybackStatus: Equatable, Sendable {
         self.duration = duration
         self.frameRate = frameRate
         self.isAtEnd = isAtEnd
+        self.audioStreamIndex = audioStreamIndex
     }
 
     public var hasMedia: Bool { mediaURL != nil }

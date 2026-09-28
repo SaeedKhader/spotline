@@ -43,9 +43,11 @@ public final class EditorState {
     /// holds what was found before this point, so the timeline fills in as it goes.
     public private(set) var analyzedUntil: MediaTime?
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
+    /// The audio stream the running or finished analysis reads, once known.
+    @ObservationIgnored private var analyzedAudioStream: Int?
     /// Reads waveform and shot changes off the main actor. Tests replace it.
     @ObservationIgnored public var analyzeMedia:
-        @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress) -> Void) async throws -> MediaAnalysis =
+        @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress) -> Void) async throws -> MediaAnalysis =
         EditorState.analyzer(cache: .standard)
 
     /// Timeline zoom in points per second of media.
@@ -453,7 +455,9 @@ public final class EditorState {
         }
         let mediaChanged = status.mediaURL != self.status.mediaURL
         self.status = status
-        if mediaChanged { analyzeCurrentMedia() }
+        // Analyze again when the player switches to another audio track than the waveform shows.
+        let audioTrackChanged = status.audioStreamIndex.map { $0 != analyzedAudioStream } ?? false
+        if mediaChanged || audioTrackChanged { analyzeCurrentMedia() }
     }
 
     // MARK: - Media analysis
@@ -463,17 +467,20 @@ public final class EditorState {
         analysis = nil
         analysisProgress = nil
         analyzedUntil = nil
+        analyzedAudioStream = status.audioStreamIndex
         guard let url = status.mediaURL else { return }
         analysisProgress = 0
         analyzedUntil = .zero
         let analyze = analyzeMedia
+        let audioStream = status.audioStreamIndex
         let report: @Sendable (MediaAnalyzer.Progress) -> Void = { [weak self] progress in
             guard let editor = self else { return }
             Task { @MainActor in editor.analysisDidProgress(progress, for: url) }
         }
         analysisTask = Task { [weak self] in
-            let result = try? await analyze(url, report)
+            let result = try? await analyze(url, audioStream, report)
             guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
+            if let stream = result?.audioStreamIndex { self.analyzedAudioStream = stream }
             self.analysis = result
             self.analysisProgress = nil
             self.analyzedUntil = nil
@@ -487,6 +494,7 @@ public final class EditorState {
         else { return }
         analysisProgress = progress.fraction
         if let partial = progress.partial {
+            if let stream = partial.audioStreamIndex { analyzedAudioStream = stream }
             analysis = partial
             analyzedUntil = progress.analyzedUntil
         }
@@ -495,11 +503,13 @@ public final class EditorState {
     /// Analyzes media off the main actor, reading and filling `cache` when given.
     private nonisolated static func analyzer(
         cache: AnalysisCache?
-    ) -> @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress) -> Void) async throws -> MediaAnalysis {
-        { url, progress in
-            if let cached = cache?.analysis(for: url) { return cached }
-            let task = Task.detached(priority: .utility) {
-                try MediaAnalyzer.analyze(url) { report in
+    ) -> @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress) -> Void) async throws -> MediaAnalysis {
+        { url, audioStream, progress in
+            if let cached = cache?.analysis(for: url, audioStream: audioStream) { return cached }
+            var options = MediaAnalyzer.Options()
+            options.audioStreamIndex = audioStream
+            let task = Task.detached(priority: .utility) { [options] in
+                try MediaAnalyzer.analyze(url, options: options) { report in
                     progress(report)
                     return !Task.isCancelled
                 }
@@ -509,7 +519,7 @@ public final class EditorState {
             } onCancel: {
                 task.cancel()
             }
-            cache?.store(analysis, for: url)
+            cache?.store(analysis, for: url, audioStream: audioStream)
             return analysis
         }
     }

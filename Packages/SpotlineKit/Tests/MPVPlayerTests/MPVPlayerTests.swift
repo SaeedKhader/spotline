@@ -51,6 +51,12 @@ struct MPVPlayerTests {
         #expect(player.status.mediaURL == Self.fixture)
     }
 
+    @Test func reportsTheAudioStreamBeingPlayed() async throws {
+        let player = try await makeLoadedPlayer(Self.fixtures.appending(path: "dialogue-5.1.mp4"))
+        try await waitUntil(player) { $0.audioStreamIndex != nil }
+        #expect(player.status.audioStreamIndex == 1)
+    }
+
     @Test func seeksLandOnTheExactFrame() async throws {
         let player = try await makeLoadedPlayer()
         for target: Int64 in [57, 1, 118, 24] {

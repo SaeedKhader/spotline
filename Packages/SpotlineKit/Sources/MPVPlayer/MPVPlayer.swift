@@ -169,6 +169,10 @@ public final class MPVPlayer: PlaybackEngine {
             status.frameRate = FrameRate(approximately: fps)
         case ("eof-reached", .flag(let atEnd)):
             status.isAtEnd = atEnd
+        case ("current-tracks/audio/ff-index", .integer(let index)):
+            status.audioStreamIndex = Int(index)
+        case ("current-tracks/audio/ff-index", .unavailable):
+            status.audioStreamIndex = nil
         default:
             break
         }

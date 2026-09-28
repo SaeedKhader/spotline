@@ -12,6 +12,9 @@ public enum MediaAnalyzer {
         public var sceneThreshold = 0.3
         /// How often `progress` receives what was found so far.
         public var partialResultInterval: Duration = .milliseconds(250)
+        /// The FFmpeg index of the audio stream to draw, e.g. the one the player
+        /// is playing. Nil, or an index that is not audio, picks the main audio stream.
+        public var audioStreamIndex: Int?
 
         public init() {}
     }
@@ -64,7 +67,11 @@ public enum MediaAnalyzer {
 
         let streams = UnsafeBufferPointer(start: format.pointee.streams, count: Int(format.pointee.nb_streams))
         for stream in streams { stream?.pointee.discard = AVDISCARD_ALL }
-        let audioIndex = av_find_best_stream(format, AVMEDIA_TYPE_AUDIO, -1, -1, nil, 0)
+        let requestedAudio = options.audioStreamIndex.flatMap { index in
+            streams.indices.contains(index) && streams[index]?.pointee.codecpar.pointee.codec_type == AVMEDIA_TYPE_AUDIO
+                ? Int32(index) : nil
+        }
+        let audioIndex = requestedAudio ?? av_find_best_stream(format, AVMEDIA_TYPE_AUDIO, -1, -1, nil, 0)
         let videoIndex = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1, nil, 0)
 
         let audio = audioIndex >= 0 ? try? AudioPeaks(stream: streams[Int(audioIndex)]!, bucketsPerSecond: options.bucketsPerSecond) : nil
@@ -77,8 +84,9 @@ public enum MediaAnalyzer {
 
         func result() -> MediaAnalysis {
             MediaAnalysis(
-                waveform: audio.map { Waveform(bucketsPerSecond: options.bucketsPerSecond, peaks: $0.peaks) },
-                shotChanges: video?.shotChanges ?? []
+                waveform: audio.map { Waveform(bucketsPerSecond: options.bucketsPerSecond, peaks: $0.peaks, source: $0.source) },
+                shotChanges: video?.shotChanges ?? [],
+                audioStreamIndex: audio != nil ? Int(audioIndex) : nil
             )
         }
 
@@ -178,6 +186,9 @@ private final class AudioPeaks {
     /// Where the next sample goes when frames carry no timestamp.
     private var nextSampleTime = 0.0
 
+    /// Which channels the peaks come from.
+    let source: Waveform.Source
+
     init(stream: UnsafeMutablePointer<AVStream>, bucketsPerSecond: Int) throws {
         decoder = try StreamDecoder(stream: stream)
         self.bucketsPerSecond = bucketsPerSecond
@@ -188,7 +199,24 @@ private final class AudioPeaks {
         guard swr_alloc_set_opts2(
             &resampler, &mono, AV_SAMPLE_FMT_FLT, rate,
             &context.pointee.ch_layout, context.pointee.sample_fmt, rate, 0, nil
-        ) >= 0, swr_init(resampler) >= 0 else {
+        ) >= 0 else {
+            throw MediaAnalyzer.Error.cannotOpen("audio resampler failed")
+        }
+        // In surround mixes dialogue lives in the center channel; music and
+        // effects in the others would bury it in a mixdown.
+        let channels = Int(context.pointee.ch_layout.nb_channels)
+        let center = av_channel_layout_index_from_channel(&context.pointee.ch_layout, AV_CHAN_FRONT_CENTER)
+        if channels > 2, center >= 0 {
+            var matrix = [Double](repeating: 0, count: channels)
+            matrix[Int(center)] = 1
+            guard swr_set_matrix(resampler, matrix, Int32(channels)) >= 0 else {
+                throw MediaAnalyzer.Error.cannotOpen("audio channel selection failed")
+            }
+            source = .centerChannel
+        } else {
+            source = .mix
+        }
+        guard swr_init(resampler) >= 0 else {
             throw MediaAnalyzer.Error.cannotOpen("audio resampler failed")
         }
     }

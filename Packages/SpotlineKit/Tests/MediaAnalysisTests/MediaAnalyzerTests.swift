@@ -24,6 +24,30 @@ struct MediaAnalyzerTests {
         #expect((0.03...0.045).contains(waveform.peak(from: 2.5, to: 3.5)))
     }
 
+    /// dialogue-5.1.mp4: loud pink noise ("music") on every channel but the center,
+    /// and a 440 Hz tone ("dialogue") on the center from 1 to 2 s.
+    @Test func surroundWaveformShowsTheDialogueChannel() throws {
+        let analysis = try MediaAnalyzer.analyze(Self.fixtures.appending(path: "dialogue-5.1.mp4"))
+        let waveform = try #require(analysis.waveform)
+        #expect(waveform.source == .centerChannel)
+        #expect(analysis.audioStreamIndex == 1)
+        #expect(waveform.peak(from: 0.2, to: 0.8) < 0.02, "Music must not show")
+        #expect(waveform.peak(from: 1.2, to: 1.8) > 0.4, "Dialogue must show")
+        #expect(waveform.peak(from: 2.5, to: 3.5) < 0.02)
+    }
+
+    @Test func monoAndStereoAreMixed() throws {
+        let analysis = try MediaAnalyzer.analyze(Self.fixtures.appending(path: "cuts-25.mp4"))
+        #expect(analysis.waveform?.source == .mix)
+    }
+
+    @Test func aStreamThatIsNotAudioFallsBackToTheMainAudio() throws {
+        var options = MediaAnalyzer.Options()
+        options.audioStreamIndex = 0  // the video stream
+        let analysis = try MediaAnalyzer.analyze(Self.fixtures.appending(path: "dialogue-5.1.mp4"), options: options)
+        #expect(analysis.audioStreamIndex == 1)
+    }
+
     @Test func steadyFootageHasNoCuts() throws {
         let analysis = try MediaAnalyzer.analyze(Self.fixtures.appending(path: "testsrc-23.976.mp4"))
         #expect(analysis.shotChanges.isEmpty)
@@ -91,6 +115,7 @@ struct AnalysisCacheTests {
         )
         cache.store(analysis, for: media)
         #expect(cache.analysis(for: media) == analysis)
+        #expect(cache.analysis(for: media, audioStream: 2) == nil, "Another audio stream is another entry")
 
         try Data([1, 2, 3, 4]).write(to: media)
         #expect(cache.analysis(for: media) == nil)

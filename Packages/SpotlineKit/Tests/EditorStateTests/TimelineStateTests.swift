@@ -17,7 +17,7 @@ struct TimelineStateTests {
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
         let cuts = [f(40), f(75)]
         let halfway = f(50)
-        editor.analyzeMedia = { _, progress in
+        editor.analyzeMedia = { _, _, progress in
             progress(MediaAnalyzer.Progress(fraction: 0.5, analyzedUntil: halfway, partial: nil))
             return MediaAnalysis(waveform: Waveform(peaks: [10, 20]), shotChanges: cuts)
         }
@@ -42,7 +42,7 @@ struct TimelineStateTests {
         let finish = AsyncStream<Void>.makeStream()
         let first = MediaAnalysis(waveform: Waveform(peaks: [1]), shotChanges: [f(40)])
         let final = MediaAnalysis(waveform: Waveform(peaks: [1, 2, 3]), shotChanges: [f(40), f(75)])
-        editor.analyzeMedia = { _, progress in
+        editor.analyzeMedia = { _, _, progress in
             for await report in reports { progress(report) }
             for await _ in finish.stream { break }
             return final
@@ -65,6 +65,29 @@ struct TimelineStateTests {
         #expect(editor.analysis == final)
         #expect(editor.analyzedUntil == nil)
         #expect(editor.timelineContent.analyzedUntil == nil)
+    }
+
+    @Test func switchingAudioTracksAnalyzesThatTrack() async throws {
+        let engine = SimulatedPlaybackEngine(frameRate: rate)
+        let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: engine)
+        let requests = Requests()
+        editor.analyzeMedia = { _, stream, _ in
+            await requests.append(stream)
+            return MediaAnalysis(waveform: Waveform(peaks: [1]), shotChanges: [], audioStreamIndex: stream ?? 1)
+        }
+        editor.open(URL(fileURLWithPath: "/tmp/tracks.mkv"))
+        for _ in 0..<100 where editor.analysis == nil { await Task.yield() }
+        #expect(editor.analysis?.audioStreamIndex == 1)
+
+        // The player reports the track the analysis already used: nothing to redo.
+        engine.selectAudioStream(1)
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await requests.all == [nil])
+
+        engine.selectAudioStream(2)
+        for _ in 0..<100 where editor.analysis?.audioStreamIndex != 2 { await Task.yield() }
+        #expect(editor.analysis?.audioStreamIndex == 2)
+        #expect(await requests.all == [nil, 2])
     }
 
     @Test func shotChangeNavigation() async throws {
@@ -131,4 +154,9 @@ enum SubtitleFormatWriter {
     static func write(_ cues: [Cue], to url: URL) throws {
         try Data(SubtitleFormats.SubtitleFormat.srt.serialize(cues).utf8).write(to: url)
     }
+}
+
+private actor Requests {
+    private(set) var all: [Int?] = []
+    func append(_ stream: Int?) { all.append(stream) }
 }

@@ -44,6 +44,14 @@ public final class SimulatedPlaybackEngine: PlaybackEngine {
 
     public func videoView() -> NSView? { nil }
 
+    /// Switches audio tracks, as a person can in a real player.
+    public func selectAudioStream(_ index: Int?) {
+        guard status.hasMedia else { return }
+        var next = status
+        next.audioStreamIndex = index
+        update(next)
+    }
+
     private func show(frame: Int64, paused: Bool) {
         let clamped = min(max(frame, 0), frameCount - 1)
         var next = status
