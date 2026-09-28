@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages:
+    name: Package tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: xcodebuild -version && swift --version
+      - name: Test SpotlineKit
+        run: swift test --package-path Packages/SpotlineKit
+
+  app:
+    name: App build and UI tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build and run UI tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Spotline.xcodeproj \
+            -scheme Spotline \
+            -destination 'platform=macOS' \
+            -resultBundlePath build/UITests.xcresult
+      - name: Show app logs
+        if: failure()
+        run: |
+          log show --last 15m --style compact \
+            --predicate 'process == "Spotline" AND NOT subsystem == "com.apple.dt.xctest"' \
+            | tail -n 300
+          ls ~/Library/Logs/DiagnosticReports | grep -i spotline || true
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: UITests.xcresult
+          path: build/UITests.xcresult

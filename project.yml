@@ -1,0 +1,58 @@
+# Generate Spotline.xcodeproj with `xcodegen generate`. The .xcodeproj is not committed.
+name: Spotline
+options:
+  bundleIdPrefix: io.github.saeedkhader
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+packages:
+  SpotlineKit:
+    path: Packages/SpotlineKit
+targets:
+  Spotline:
+    type: application
+    platform: macOS
+    sources: [App]
+    dependencies:
+      - package: SpotlineKit
+        product: EditorUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.saeedkhader.spotline
+        PRODUCT_NAME: Spotline
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Spotline
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.video
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Saeed Khader. GPL-3.0-or-later."
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+  SpotlineUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [AppUITests]
+    dependencies:
+      - target: Spotline
+      - package: SpotlineKit
+        product: SpotlineAccessibility
+      - package: SpotlineKit
+        product: EditorCommands
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.saeedkhader.spotline.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Spotline
+schemes:
+  Spotline:
+    build:
+      targets:
+        Spotline: all
+        SpotlineUITests: [test]
+    test:
+      targets: [SpotlineUITests]
