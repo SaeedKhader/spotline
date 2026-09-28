@@ -32,6 +32,22 @@ public struct MediaTime: Hashable, Comparable, Sendable, Codable, CustomStringCo
         floorDivide(value * Int64(rate.numerator), timescale * Int64(rate.denominator))
     }
 
+    /// The frame whose start is closest to this time at `rate`.
+    ///
+    /// Use this for timestamps read from media: containers round frame times
+    /// (MKV to the millisecond), so a frame's timestamp can land just before
+    /// the exact frame boundary.
+    public func nearestFrame(at rate: FrameRate) -> Int64 {
+        let numerator = Int64(rate.numerator), denominator = Int64(rate.denominator)
+        return floorDivide(2 * value * numerator + timescale * denominator, 2 * timescale * denominator)
+    }
+
+    /// The middle of `frame` at `rate`. Seeking here lands on `frame` even when
+    /// the media's timestamps are rounded.
+    public init(midpointOfFrame frame: Int64, rate: FrameRate) {
+        self.init(value: (2 * frame + 1) * Int64(rate.denominator), timescale: 2 * Int64(rate.numerator))
+    }
+
     /// This time moved back to the start of the frame that contains it.
     public func snapped(to rate: FrameRate) -> MediaTime {
         MediaTime(frame: frame(at: rate), rate: rate)

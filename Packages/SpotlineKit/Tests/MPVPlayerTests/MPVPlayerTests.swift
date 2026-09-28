@@ -1,0 +1,94 @@
+import Foundation
+import PlaybackCore
+import SubtitleCore
+import Testing
+@testable import MPVPlayer
+
+/// Plays the repository's fixture clip through real libmpv, headless.
+@MainActor
+@Suite(.serialized)
+struct MPVPlayerTests {
+    nonisolated static let fixtures = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appending(path: "../../../../Fixtures")
+        .standardizedFileURL
+    /// 119 frames of testsrc2 at 24000/1001 fps, timestamps in 1/24000 s.
+    nonisolated static let fixture = fixtures.appending(path: "testsrc-23.976.mp4")
+    /// The same frames in Matroska, whose timestamps are rounded to the millisecond.
+    nonisolated static let matroskaFixture = fixtures.appending(path: "testsrc-23.976.mkv")
+
+    func makeLoadedPlayer(_ media: URL = fixture) async throws -> MPVPlayer {
+        let player = try MPVPlayer(configuration: .init(showsVideo: false, playsAudio: false, usesHardwareDecoding: false))
+        player.load(media)
+        try await waitUntil(player) { $0.hasMedia && $0.frameRate != nil && $0.duration != nil }
+        return player
+    }
+
+    func waitUntil(
+        _ player: MPVPlayer,
+        timeout: Duration = .seconds(10),
+        _ condition: (PlaybackStatus) -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition(player.status) {
+            guard ContinuousClock.now < deadline else {
+                Issue.record("Timed out; status is \(player.status)")
+                throw CancellationError()
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    func frame(_ player: MPVPlayer) -> Int64 {
+        player.status.position.nearestFrame(at: player.status.frameRate!)
+    }
+
+    @Test func loadsPausedOnTheFirstFrameWithTheExactRate() async throws {
+        let player = try await makeLoadedPlayer()
+        #expect(player.status.frameRate == .fps23_976)
+        #expect(player.status.isPaused)
+        #expect(frame(player) == 0)
+        #expect(player.status.mediaURL == Self.fixture)
+    }
+
+    @Test func seeksLandOnTheExactFrame() async throws {
+        let player = try await makeLoadedPlayer()
+        for target: Int64 in [57, 1, 118, 24] {
+            player.seek(toFrame: target, rate: .fps23_976)
+            try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) == target }
+        }
+    }
+
+    @Test(arguments: [fixture, matroskaFixture])
+    func everyFrameIsReachableBySeeking(media: URL) async throws {
+        let player = try await makeLoadedPlayer(media)
+        for target in Int64(0)..<119 {
+            player.seek(toFrame: target, rate: .fps23_976)
+            try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) == target }
+        }
+    }
+
+    @Test func rapidStepsAddUp() async throws {
+        let player = try await makeLoadedPlayer()
+        for _ in 0..<10 { player.step(by: 1) }
+        try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) == 10 }
+        for _ in 0..<3 { player.step(by: -1) }
+        try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) == 7 }
+        #expect(player.status.isPaused)
+    }
+
+    @Test func seeksPastTheEndStopOnTheLastFrame() async throws {
+        let player = try await makeLoadedPlayer()
+        player.seek(toFrame: 10_000, rate: .fps23_976)
+        try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) >= 118 }
+        #expect(frame(player) <= 119)
+    }
+
+    @Test func playingAdvancesTime() async throws {
+        let player = try await makeLoadedPlayer()
+        player.setPaused(false)
+        try await waitUntil(player) { !$0.isPaused && $0.position.nearestFrame(at: .fps23_976) > 5 }
+        player.setPaused(true)
+        try await waitUntil(player) { $0.isPaused }
+    }
+}

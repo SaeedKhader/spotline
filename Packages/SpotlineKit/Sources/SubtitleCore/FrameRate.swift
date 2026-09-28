@@ -52,4 +52,18 @@ extension FrameRate {
         .fps23_976, .fps24, .fps25, .fps29_97, .fps29_97DropFrame,
         .fps30, .fps50, .fps59_94, .fps59_94DropFrame, .fps60,
     ]
+
+    /// The exact rate for a floating-point rate reported by a container or decoder,
+    /// e.g. 23.976023 becomes 24000/1001. Drop-frame counting is never inferred.
+    /// Rates that match no common rate are kept to the thousandth.
+    public init?(approximately framesPerSecond: Double) {
+        guard framesPerSecond.isFinite, framesPerSecond > 0 else { return nil }
+        if let match = FrameRate.common.first(where: {
+            !$0.isDropFrame && abs($0.framesPerSecond - framesPerSecond) < 0.005
+        }) {
+            self = match
+        } else {
+            self.init(numerator: Int((framesPerSecond * 1000).rounded()), denominator: 1000)
+        }
+    }
 }

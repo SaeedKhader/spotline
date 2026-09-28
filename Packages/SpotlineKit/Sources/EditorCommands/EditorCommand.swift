@@ -10,6 +10,7 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
     public let defaultShortcut: KeyShortcut?
 
     public enum Category: String, Sendable, CaseIterable {
+        case file
         case playback
         case editing
         case navigation
@@ -24,6 +25,10 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
 }
 
 extension EditorCommand {
+    public static let openMedia = EditorCommand(
+        id: "file.openMedia", title: "Open Media…", category: .file,
+        defaultShortcut: KeyShortcut(.character("o"), modifiers: .command)
+    )
     public static let togglePlay = EditorCommand(
         id: "playback.togglePlay", title: "Play/Pause", category: .playback,
         defaultShortcut: KeyShortcut(.space)
@@ -42,7 +47,7 @@ extension EditorCommand {
     )
 
     /// Every command the app knows, in menu order.
-    public static let all: [EditorCommand] = [togglePlay, stepBackward, stepForward, goToStart]
+    public static let all: [EditorCommand] = [openMedia, togglePlay, stepBackward, stepForward, goToStart]
 
     public static func named(_ id: String) -> EditorCommand? {
         all.first { $0.id == id }

@@ -12,20 +12,22 @@ concurrency:
 jobs:
   packages:
     name: Package tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - run: xcodebuild -version && swift --version
+      - name: Install libmpv
+        run: brew install mpv
       - name: Test SpotlineKit
         run: swift test --package-path Packages/SpotlineKit
 
   app:
     name: App build and UI tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install XcodeGen and libmpv
+        run: brew install xcodegen mpv
       - name: Generate project
         run: xcodegen generate
       - name: Build and run UI tests
