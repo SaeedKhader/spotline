@@ -93,15 +93,7 @@ struct TransportBar: View {
             CommandButton(command: .stepForward, systemImage: "forward.frame", editor: editor)
             Spacer()
             AnalysisStatusView(editor: editor)
-            if !editor.audioTracks.isEmpty {
-                AudioTrackPicker(editor: editor)
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .fixedSize()
-                    .help("Audio track")
-                    .accessibilityValue(editor.selectedAudioTrack?.displayName ?? "None")
-                    .accessibilityIdentifier(AccessibilityID.Transport.audioTrack)
-            }
+            TransportAudioTrackPicker(editor: editor)
             Text(editor.timecode.description)
                 .font(.system(.title3, design: .monospaced))
                 .accessibilityLabel("Timecode")
@@ -183,12 +175,30 @@ struct AudioTrackPicker: View {
 
     var body: some View {
         Picker("Audio Track", selection: Binding(
-            get: { editor.status.selectedAudioTrackID },
+            get: { editor.selectedAudioTrackID },
             set: { id in if let id { editor.selectAudioTrack(id: id) } }
         )) {
             ForEach(editor.audioTracks) { track in
                 Text(track.displayName).tag(Optional(track.id))
             }
+        }
+    }
+}
+
+/// The transport bar's track pop-up. Its own view, so it only redraws when
+/// the tracks or the selection change, not with the playhead.
+struct TransportAudioTrackPicker: View {
+    let editor: EditorState
+
+    var body: some View {
+        if !editor.audioTracks.isEmpty {
+            AudioTrackPicker(editor: editor)
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .help("Audio track")
+                .accessibilityValue(editor.selectedAudioTrack?.displayName ?? "None")
+                .accessibilityIdentifier(AccessibilityID.Transport.audioTrack)
         }
     }
 }

@@ -78,12 +78,16 @@ final class TimelineUITests: XCTestCase {
         waitForValue(of: timeline, toEqual: "Waveform: all channels mixed")
         XCTAssertTrue((picker.value as? String)?.contains("Original") == true, "\(picker.value ?? "nil")")
 
-        app.typeKey("a", modifierFlags: [.command, .option])
+        // Pick the second track from the pop-up while the video plays: the
+        // playhead must not redraw (and break) the open menu.
+        button(EditorCommand.togglePlay, in: app).click()
+        picker.click()
+        app.menuItems.matching(NSPredicate(format: "title CONTAINS 'Arabic dub'")).firstMatch.click()
         waitForValue(of: timeline, toEqual: "Waveform: center channel (dialogue)")
         XCTAssertTrue((picker.value as? String)?.contains("Arabic dub") == true, "\(picker.value ?? "nil")")
 
-        picker.click()
-        app.menuItems.matching(NSPredicate(format: "title CONTAINS 'Original'")).firstMatch.click()
+        app.typeKey("a", modifierFlags: [.command, .option])
         waitForValue(of: timeline, toEqual: "Waveform: all channels mixed")
+        XCTAssertTrue((picker.value as? String)?.contains("Original") == true, "\(picker.value ?? "nil")")
     }
 }

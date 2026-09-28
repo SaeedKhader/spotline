@@ -126,6 +126,7 @@ final class TimelineView: NSView {
 
     private func contentDidChange(from old: TimelineContent) {
         guard content != old else { return }
+        let originBefore = originSeconds
         if content.scale != old.scale, let anchor = zoomAnchor {
             originSeconds = anchor.seconds - Double(anchor.x) / scale
             zoomAnchor = nil
@@ -139,14 +140,19 @@ final class TimelineView: NSView {
         if content.selectedCueID != old.selectedCueID, let cue = content.cues.first(where: { $0.id == content.selectedCueID }) {
             keepVisible(cue.start.seconds)
         }
-        toolTip = switch content.waveform?.source {
+        let waveformDescription: String? = switch content.waveform?.source {
         case .centerChannel: "Waveform: center channel (dialogue)"
         case .mix: "Waveform: all channels mixed"
         case nil: nil
         }
+        if toolTip != waveformDescription { toolTip = waveformDescription }
         clampOrigin()
         needsDisplay = true
-        invalidateAccessibility()
+        // While playing, only the playhead moves every frame. Announcing a new
+        // layout that often floods accessibility clients and stalls menus.
+        var playheadOnly = old
+        playheadOnly.playhead = content.playhead
+        invalidateAccessibility(announce: playheadOnly != content || originSeconds != originBefore)
     }
 
     /// Pages the view when `seconds` is off screen, leaving it a tenth of the way in.
@@ -430,9 +436,9 @@ final class TimelineView: NSView {
     /// Elements must outlive the call that returns them, so they are kept until the layout changes.
     private var accessibilityElementsCache: [NSAccessibilityElement]?
 
-    private func invalidateAccessibility() {
+    private func invalidateAccessibility(announce: Bool = true) {
         accessibilityElementsCache = nil
-        NSAccessibility.post(element: self, notification: .layoutChanged)
+        if announce { NSAccessibility.post(element: self, notification: .layoutChanged) }
     }
 
     override func accessibilityChildren() -> [Any]? {

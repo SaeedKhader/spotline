@@ -19,7 +19,16 @@ import SubtitleFormats
 public final class EditorState {
     public let launchOptions: LaunchOptions
     @ObservationIgnored public let playback: any PlaybackEngine
+    /// The engine's latest status. Observers see it change only when something
+    /// other than the position changes; the position, which changes every frame
+    /// during playback, is `position`. Menus and pickers depend on `status`, and
+    /// redrawing them every frame breaks open menus.
     public private(set) var status: PlaybackStatus
+    /// The timestamp of the frame on screen.
+    public private(set) var position: MediaTime
+    /// True on the first frame (and with no media). Kept apart from `position`
+    /// so menus depending on it redraw only when it flips.
+    public private(set) var isAtStart = true
     public var frameRate: FrameRate
     public private(set) var track: SubtitleTrack
     public private(set) var selectedCueID: Cue.ID?
@@ -87,6 +96,7 @@ public final class EditorState {
         self.launchOptions = launchOptions
         self.playback = playback
         self.status = playback.status
+        self.position = playback.status.position
         self.frameRate = frameRate
         self.track = track
         self.undoManager = UndoManager()
@@ -121,7 +131,7 @@ public final class EditorState {
 
     public var hasMedia: Bool { status.hasMedia }
     public var isPlaying: Bool { hasMedia && !status.isPaused }
-    public var currentFrame: Int64 { status.position.nearestFrame(at: frameRate) }
+    public var currentFrame: Int64 { position.nearestFrame(at: frameRate) }
     public var currentTime: MediaTime { MediaTime(frame: currentFrame, rate: frameRate) }
     public var timecode: Timecode { Timecode(frameNumber: max(currentFrame, 0), rate: frameRate) }
 
@@ -152,14 +162,13 @@ public final class EditorState {
             canRedo
         case EditorCommand.deleteCue.id:
             selectedCue != nil
-        case EditorCommand.setIn.id:
-            hasMedia && selectedCue.map { $0.start != currentTime } ?? false
-        case EditorCommand.setOut.id:
-            hasMedia && selectedCue.map { $0.end != currentTime && $0.start < currentTime } ?? false
-        case EditorCommand.previousShotChange.id:
-            hasMedia && shotChangeFrame(before: currentFrame) != nil
-        case EditorCommand.nextShotChange.id:
-            hasMedia && shotChangeFrame(after: currentFrame) != nil
+        // Commands that depend on where the playhead is are enabled whenever they
+        // could apply, and do nothing (returning false) when they would not change
+        // anything, so their menu items do not redraw on every frame.
+        case EditorCommand.setIn.id, EditorCommand.setOut.id:
+            hasMedia && selectedCue != nil
+        case EditorCommand.previousShotChange.id, EditorCommand.nextShotChange.id:
+            hasMedia && !(shotChanges ?? []).isEmpty
         case EditorCommand.zoomIn.id:
             timelineScale < Self.timelineScaleRange.upperBound
         case EditorCommand.zoomOut.id:
@@ -175,7 +184,7 @@ public final class EditorState {
         case EditorCommand.togglePlay.id, EditorCommand.stepForward.id:
             hasMedia
         case EditorCommand.stepBackward.id, EditorCommand.goToStart.id:
-            hasMedia && currentFrame > 0
+            hasMedia && !isAtStart
         default:
             false
         }
@@ -217,13 +226,15 @@ public final class EditorState {
         case EditorCommand.deleteCue.id:
             deleteSelectedCue()
         case EditorCommand.setIn.id:
-            setInAtPlayhead()
+            return setInAtPlayhead()
         case EditorCommand.setOut.id:
-            setOutAtPlayhead()
+            return setOutAtPlayhead()
         case EditorCommand.previousShotChange.id:
-            if let frame = shotChangeFrame(before: currentFrame) { seek(toFrame: frame) }
+            guard let frame = shotChangeFrame(before: currentFrame) else { return false }
+            seek(toFrame: frame)
         case EditorCommand.nextShotChange.id:
-            if let frame = shotChangeFrame(after: currentFrame) { seek(toFrame: frame) }
+            guard let frame = shotChangeFrame(after: currentFrame) else { return false }
+            seek(toFrame: frame)
         case EditorCommand.zoomIn.id:
             setTimelineScale(timelineScale * 1.5)
         case EditorCommand.zoomOut.id:
@@ -236,7 +247,7 @@ public final class EditorState {
             selectNeighbour(offset: 1)
         case EditorCommand.nextAudioTrack.id:
             let tracks = audioTracks
-            let current = tracks.firstIndex { $0.id == status.selectedAudioTrackID } ?? -1
+            let current = tracks.firstIndex { $0.id == selectedAudioTrackID } ?? -1
             selectAudioTrack(id: tracks[(current + 1) % tracks.count].id)
         case EditorCommand.togglePlay.id:
             playback.setPaused(isPlaying)
@@ -306,15 +317,19 @@ public final class EditorState {
 
     // MARK: - Audio tracks
 
-    public var audioTracks: [AudioTrack] { status.audioTracks }
+    /// Copies of the player's track list and selection, kept apart from
+    /// `status` (which changes every frame) so views showing them only redraw
+    /// when they change. A pop-up menu redrawn while open stops working.
+    public private(set) var audioTracks: [AudioTrack] = []
+    public private(set) var selectedAudioTrackID: Int?
 
     public var selectedAudioTrack: AudioTrack? {
-        audioTracks.first { $0.id == status.selectedAudioTrackID }
+        audioTracks.first { $0.id == selectedAudioTrackID }
     }
 
     /// Plays another audio track; the waveform follows once the player reports it.
     public func selectAudioTrack(id: Int) {
-        guard audioTracks.contains(where: { $0.id == id }), id != status.selectedAudioTrackID else { return }
+        guard audioTracks.contains(where: { $0.id == id }), id != selectedAudioTrackID else { return }
         playback.selectAudioTrack(id: id)
     }
 
@@ -406,22 +421,27 @@ public final class EditorState {
 
     /// Moves the selected cue's start to the playhead. When that passes the
     /// cue's end, the cue keeps its duration.
-    private func setInAtPlayhead() {
-        guard let index = selectedCueIndex else { return }
+    private func setInAtPlayhead() -> Bool {
+        guard let index = selectedCueIndex, track.cues[index].start != currentTime else { return false }
         let time = currentTime
         edit("Set In") { track in
             let cue = track.cues[index]
             if time >= cue.end { track.cues[index].end = time + cue.duration }
             track.cues[index].start = time
         }
+        return true
     }
 
-    private func setOutAtPlayhead() {
-        guard let index = selectedCueIndex else { return }
+    /// Moves the selected cue's end to the playhead, which must be after its start.
+    private func setOutAtPlayhead() -> Bool {
+        guard let index = selectedCueIndex else { return false }
+        let cue = track.cues[index]
         let time = currentTime
+        guard cue.start < time, cue.end != time else { return false }
         edit("Set Out") { track in
             track.cues[index].end = time
         }
+        return true
     }
 
     /// Applies one undoable change to the track and keeps cues ordered by start time.
@@ -482,7 +502,14 @@ public final class EditorState {
             frameRate = rate
         }
         let mediaChanged = status.mediaURL != self.status.mediaURL
-        self.status = status
+        var withoutPosition = status
+        withoutPosition.position = self.status.position
+        if withoutPosition != self.status { self.status = status }
+        if status.position != position { position = status.position }
+        let atStart = !status.hasMedia || status.position.nearestFrame(at: frameRate) <= 0
+        if atStart != isAtStart { isAtStart = atStart }
+        if status.audioTracks != audioTracks { audioTracks = status.audioTracks }
+        if status.selectedAudioTrackID != selectedAudioTrackID { selectedAudioTrackID = status.selectedAudioTrackID }
         // Analyze again when the player switches to another audio track than the waveform shows.
         let audioTrackChanged = status.audioStreamIndex.map { $0 != analyzedAudioStream } ?? false
         if mediaChanged {

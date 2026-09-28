@@ -156,12 +156,12 @@ struct TimelineStateTests {
 
     @Test func shotChangeNavigation() async throws {
         let editor = try await makeEditor()
-        #expect(!editor.canPerform(.previousShotChange))
+        #expect(!editor.perform(.previousShotChange))
         #expect(editor.perform(.nextShotChange))
         #expect(editor.currentFrame == 40)
         editor.perform(.nextShotChange)
         #expect(editor.currentFrame == 75)
-        #expect(!editor.canPerform(.nextShotChange))
+        #expect(!editor.perform(.nextShotChange))
         editor.perform(.previousShotChange)
         #expect(editor.currentFrame == 40)
     }
