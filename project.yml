@@ -48,6 +48,8 @@ targets:
         buildPhase: resources
       - path: Fixtures/cuts-25.srt
         buildPhase: resources
+      - path: Fixtures/two-tracks.mkv
+        buildPhase: resources
     dependencies:
       - target: Spotline
       - package: SpotlineKit

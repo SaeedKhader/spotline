@@ -170,6 +170,8 @@ public final class EditorState {
             selectedCueIndex.map { $0 > 0 } ?? !track.cues.isEmpty
         case EditorCommand.nextCue.id:
             selectedCueIndex.map { $0 < track.cues.count - 1 } ?? !track.cues.isEmpty
+        case EditorCommand.nextAudioTrack.id:
+            hasMedia && audioTracks.count > 1
         case EditorCommand.togglePlay.id, EditorCommand.stepForward.id:
             hasMedia
         case EditorCommand.stepBackward.id, EditorCommand.goToStart.id:
@@ -232,6 +234,10 @@ public final class EditorState {
             selectNeighbour(offset: -1)
         case EditorCommand.nextCue.id:
             selectNeighbour(offset: 1)
+        case EditorCommand.nextAudioTrack.id:
+            let tracks = audioTracks
+            let current = tracks.firstIndex { $0.id == status.selectedAudioTrackID } ?? -1
+            selectAudioTrack(id: tracks[(current + 1) % tracks.count].id)
         case EditorCommand.togglePlay.id:
             playback.setPaused(isPlaying)
         case EditorCommand.stepForward.id:
@@ -296,6 +302,20 @@ public final class EditorState {
         let index = selectedCueIndex.map { $0 + offset } ?? (offset > 0 ? 0 : track.cues.count - 1)
         guard track.cues.indices.contains(index) else { return }
         select(track.cues[index].id)
+    }
+
+    // MARK: - Audio tracks
+
+    public var audioTracks: [AudioTrack] { status.audioTracks }
+
+    public var selectedAudioTrack: AudioTrack? {
+        audioTracks.first { $0.id == status.selectedAudioTrackID }
+    }
+
+    /// Plays another audio track; the waveform follows once the player reports it.
+    public func selectAudioTrack(id: Int) {
+        guard audioTracks.contains(where: { $0.id == id }), id != status.selectedAudioTrackID else { return }
+        playback.selectAudioTrack(id: id)
     }
 
     // MARK: - Playhead and timeline

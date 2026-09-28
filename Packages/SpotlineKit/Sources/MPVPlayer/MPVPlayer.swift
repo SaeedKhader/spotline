@@ -110,6 +110,31 @@ public final class MPVPlayer: PlaybackEngine {
         seek(toFrame: current + Int64(frames), rate: rate)
     }
 
+    public func selectAudioTrack(id: Int) {
+        guard status.hasMedia else { return }
+        handle.command(["set", "aid", String(id)])
+    }
+
+    /// Reads the audio tracks and the one playing from mpv.
+    private func readTracks(into status: inout PlaybackStatus) {
+        let count = handle.string("track-list/count").flatMap(Int.init) ?? 0
+        status.audioTracks = (0..<count).compactMap { index in
+            let prefix = "track-list/\(index)/"
+            guard handle.string(prefix + "type") == "audio", let id = handle.string(prefix + "id").flatMap(Int.init) else {
+                return nil
+            }
+            return AudioTrack(
+                id: id,
+                streamIndex: handle.string(prefix + "ff-index").flatMap(Int.init),
+                language: handle.string(prefix + "lang"),
+                title: handle.string(prefix + "title"),
+                channelCount: handle.string(prefix + "demux-channel-count").flatMap(Int.init)
+            )
+        }
+        status.selectedAudioTrackID = handle.string("aid").flatMap(Int.init)
+        status.audioStreamIndex = handle.string("current-tracks/audio/ff-index").flatMap(Int.init)
+    }
+
     public func videoView() -> NSView? {
         guard configuration.showsVideo else { return nil }
         if let view { return view }
@@ -139,6 +164,8 @@ public final class MPVPlayer: PlaybackEngine {
             switch event {
             case .fileLoaded:
                 next = PlaybackStatus(mediaURL: loadingURL, isPaused: next.isPaused)
+                // Track properties can change before this event; read them now.
+                readTracks(into: &next)
             case .fileEnded:
                 next = PlaybackStatus(isPaused: next.isPaused)
                 requestedFrame = nil
@@ -173,6 +200,12 @@ public final class MPVPlayer: PlaybackEngine {
             status.audioStreamIndex = Int(index)
         case ("current-tracks/audio/ff-index", .unavailable):
             status.audioStreamIndex = nil
+        case ("aid", .integer(let id)):
+            status.selectedAudioTrackID = Int(id)
+        case ("aid", .unavailable):
+            status.selectedAudioTrackID = nil
+        case ("track-list/count", _):
+            if status.hasMedia { readTracks(into: &status) }
         default:
             break
         }

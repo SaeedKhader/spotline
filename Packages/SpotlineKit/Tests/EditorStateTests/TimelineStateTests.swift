@@ -122,6 +122,38 @@ struct TimelineStateTests {
         #expect(all.count == 3 && all.last == 2, "Only the waveform ran again: \(all)")
     }
 
+    @Test func audioTrackCommandsCycleAndRedoTheWaveform() async throws {
+        let tracks = [
+            AudioTrack(id: 1, streamIndex: 1, language: "eng", title: "Original", channelCount: 2),
+            AudioTrack(id: 2, streamIndex: 2, language: "ara", title: "Arabic dub", channelCount: 6),
+        ]
+        let editor = EditorState(
+            launchOptions: LaunchOptions(isUITestMode: true),
+            playback: SimulatedPlaybackEngine(frameRate: rate, audioTracks: tracks)
+        )
+        editor.analyzeWaveform = { _, stream, _ in AudioAnalysis(waveform: Waveform(peaks: [1]), audioStreamIndex: stream ?? 1) }
+        editor.analyzeShotChanges = { _, _ in [] }
+        #expect(!editor.canPerform(.nextAudioTrack))
+        editor.open(URL(fileURLWithPath: "/tmp/tracks.mkv"))
+        #expect(editor.selectedAudioTrack?.title == "Original")
+
+        #expect(editor.perform(.nextAudioTrack))
+        #expect(editor.selectedAudioTrack?.title == "Arabic dub")
+        for _ in 0..<100 where editor.audioAnalysis?.audioStreamIndex != 2 { await Task.yield() }
+        #expect(editor.audioAnalysis?.audioStreamIndex == 2)
+
+        editor.perform(.nextAudioTrack)
+        #expect(editor.selectedAudioTrack?.id == 1, "Wraps around")
+        editor.selectAudioTrack(id: 99)
+        #expect(editor.selectedAudioTrack?.id == 1, "Unknown tracks are ignored")
+    }
+
+    @Test func trackNames() {
+        #expect(AudioTrack(id: 3).displayName == "Track 3")
+        #expect(AudioTrack(id: 1, language: "xx-private", title: "Commentary", channelCount: 2).displayName.hasSuffix("Commentary · Stereo"))
+        #expect(AudioTrack(id: 1, channelCount: 8).displayName == "7.1")
+    }
+
     @Test func shotChangeNavigation() async throws {
         let editor = try await makeEditor()
         #expect(!editor.canPerform(.previousShotChange))

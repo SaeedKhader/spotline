@@ -93,6 +93,15 @@ struct TransportBar: View {
             CommandButton(command: .stepForward, systemImage: "forward.frame", editor: editor)
             Spacer()
             AnalysisStatusView(editor: editor)
+            if !editor.audioTracks.isEmpty {
+                AudioTrackPicker(editor: editor)
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
+                    .help("Audio track")
+                    .accessibilityValue(editor.selectedAudioTrack?.displayName ?? "None")
+                    .accessibilityIdentifier(AccessibilityID.Transport.audioTrack)
+            }
             Text(editor.timecode.description)
                 .font(.system(.title3, design: .monospaced))
                 .accessibilityLabel("Timecode")
@@ -165,6 +174,22 @@ struct SubtitleOverlay: View {
             .frame(maxWidth: .infinity)
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// Chooses the audio track to play and draw. Used in the transport bar and the Playback menu.
+struct AudioTrackPicker: View {
+    let editor: EditorState
+
+    var body: some View {
+        Picker("Audio Track", selection: Binding(
+            get: { editor.status.selectedAudioTrackID },
+            set: { id in if let id { editor.selectAudioTrack(id: id) } }
+        )) {
+            ForEach(editor.audioTracks) { track in
+                Text(track.displayName).tag(Optional(track.id))
+            }
+        }
     }
 }
 

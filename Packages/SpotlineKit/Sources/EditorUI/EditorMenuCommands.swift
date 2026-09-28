@@ -28,6 +28,9 @@ public struct EditorMenuCommands: Commands {
         }
         CommandMenu("Playback") {
             buttons(for: .playback)
+            Divider()
+            AudioTrackPicker(editor: editor)
+                .disabled(editor.audioTracks.isEmpty)
         }
     }
 

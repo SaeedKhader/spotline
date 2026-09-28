@@ -46,7 +46,17 @@ final class MPVHandle: @unchecked Sendable {
         ("container-fps", MPV_FORMAT_DOUBLE),
         ("eof-reached", MPV_FORMAT_FLAG),
         ("current-tracks/audio/ff-index", MPV_FORMAT_INT64),
+        ("aid", MPV_FORMAT_INT64),
+        ("track-list/count", MPV_FORMAT_INT64),
     ]
+
+    /// A property's value as a string, nil when unavailable.
+    func string(_ name: String) -> String? {
+        guard let value = mpv_get_property_string(raw, name) else { return nil }
+        defer { mpv_free(value) }
+        return String(cString: value)
+    }
+
 
     init(options: KeyValuePairs<String, String>, onEvents: @escaping @Sendable ([MPVEvent]) -> Void) throws {
         guard let raw = mpv_create() else { throw MPVError(code: MPV_ERROR_NOMEM.rawValue, context: "mpv_create") }

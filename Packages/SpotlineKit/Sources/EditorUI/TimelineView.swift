@@ -424,6 +424,8 @@ final class TimelineView: NSView {
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .group }
     override func accessibilityLabel() -> String? { "Timeline" }
+    /// Which channels the waveform shows, as in the tooltip.
+    override func accessibilityValue() -> Any? { toolTip ?? "" }
 
     /// Elements must outlive the call that returns them, so they are kept until the layout changes.
     private var accessibilityElementsCache: [NSAccessibilityElement]?

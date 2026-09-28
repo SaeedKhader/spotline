@@ -94,6 +94,10 @@ extension EditorCommand {
     public static let toggleSnapping = EditorCommand(
         id: "timeline.toggleSnapping", title: "Snap to Shot Changes and Cues", category: .timeline
     )
+    public static let nextAudioTrack = EditorCommand(
+        id: "playback.nextAudioTrack", title: "Next Audio Track", category: .playback,
+        defaultShortcut: KeyShortcut(.character("a"), modifiers: [.command, .option])
+    )
     public static let togglePlay = EditorCommand(
         id: "playback.togglePlay", title: "Play/Pause", category: .playback,
         defaultShortcut: KeyShortcut(.space)
@@ -118,7 +122,7 @@ extension EditorCommand {
         addCue, deleteCue, setIn, setOut,
         previousCue, nextCue, previousShotChange, nextShotChange,
         zoomIn, zoomOut, toggleSnapping,
-        togglePlay, stepBackward, stepForward, goToStart,
+        togglePlay, stepBackward, stepForward, goToStart, nextAudioTrack,
     ]
 
     public static func named(_ id: String) -> EditorCommand? {

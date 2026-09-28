@@ -68,4 +68,22 @@ final class TimelineUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [moved], timeout: 10), .completed, "In is \(inPoint.value ?? "nil")")
         XCTAssertEqual(app.cueCells(.duration).element(boundBy: 1).value as? String, "0.800")
     }
+
+    /// two-tracks.mkv: an English stereo track (default) and an Arabic 5.1 track.
+    @MainActor
+    func testSwitchingAudioTracksRedrawsTheWaveform() throws {
+        let app = launchApp(media: "two-tracks.mkv")
+        let timeline = app.descendants(matching: .any)[AccessibilityID.Timeline.root]
+        let picker = app.popUpButtons[AccessibilityID.Transport.audioTrack]
+        waitForValue(of: timeline, toEqual: "Waveform: all channels mixed")
+        XCTAssertTrue((picker.value as? String)?.contains("Original") == true, "\(picker.value ?? "nil")")
+
+        app.typeKey("a", modifierFlags: [.command, .option])
+        waitForValue(of: timeline, toEqual: "Waveform: center channel (dialogue)")
+        XCTAssertTrue((picker.value as? String)?.contains("Arabic dub") == true, "\(picker.value ?? "nil")")
+
+        picker.click()
+        app.menuItems.matching(NSPredicate(format: "title CONTAINS 'Original'")).firstMatch.click()
+        waitForValue(of: timeline, toEqual: "Waveform: all channels mixed")
+    }
 }
