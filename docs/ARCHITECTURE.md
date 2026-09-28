@@ -141,6 +141,14 @@ Round-trip tests for every format live in `SubtitleFormats` with golden files.
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### As built in M3 (timeline)
+- `MediaAnalysis` opens the media with FFmpeg's libraries (`CFFmpeg`, Homebrew's ffmpeg that mpv depends on) and runs two background jobs side by side, because audio decodes in seconds while shot detection decodes every video frame (minutes for a feature). The waveform job reduces the audio track mpv is playing (`PlaybackStatus.audioStreamIndex`; switching tracks re-analyzes) to 100 peaks per second, from the center channel alone in 5.1/7.1 mixes (dialogue, as in the M6 audio pipeline) and from a mono mix otherwise; the shot-change job shrinks each video frame to 64×36 RGB and scores it against the previous frame the way FFmpeg's `scene` filter does (threshold 0.3). Results are cached in `~/Library/Caches/<bundle id>/MediaAnalysis`, keyed by path, size and modification date (waveforms also by audio stream, so switching tracks redoes only the waveform), until project packages exist. Results stream in: each job reports what it has found a few times a second, so the timeline fills in from left to right (unread media is striped) and cuts found so far already work for navigation and snapping. `-NoAnalysisCache` (and UI test mode) always analyzes.
+- `TimelineView` is a hand-drawn `NSView` (ruler, waveform normalized to its loudest peak, yellow shot-change lines, cue blocks, red playhead) bridged with `NSViewRepresentable`. Click to seek, click a block to select, drag the body to move, drag an edge to trim; scroll to pan, pinch or ⌘-scroll to zoom.
+- Drags move in whole frames and snap within 8 points to shot changes, the playhead and other cues' edges (exactly, even when those are off-frame times from SRT). The drag previews live and lands as one undoable edit (`EditorState.setTiming`). The math lives in `CueDrag` and is unit tested.
+- Accessibility: the timeline exposes the playhead, each shot change and each cue with its in/out handles as `NSAccessibilityElement`s (IDs in `AccessibilityID.Timeline`); handles support increment/decrement by one frame.
+- New commands: Go to Previous/Next Shot Change (⌥← / ⌥→), Zoom In/Out (⌘= / ⌘-), and the "Snap to Shot Changes and Cues" toggle.
+- Audio tracks: `PlaybackStatus` lists the media's audio tracks (language, title, channels, FFmpeg stream) from mpv's `track-list`; Playback › Audio Track chooses one (`EditorState.selectAudioTrack`), and Next Audio Track (⌥⌘A) cycles. The waveform follows the playing track.
+
 ## 7. Pro workflow features (backlog, roughly in order)
 
 - J/K/L shuttle, frame step, set in/out at playhead, "snap to shot change", nudge by frame, split/merge cues, ripple.

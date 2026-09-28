@@ -1,0 +1,65 @@
+import CryptoKit
+import Foundation
+import SubtitleCore
+
+/// Keeps analyses on disk so a file is only decoded once. Entries are keyed by
+/// the file's path, size and modification date, so an edited file is analyzed
+/// again. Waveforms are also keyed by audio stream, so switching tracks redoes
+/// only the waveform.
+///
+/// Project packages will hold their own copy (docs/ARCHITECTURE.md, section 5);
+/// until Spotline has project files, this cache lives in ~/Library/Caches.
+public struct AnalysisCache: Sendable {
+    /// Bumped whenever the analyzer's output changes, so old entries are ignored.
+    public static let formatVersion = 3
+
+    public let directory: URL
+
+    public init(directory: URL) {
+        self.directory = directory
+    }
+
+    public static var standard: AnalysisCache {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let app = Bundle.main.bundleIdentifier ?? "Spotline"
+        return AnalysisCache(directory: caches.appending(path: app).appending(path: "MediaAnalysis"))
+    }
+
+    /// `audioStream` is the FFmpeg stream index asked for; nil means the main audio stream.
+    public func waveform(for media: URL, audioStream: Int?) -> AudioAnalysis? {
+        load(AudioAnalysis.self, kind: "waveform-\(audioStream.map(String.init) ?? "main")", for: media)
+    }
+
+    public func store(_ analysis: AudioAnalysis, for media: URL, audioStream: Int?) {
+        save(analysis, kind: "waveform-\(audioStream.map(String.init) ?? "main")", for: media)
+    }
+
+    public func shotChanges(for media: URL) -> [MediaTime]? {
+        load([MediaTime].self, kind: "shots", for: media)
+    }
+
+    public func store(shotChanges: [MediaTime], for media: URL) {
+        save(shotChanges, kind: "shots", for: media)
+    }
+
+    private func load<Value: Decodable>(_ type: Value.Type, kind: String, for media: URL) -> Value? {
+        guard let file = entry(kind: kind, for: media), let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(Value.self, from: data)
+    }
+
+    private func save<Value: Encodable>(_ value: Value, kind: String, for media: URL) {
+        guard let file = entry(kind: kind, for: media), let data = try? JSONEncoder().encode(value) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
+    }
+
+    private func entry(kind: String, for media: URL) -> URL? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: media.path),
+              let size = attributes[.size] as? Int,
+              let modified = attributes[.modificationDate] as? Date
+        else { return nil }
+        let key = "\(Self.formatVersion)|\(kind)|\(media.standardizedFileURL.path)|\(size)|\(modified.timeIntervalSince1970)"
+        let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory.appending(path: "\(digest).json")
+    }
+}

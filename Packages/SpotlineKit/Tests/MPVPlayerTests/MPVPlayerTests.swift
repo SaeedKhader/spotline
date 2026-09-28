@@ -51,6 +51,27 @@ struct MPVPlayerTests {
         #expect(player.status.mediaURL == Self.fixture)
     }
 
+    @Test func reportsTheAudioStreamBeingPlayed() async throws {
+        let player = try await makeLoadedPlayer(Self.fixtures.appending(path: "dialogue-5.1.mp4"))
+        try await waitUntil(player) { $0.audioStreamIndex != nil }
+        #expect(player.status.audioStreamIndex == 1)
+    }
+
+    @Test func listsAndSwitchesAudioTracks() async throws {
+        let player = try await makeLoadedPlayer(Self.fixtures.appending(path: "two-tracks.mkv"))
+        try await waitUntil(player) { $0.audioTracks.count == 2 && $0.selectedAudioTrackID != nil }
+        let tracks = player.status.audioTracks
+        #expect(tracks.map(\.language) == ["eng", "ara"])
+        #expect(tracks.map(\.title) == ["Original", "Arabic dub"])
+        #expect(tracks.map(\.channelCount) == [2, 6])
+        #expect(tracks.map(\.streamIndex) == [1, 2])
+        #expect(player.status.selectedAudioTrackID == tracks[0].id)
+        #expect(player.status.audioStreamIndex == 1)
+
+        player.selectAudioTrack(id: tracks[1].id)
+        try await waitUntil(player) { $0.selectedAudioTrackID == tracks[1].id && $0.audioStreamIndex == 2 }
+    }
+
     @Test func seeksLandOnTheExactFrame() async throws {
         let player = try await makeLoadedPlayer()
         for target: Int64 in [57, 1, 118, 24] {

@@ -165,12 +165,14 @@ struct EditingTests {
         step(editor, to: 30)
         #expect(editor.perform(.setIn))
         #expect(editor.selectedCue?.start == frame(30))
-        #expect(!editor.canPerform(.setIn), "Already there")
+        #expect(!editor.perform(.setIn), "Already there")
         step(editor, to: 40)
         #expect(editor.perform(.setOut))
         #expect(editor.selectedCue?.end == frame(40))
         step(editor, to: 20)
-        #expect(!editor.canPerform(.setOut), "Out must follow in")
+        #expect(editor.canPerform(.setOut))
+        #expect(!editor.perform(.setOut), "Out must follow in")
+        #expect(editor.selectedCue?.end == frame(40))
     }
 
     @Test func setInPastTheOutKeepsTheDuration() throws {

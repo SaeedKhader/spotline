@@ -4,6 +4,7 @@ import MPVPlayer
 import Observation
 import PlaybackCore
 import SubtitleCore
+import MediaAnalysis
 import SubtitleFormats
 
 /// The editor's observable state and the single place commands are executed.
@@ -18,7 +19,16 @@ import SubtitleFormats
 public final class EditorState {
     public let launchOptions: LaunchOptions
     @ObservationIgnored public let playback: any PlaybackEngine
+    /// The engine's latest status. Observers see it change only when something
+    /// other than the position changes; the position, which changes every frame
+    /// during playback, is `position`. Menus and pickers depend on `status`, and
+    /// redrawing them every frame breaks open menus.
     public private(set) var status: PlaybackStatus
+    /// The timestamp of the frame on screen.
+    public private(set) var position: MediaTime
+    /// True on the first frame (and with no media). Kept apart from `position`
+    /// so menus depending on it redraw only when it flips.
+    public private(set) var isAtStart = true
     public var frameRate: FrameRate
     public private(set) var track: SubtitleTrack
     public private(set) var selectedCueID: Cue.ID?
@@ -33,6 +43,32 @@ public final class EditorState {
     }
     /// Increments when the text editor should take keyboard focus (after adding a cue).
     public private(set) var textFocusRequest = 0
+
+    /// The open media's waveform, filled in while it is being read.
+    public private(set) var audioAnalysis: AudioAnalysis?
+    /// The open media's shot changes, filled in while they are being found.
+    public private(set) var shotChanges: [MediaTime]?
+    /// The two analysis jobs while they run, nil once done. They run side by
+    /// side: the waveform takes seconds, shot changes take minutes on a feature.
+    public private(set) var waveformJob: AnalysisJob?
+    public private(set) var shotChangesJob: AnalysisJob?
+    @ObservationIgnored private var waveformTask: Task<Void, Never>?
+    @ObservationIgnored private var shotChangesTask: Task<Void, Never>?
+    /// The audio stream the running or finished waveform reads, once known.
+    @ObservationIgnored private var analyzedAudioStream: Int?
+    /// Read a waveform and find shot changes off the main actor. Tests replace them.
+    @ObservationIgnored public var analyzeWaveform:
+        @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress<AudioAnalysis>) -> Void) async throws -> AudioAnalysis =
+        EditorState.waveformAnalyzer(cache: .standard)
+    @ObservationIgnored public var analyzeShotChanges:
+        @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void) async throws -> [MediaTime] =
+        EditorState.shotChangeAnalyzer(cache: .standard)
+
+    /// Timeline zoom in points per second of media.
+    public private(set) var timelineScale: Double = 100
+    public static let timelineScaleRange: ClosedRange<Double> = 0.5...2_000
+    /// Whether timeline drags snap to shot changes, the playhead and other cues' edges.
+    public private(set) var isSnappingEnabled = true
 
     @ObservationIgnored public let undoManager: UndoManager
     public private(set) var canUndo = false
@@ -60,12 +96,17 @@ public final class EditorState {
         self.launchOptions = launchOptions
         self.playback = playback
         self.status = playback.status
+        self.position = playback.status.position
         self.frameRate = frameRate
         self.track = track
         self.undoManager = UndoManager()
         // One undo step per edit, also where no run loop groups events (unit tests).
         undoManager.groupsByEvent = false
         playback.onStatusChange = { [weak self] status in self?.playbackDidChange(status) }
+        if !launchOptions.usesAnalysisCache {
+            analyzeWaveform = Self.waveformAnalyzer(cache: nil)
+            analyzeShotChanges = Self.shotChangeAnalyzer(cache: nil)
+        }
         if let url = launchOptions.mediaURL { open(url) }
         if let url = launchOptions.subtitlesURL {
             importSubtitles(from: url)
@@ -90,7 +131,7 @@ public final class EditorState {
 
     public var hasMedia: Bool { status.hasMedia }
     public var isPlaying: Bool { hasMedia && !status.isPaused }
-    public var currentFrame: Int64 { status.position.nearestFrame(at: frameRate) }
+    public var currentFrame: Int64 { position.nearestFrame(at: frameRate) }
     public var currentTime: MediaTime { MediaTime(frame: currentFrame, rate: frameRate) }
     public var timecode: Timecode { Timecode(frameNumber: max(currentFrame, 0), rate: frameRate) }
 
@@ -121,18 +162,29 @@ public final class EditorState {
             canRedo
         case EditorCommand.deleteCue.id:
             selectedCue != nil
-        case EditorCommand.setIn.id:
-            hasMedia && selectedCue.map { $0.start != currentTime } ?? false
-        case EditorCommand.setOut.id:
-            hasMedia && selectedCue.map { $0.end != currentTime && $0.start < currentTime } ?? false
+        // Commands that depend on where the playhead is are enabled whenever they
+        // could apply, and do nothing (returning false) when they would not change
+        // anything, so their menu items do not redraw on every frame.
+        case EditorCommand.setIn.id, EditorCommand.setOut.id:
+            hasMedia && selectedCue != nil
+        case EditorCommand.previousShotChange.id, EditorCommand.nextShotChange.id:
+            hasMedia && !(shotChanges ?? []).isEmpty
+        case EditorCommand.zoomIn.id:
+            timelineScale < Self.timelineScaleRange.upperBound
+        case EditorCommand.zoomOut.id:
+            timelineScale > Self.timelineScaleRange.lowerBound
+        case EditorCommand.toggleSnapping.id:
+            true
         case EditorCommand.previousCue.id:
             selectedCueIndex.map { $0 > 0 } ?? !track.cues.isEmpty
         case EditorCommand.nextCue.id:
             selectedCueIndex.map { $0 < track.cues.count - 1 } ?? !track.cues.isEmpty
+        case EditorCommand.nextAudioTrack.id:
+            hasMedia && audioTracks.count > 1
         case EditorCommand.togglePlay.id, EditorCommand.stepForward.id:
             hasMedia
         case EditorCommand.stepBackward.id, EditorCommand.goToStart.id:
-            hasMedia && currentFrame > 0
+            hasMedia && !isAtStart
         default:
             false
         }
@@ -143,6 +195,11 @@ public final class EditorState {
     public func isShortcutEnabled(for command: EditorCommand) -> Bool {
         guard canPerform(command) else { return false }
         return !(isEditingText && command.defaultShortcut?.conflictsWithTextEditing == true)
+    }
+
+    /// The on/off state of a toggle command, nil for other commands.
+    public func isOn(_ command: EditorCommand) -> Bool? {
+        command.id == EditorCommand.toggleSnapping.id ? isSnappingEnabled : nil
     }
 
     /// Runs `command`. Returns false when it is unknown or not currently possible.
@@ -169,13 +226,29 @@ public final class EditorState {
         case EditorCommand.deleteCue.id:
             deleteSelectedCue()
         case EditorCommand.setIn.id:
-            setInAtPlayhead()
+            return setInAtPlayhead()
         case EditorCommand.setOut.id:
-            setOutAtPlayhead()
+            return setOutAtPlayhead()
+        case EditorCommand.previousShotChange.id:
+            guard let frame = shotChangeFrame(before: currentFrame) else { return false }
+            seek(toFrame: frame)
+        case EditorCommand.nextShotChange.id:
+            guard let frame = shotChangeFrame(after: currentFrame) else { return false }
+            seek(toFrame: frame)
+        case EditorCommand.zoomIn.id:
+            setTimelineScale(timelineScale * 1.5)
+        case EditorCommand.zoomOut.id:
+            setTimelineScale(timelineScale / 1.5)
+        case EditorCommand.toggleSnapping.id:
+            isSnappingEnabled.toggle()
         case EditorCommand.previousCue.id:
             selectNeighbour(offset: -1)
         case EditorCommand.nextCue.id:
             selectNeighbour(offset: 1)
+        case EditorCommand.nextAudioTrack.id:
+            let tracks = audioTracks
+            let current = tracks.firstIndex { $0.id == selectedAudioTrackID } ?? -1
+            selectAudioTrack(id: tracks[(current + 1) % tracks.count].id)
         case EditorCommand.togglePlay.id:
             playback.setPaused(isPlaying)
         case EditorCommand.stepForward.id:
@@ -242,7 +315,71 @@ public final class EditorState {
         select(track.cues[index].id)
     }
 
+    // MARK: - Audio tracks
+
+    /// Copies of the player's track list and selection, so the Audio Track
+    /// menu only redraws when they change.
+    public private(set) var audioTracks: [AudioTrack] = []
+    public private(set) var selectedAudioTrackID: Int?
+
+    public var selectedAudioTrack: AudioTrack? {
+        audioTracks.first { $0.id == selectedAudioTrackID }
+    }
+
+    /// Plays another audio track; the waveform follows once the player reports it.
+    public func selectAudioTrack(id: Int) {
+        guard audioTracks.contains(where: { $0.id == id }), id != selectedAudioTrackID else { return }
+        playback.selectAudioTrack(id: id)
+    }
+
+    // MARK: - Playhead and timeline
+
+    /// Pauses nothing; shows `frame` at the media's rate.
+    public func seek(toFrame frame: Int64) {
+        guard hasMedia else { return }
+        playback.seek(toFrame: max(frame, 0), rate: frameRate)
+    }
+
+    public func setTimelineScale(_ scale: Double) {
+        timelineScale = min(max(scale, Self.timelineScaleRange.lowerBound), Self.timelineScaleRange.upperBound)
+    }
+
+    /// Shot changes as frame numbers at the current rate.
+    public var shotChangeFrames: [Int64] {
+        (shotChanges ?? []).map { $0.nearestFrame(at: frameRate) }
+    }
+
+    private func shotChangeFrame(before frame: Int64) -> Int64? {
+        shotChangeFrames.last { $0 < frame }
+    }
+
+    private func shotChangeFrame(after frame: Int64) -> Int64? {
+        shotChangeFrames.first { $0 > frame }
+    }
+
+    /// Times a dragged cue edge snaps to: shot changes, the playhead and the
+    /// edges of every other cue.
+    public func snapTargets(excluding cueID: Cue.ID?) -> [MediaTime] {
+        guard isSnappingEnabled else { return [] }
+        var targets = shotChangeFrames.map { MediaTime(frame: $0, rate: frameRate) }
+        if hasMedia { targets.append(currentTime) }
+        for cue in track.cues where cue.id != cueID {
+            targets.append(cue.start)
+            targets.append(cue.end)
+        }
+        return targets
+    }
+
     // MARK: - Editing
+
+    /// Sets a cue's start and end in one undoable step (a timeline drag or nudge).
+    public func setTiming(start: MediaTime, end: MediaTime, forCue id: Cue.ID, actionName: String) {
+        guard start < end, start >= .zero, let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
+        edit(actionName) { track in
+            track.cues[index].start = start
+            track.cues[index].end = end
+        }
+    }
 
     /// Changes the text of a cue. Consecutive changes to the same cue while
     /// typing undo as one step.
@@ -283,22 +420,27 @@ public final class EditorState {
 
     /// Moves the selected cue's start to the playhead. When that passes the
     /// cue's end, the cue keeps its duration.
-    private func setInAtPlayhead() {
-        guard let index = selectedCueIndex else { return }
+    private func setInAtPlayhead() -> Bool {
+        guard let index = selectedCueIndex, track.cues[index].start != currentTime else { return false }
         let time = currentTime
         edit("Set In") { track in
             let cue = track.cues[index]
             if time >= cue.end { track.cues[index].end = time + cue.duration }
             track.cues[index].start = time
         }
+        return true
     }
 
-    private func setOutAtPlayhead() {
-        guard let index = selectedCueIndex else { return }
+    /// Moves the selected cue's end to the playhead, which must be after its start.
+    private func setOutAtPlayhead() -> Bool {
+        guard let index = selectedCueIndex else { return false }
+        let cue = track.cues[index]
         let time = currentTime
+        guard cue.start < time, cue.end != time else { return false }
         edit("Set Out") { track in
             track.cues[index].end = time
         }
+        return true
     }
 
     /// Applies one undoable change to the track and keeps cues ordered by start time.
@@ -358,7 +500,162 @@ public final class EditorState {
         if let rate = status.frameRate, rate != self.status.frameRate {
             frameRate = rate
         }
-        self.status = status
+        let mediaChanged = status.mediaURL != self.status.mediaURL
+        var withoutPosition = status
+        withoutPosition.position = self.status.position
+        if withoutPosition != self.status { self.status = status }
+        if status.position != position { position = status.position }
+        let atStart = !status.hasMedia || status.position.nearestFrame(at: frameRate) <= 0
+        if atStart != isAtStart { isAtStart = atStart }
+        if status.audioTracks != audioTracks { audioTracks = status.audioTracks }
+        if status.selectedAudioTrackID != selectedAudioTrackID { selectedAudioTrackID = status.selectedAudioTrackID }
+        // Analyze again when the player switches to another audio track than the waveform shows.
+        let audioTrackChanged = status.audioStreamIndex.map { $0 != analyzedAudioStream } ?? false
+        if mediaChanged {
+            startWaveformAnalysis()
+            startShotChangeAnalysis()
+        } else if audioTrackChanged {
+            startWaveformAnalysis()
+        }
+    }
+
+    // MARK: - Media analysis
+
+    /// Waveform and shot changes together, nil before either has results.
+    public var analysis: MediaAnalysis? {
+        guard audioAnalysis != nil || shotChanges != nil else { return nil }
+        return MediaAnalysis(
+            waveform: audioAnalysis?.waveform,
+            shotChanges: shotChanges ?? [],
+            audioStreamIndex: audioAnalysis?.audioStreamIndex
+        )
+    }
+
+    /// While analysis runs, how far into the media every running job has read.
+    public var analyzedUntil: MediaTime? {
+        [waveformJob, shotChangesJob].compactMap { $0?.analyzedUntil }.min()
+    }
+
+    private func startWaveformAnalysis() {
+        waveformTask?.cancel()
+        audioAnalysis = nil
+        waveformJob = nil
+        analyzedAudioStream = status.audioStreamIndex
+        guard let url = status.mediaURL else { return }
+        waveformJob = AnalysisJob()
+        let analyze = analyzeWaveform
+        let stream = status.audioStreamIndex
+        let report: @Sendable (MediaAnalyzer.Progress<AudioAnalysis>) -> Void = { [weak self] progress in
+            guard let editor = self else { return }
+            Task { @MainActor in editor.waveformDidProgress(progress, for: url) }
+        }
+        waveformTask = Task { [weak self] in
+            let result = try? await analyze(url, stream, report)
+            guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
+            if let result {
+                self.audioAnalysis = result
+                self.analyzedAudioStream = result.audioStreamIndex
+            }
+            self.waveformJob = nil
+        }
+    }
+
+    private func startShotChangeAnalysis() {
+        shotChangesTask?.cancel()
+        shotChanges = nil
+        shotChangesJob = nil
+        guard let url = status.mediaURL else { return }
+        shotChangesJob = AnalysisJob()
+        let analyze = analyzeShotChanges
+        let report: @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void = { [weak self] progress in
+            guard let editor = self else { return }
+            Task { @MainActor in editor.shotChangesDidProgress(progress, for: url) }
+        }
+        shotChangesTask = Task { [weak self] in
+            let result = try? await analyze(url, report)
+            guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
+            if let result { self.shotChanges = result }
+            self.shotChangesJob = nil
+        }
+    }
+
+    /// Shows partial results. Reports can arrive out of order, so older ones are ignored.
+    private func waveformDidProgress(_ progress: MediaAnalyzer.Progress<AudioAnalysis>, for url: URL) {
+        guard status.mediaURL == url, let job = waveformJob, let next = job.advanced(by: progress) else { return }
+        waveformJob = next
+        if let partial = progress.partial {
+            audioAnalysis = partial
+            analyzedAudioStream = partial.audioStreamIndex
+        }
+    }
+
+    private func shotChangesDidProgress(_ progress: MediaAnalyzer.Progress<[MediaTime]>, for url: URL) {
+        guard status.mediaURL == url, let job = shotChangesJob, let next = job.advanced(by: progress) else { return }
+        shotChangesJob = next
+        if let partial = progress.partial { shotChanges = partial }
+    }
+
+    private nonisolated static func waveformAnalyzer(
+        cache: AnalysisCache?
+    ) -> @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress<AudioAnalysis>) -> Void) async throws -> AudioAnalysis {
+        { url, stream, progress in
+            if let cached = cache?.waveform(for: url, audioStream: stream) { return cached }
+            var options = MediaAnalyzer.Options()
+            options.audioStreamIndex = stream
+            let result = try await runDetached { [options] in
+                try MediaAnalyzer.waveform(of: url, options: options) { report in
+                    progress(report)
+                    return !Task.isCancelled
+                }
+            }
+            cache?.store(result, for: url, audioStream: stream)
+            return result
+        }
+    }
+
+    private nonisolated static func shotChangeAnalyzer(
+        cache: AnalysisCache?
+    ) -> @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void) async throws -> [MediaTime] {
+        { url, progress in
+            if let cached = cache?.shotChanges(for: url) { return cached }
+            let result = try await runDetached {
+                try MediaAnalyzer.shotChanges(in: url) { report in
+                    progress(report)
+                    return !Task.isCancelled
+                }
+            }
+            cache?.store(shotChanges: result, for: url)
+            return result
+        }
+    }
+
+    /// Runs blocking work on a background thread, cancelling it with the caller.
+    private nonisolated static func runDetached<Result: Sendable>(
+        _ work: @escaping @Sendable () throws -> Result
+    ) async throws -> Result {
+        let task = Task.detached(priority: .utility, operation: work)
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+}
+
+/// How far a running analysis job has got.
+public struct AnalysisJob: Equatable, Sendable {
+    /// 0 to 1.
+    public var fraction: Double = 0
+    /// Results cover the media before this time.
+    public var analyzedUntil: MediaTime = .zero
+
+    /// The job after `progress`, or nil when the report is older than what is shown.
+    func advanced<Partial>(by progress: MediaAnalyzer.Progress<Partial>) -> AnalysisJob? {
+        guard progress.analyzedUntil >= analyzedUntil else { return nil }
+        return AnalysisJob(
+            fraction: progress.fraction,
+            analyzedUntil: progress.partial != nil ? progress.analyzedUntil : analyzedUntil
+        )
     }
 }
 

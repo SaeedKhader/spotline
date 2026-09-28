@@ -23,16 +23,28 @@ public struct EditorMenuCommands: Commands {
             Divider()
             buttons(for: .navigation)
         }
+        CommandMenu("Timeline") {
+            buttons(for: .timeline)
+        }
         CommandMenu("Playback") {
             buttons(for: .playback)
+            Divider()
+            AudioTrackPicker(editor: editor)
+                .disabled(editor.audioTracks.isEmpty)
         }
     }
 
     private func buttons(for category: EditorCommand.Category) -> some View {
         ForEach(EditorCommand.all.filter { $0.category == category }) { command in
-            Button(command.title) { editor.perform(command) }
-                .keyboardShortcut(command.defaultShortcut?.keyboardShortcut)
-                .disabled(!editor.isShortcutEnabled(for: command))
+            Group {
+                if let isOn = editor.isOn(command) {
+                    Toggle(command.title, isOn: Binding(get: { isOn }, set: { _ in editor.perform(command) }))
+                } else {
+                    Button(command.title) { editor.perform(command) }
+                }
+            }
+            .keyboardShortcut(command.defaultShortcut?.keyboardShortcut)
+            .disabled(!editor.isShortcutEnabled(for: command))
         }
     }
 }

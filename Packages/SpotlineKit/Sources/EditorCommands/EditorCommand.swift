@@ -17,6 +17,8 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
         /// Creating and changing cues.
         case cue
         case navigation
+        /// Timeline zoom and snapping.
+        case timeline
     }
 
     public init(id: String, title: String, category: Category, defaultShortcut: KeyShortcut? = nil) {
@@ -72,6 +74,30 @@ extension EditorCommand {
         id: "navigation.nextCue", title: "Select Next Cue", category: .navigation,
         defaultShortcut: KeyShortcut(.downArrow, modifiers: .command)
     )
+    public static let previousShotChange = EditorCommand(
+        id: "navigation.previousShotChange", title: "Go to Previous Shot Change", category: .navigation,
+        defaultShortcut: KeyShortcut(.leftArrow, modifiers: .option)
+    )
+    public static let nextShotChange = EditorCommand(
+        id: "navigation.nextShotChange", title: "Go to Next Shot Change", category: .navigation,
+        defaultShortcut: KeyShortcut(.rightArrow, modifiers: .option)
+    )
+    public static let zoomIn = EditorCommand(
+        id: "timeline.zoomIn", title: "Zoom In", category: .timeline,
+        defaultShortcut: KeyShortcut(.character("="), modifiers: .command)
+    )
+    public static let zoomOut = EditorCommand(
+        id: "timeline.zoomOut", title: "Zoom Out", category: .timeline,
+        defaultShortcut: KeyShortcut(.character("-"), modifiers: .command)
+    )
+    /// A toggle: see `EditorState.isOn(_:)`.
+    public static let toggleSnapping = EditorCommand(
+        id: "timeline.toggleSnapping", title: "Snap to Shot Changes and Cues", category: .timeline
+    )
+    public static let nextAudioTrack = EditorCommand(
+        id: "playback.nextAudioTrack", title: "Next Audio Track", category: .playback,
+        defaultShortcut: KeyShortcut(.character("a"), modifiers: [.command, .option])
+    )
     public static let togglePlay = EditorCommand(
         id: "playback.togglePlay", title: "Play/Pause", category: .playback,
         defaultShortcut: KeyShortcut(.space)
@@ -94,8 +120,9 @@ extension EditorCommand {
         openMedia, importSubtitles, exportSubtitles,
         undo, redo,
         addCue, deleteCue, setIn, setOut,
-        previousCue, nextCue,
-        togglePlay, stepBackward, stepForward, goToStart,
+        previousCue, nextCue, previousShotChange, nextShotChange,
+        zoomIn, zoomOut, toggleSnapping,
+        togglePlay, stepBackward, stepForward, goToStart, nextAudioTrack,
     ]
 
     public static func named(_ id: String) -> EditorCommand? {

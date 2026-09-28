@@ -22,7 +22,8 @@ public struct MainWindowView: View {
             VStack(spacing: 0) {
                 TransportBar(editor: editor)
                 Divider()
-                TimelinePlaceholderView()
+                TimelineRepresentable(editor: editor, content: editor.timelineContent)
+                    .frame(height: 110)
                 Divider()
                 CueListView(editor: editor)
             }
@@ -91,6 +92,7 @@ struct TransportBar: View {
             )
             CommandButton(command: .stepForward, systemImage: "forward.frame", editor: editor)
             Spacer()
+            AnalysisStatusView(editor: editor)
             Text(editor.timecode.description)
                 .font(.system(.title3, design: .monospaced))
                 .accessibilityLabel("Timecode")
@@ -136,17 +138,6 @@ struct CommandButton: View {
     }
 }
 
-struct TimelinePlaceholderView: View {
-    var body: some View {
-        Rectangle()
-            .fill(.quaternary)
-            .frame(height: 80)
-            .overlay(Text("Timeline").foregroundStyle(.secondary))
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier(AccessibilityID.Timeline.root)
-    }
-}
-
 /// The cue under the playhead, drawn over the bottom of the video.
 struct SubtitleOverlay: View {
     let cue: Cue
@@ -174,5 +165,67 @@ struct SubtitleOverlay: View {
             .frame(maxWidth: .infinity)
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// Chooses the audio track to play and draw, in the Playback menu.
+struct AudioTrackPicker: View {
+    let editor: EditorState
+
+    var body: some View {
+        Picker("Audio Track", selection: Binding(
+            get: { editor.selectedAudioTrackID },
+            set: { id in if let id { editor.selectAudioTrack(id: id) } }
+        )) {
+            ForEach(editor.audioTracks) { track in
+                Text(track.displayName).tag(Optional(track.id))
+            }
+        }
+    }
+}
+
+/// Media analysis progress, then the number of shot changes found.
+struct AnalysisStatusView: View {
+    let editor: EditorState
+
+    private func percent(_ job: AnalysisJob) -> String {
+        "\(Int((job.fraction * 100).rounded()))%"
+    }
+
+    var body: some View {
+        let found = editor.shotChanges.map { $0.count == 1 ? "1 shot change" : "\($0.count) shot changes" }
+        let text: String? = if let job = editor.waveformJob {
+            "Reading audio \(percent(job))"
+        } else if let job = editor.shotChangesJob {
+            "Finding shot changes \(percent(job))" + (editor.shotChanges.map { " · \($0.count) so far" } ?? "")
+        } else {
+            found
+        }
+        if let text {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .accessibilityLabel("Media analysis")
+                .accessibilityValue(text)
+                .accessibilityIdentifier(AccessibilityID.Transport.analysis)
+        }
+    }
+}
+
+extension EditorState {
+    var timelineContent: TimelineContent {
+        TimelineContent(
+            cues: track.cues,
+            selectedCueID: selectedCueID,
+            playhead: currentTime,
+            hasMedia: hasMedia,
+            duration: status.duration,
+            frameRate: frameRate,
+            shotChanges: shotChangeFrames,
+            waveform: audioAnalysis?.waveform,
+            analyzedUntil: analyzedUntil,
+            scale: timelineScale
+        )
     }
 }

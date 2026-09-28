@@ -4,15 +4,20 @@ import XCTest
 
 extension XCTestCase {
     @MainActor
-    func launchApp(openFixture: Bool = true, openSubtitles: Bool = false) -> XCUIApplication {
+    func launchApp(
+        openFixture: Bool = true,
+        openSubtitles: Bool = false,
+        media: String = "testsrc-23.976.mp4",
+        subtitles: String = "testsrc-23.976.srt"
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["-UITestMode", "-ApplePersistenceIgnoreState", "YES"]
         if openFixture {
-            let fixture = Bundle(for: MainWindowUITests.self).url(forResource: "testsrc-23.976", withExtension: "mp4")
+            let fixture = Bundle(for: MainWindowUITests.self).url(forResource: media, withExtension: nil)
             app.launchArguments += ["-OpenMedia", fixture!.path]
         }
         if openSubtitles {
-            let fixture = Bundle(for: MainWindowUITests.self).url(forResource: "testsrc-23.976", withExtension: "srt")
+            let fixture = Bundle(for: MainWindowUITests.self).url(forResource: subtitles, withExtension: nil)
             app.launchArguments += ["-OpenSubtitles", fixture!.path]
         }
         app.launch()
@@ -60,4 +65,18 @@ extension XCUIApplication {
     }
 
     var timecode: XCUIElement { staticTexts[AccessibilityID.Transport.timecode] }
+
+    /// Timeline cue blocks, in cue order.
+    var timelineCueBlocks: XCUIElementQuery {
+        descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'timeline.cue.' AND NOT identifier ENDSWITH 'Handle'")
+        )
+    }
+
+    /// Timeline cue edges (`.inHandle` or `.outHandle`), in cue order.
+    func timelineHandles(_ suffix: String) -> XCUIElementQuery {
+        descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'timeline.cue.' AND identifier ENDSWITH %@", suffix)
+        )
+    }
 }

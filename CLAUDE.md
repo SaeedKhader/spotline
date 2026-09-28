@@ -4,7 +4,7 @@ Native macOS subtitle editor (SwiftUI + AppKit, libmpv playback). Design and roa
 
 ## Build and test
 
-- Requires `brew install xcodegen mpv`. SpotlineKit links Homebrew's libmpv through pkg-config (`Sources/CMPV`).
+- Requires `brew install xcodegen mpv`. SpotlineKit links Homebrew's libmpv (`Sources/CMPV`) and the FFmpeg libraries mpv depends on (`Sources/CFFmpeg`) through pkg-config.
 - `swift test --package-path Packages/SpotlineKit` runs the unit tests (Swift Testing).
 - `xcodegen generate` creates `Spotline.xcodeproj` from `project.yml`. Never commit the `.xcodeproj`; change `project.yml` instead.
 - UI tests: `xcodebuild test -project Spotline.xcodeproj -scheme Spotline -destination 'platform=macOS'`.
