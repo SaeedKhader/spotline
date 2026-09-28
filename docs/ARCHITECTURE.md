@@ -42,16 +42,18 @@ spotline/
 │  ├─ SubtitleCore            pure Swift, no AppKit, no mpv: MediaTime, FrameRate, Timecode, Cue, Track
 │  ├─ SpotlineAccessibility   accessibility ID catalog shared by app, UI tests and agents
 │  ├─ EditorCommands          every user action as a named command
+│  ├─ PlaybackCore            PlaybackEngine protocol + PlaybackStatus; simulated engine for tests
+│  ├─ CMPV                    libmpv headers and link flags (system library, pkg-config)
+│  ├─ MPVPlayer               libmpv player, CAOpenGLLayer render layer, video NSView
 │  ├─ EditorUI                SwiftUI + AppKit views, EditorState (executes commands)
 │  │  --- added in later milestones ---
 │  ├─ SubtitleFormats         SRT, WebVTT, ASS/SSA, TTML/IMSC1, EBU STL, SCC
 │  ├─ QualityControl          CPS, CPL, line count, durations, gaps, overlaps, shot changes
-│  ├─ MPVPlayer               CMPV module map + Swift wrapper + video NSView
 │  ├─ MediaAnalysis           waveform peaks, shot-change detection (libav*)
 │  ├─ Translation             source/target alignment, glossary, translation memory
 │  ├─ AITools                 transcription, translation, text-transform providers + job runner
 │  └─ AgentBridge             local MCP server exposing EditorCommands to AI agents
-└─ Fixtures/                  short test clips at 23.976 / 25 / 29.97 DF, sample subtitle files
+└─ Fixtures/                  short test clips (M1: 23.976 fps MP4 and MKV), later 25 / 29.97 DF and subtitle files
 ```
 
 Dependency direction: `App → EditorUI → (MPVPlayer, QualityControl, Translation, AITools, MediaAnalysis) → SubtitleFormats → SubtitleCore`. Nothing depends on EditorUI or App. One package with many targets keeps module boundaries while staying simple to open and build; targets can split into separate packages later if needed.
@@ -64,6 +66,12 @@ Dependency direction: `App → EditorUI → (MPVPlayer, QualityControl, Translat
 2. `MPVVideoLayer: CAOpenGLLayer` creates the `mpv_render_context` (`MPV_RENDER_API_TYPE_OPENGL`) and draws in `draw(inCGLContext:…)`. mpv's update callback schedules a redraw; a `CVDisplayLink`/`CADisplayLink` paces it.
 3. `MPVVideoView: NSView` hosts the layer, handles resize/backing scale, and hosts the subtitle overlay.
 4. `VideoPlayerView: NSViewRepresentable` bridges it into SwiftUI. SwiftUI only sees a small `@Observable PlaybackState` (time, frame, duration, paused, rate).
+
+As built in M1:
+- `MPVPlayer` is a `@MainActor` class implementing `PlaybackEngine`; a thread-safe `MPVHandle` owns the `mpv_handle` and drains events on a private queue, delivering them to the main actor in order.
+- The player owns one `MPVVideoView` for its lifetime, because libmpv allows one render context per handle. Loads wait until the layer has created its render context, since mpv drops the video track of files opened without one.
+- Seeks and frame steps are `seek <t> absolute+exact`, aimed a quarter frame before the target frame's start: mpv shows the first frame at or after the target (with a 5 ms tolerance), and MKV rounds timestamps to the millisecond. Rapid steps count from the last requested frame, so ten clicks move exactly ten frames. Tests check every frame of the MP4 and MKV fixtures.
+- Test mode (`-UITestMode`) turns off audio and hardware decoding. `-OpenMedia <path>` opens a file at launch.
 
 Notes and risks:
 - OpenGL is deprecated on macOS but still works on Apple silicon; libmpv has no Metal render API. Fallback if Apple removes GL: embed via `wid` with `vo=gpu-next` + MoltenVK. The wrapper hides which one is used.

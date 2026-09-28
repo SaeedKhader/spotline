@@ -35,3 +35,30 @@ struct MediaTimeTests {
         #expect(FrameRate.fps25.description == "25 fps")
     }
 }
+
+struct MediaTimestampTests {
+    @Test(arguments: FrameRate.common)
+    func millisecondRoundedTimestampsMapToTheirFrame(rate: FrameRate) {
+        for frame in Int64(0)..<5_000 {
+            let exact = MediaTime(frame: frame, rate: rate)
+            let milliseconds = (exact.seconds * 1000).rounded() / 1000
+            #expect(MediaTime(seconds: milliseconds).nearestFrame(at: rate) == frame)
+        }
+    }
+
+    @Test(arguments: FrameRate.common)
+    func frameMidpointsLieInsideTheirFrame(rate: FrameRate) {
+        for frame in Int64(0)..<1_000 {
+            #expect(MediaTime(midpointOfFrame: frame, rate: rate).frame(at: rate) == frame)
+        }
+    }
+
+    @Test func containerRatesMapToExactRates() {
+        #expect(FrameRate(approximately: 23.976023) == .fps23_976)
+        #expect(FrameRate(approximately: 29.97) == .fps29_97)
+        #expect(FrameRate(approximately: 25) == .fps25)
+        #expect(FrameRate(approximately: 12.5) == FrameRate(numerator: 12_500, denominator: 1000))
+        #expect(FrameRate(approximately: 0) == nil)
+        #expect(FrameRate(approximately: .nan) == nil)
+    }
+}

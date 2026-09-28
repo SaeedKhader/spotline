@@ -10,12 +10,19 @@ public struct EditorMenuCommands: Commands {
     }
 
     public var body: some Commands {
+        CommandGroup(after: .newItem) {
+            buttons(for: .file)
+        }
         CommandMenu("Playback") {
-            ForEach(EditorCommand.all.filter { $0.category == .playback }) { command in
-                Button(command.title) { editor.perform(command) }
-                    .keyboardShortcut(command.defaultShortcut?.keyboardShortcut)
-                    .disabled(!editor.canPerform(command))
-            }
+            buttons(for: .playback)
+        }
+    }
+
+    private func buttons(for category: EditorCommand.Category) -> some View {
+        ForEach(EditorCommand.all.filter { $0.category == category }) { command in
+            Button(command.title) { editor.perform(command) }
+                .keyboardShortcut(command.defaultShortcut?.keyboardShortcut)
+                .disabled(!editor.canPerform(command))
         }
     }
 }

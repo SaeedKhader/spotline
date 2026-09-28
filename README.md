@@ -7,13 +7,13 @@ A native macOS subtitle editor for professional movie and TV workflows: timing (
 - Built for automation from day one: stable accessibility IDs, one command layer shared by menus, shortcuts, UI tests and AI agents
 - AI tools (planned): transcription with timestamps, translation, profanity removal and line shortening, always reviewed as a diff before applying
 
-Status: early development (milestone M0, scaffold). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
+Status: early development (milestone M1, playback). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
 ## Requirements
 
 - macOS 15 or later
 - Xcode 16 or later
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) and libmpv: `brew install xcodegen mpv`
 
 ## Build
 
@@ -27,6 +27,8 @@ Run the package unit tests without Xcode's UI:
 ```sh
 swift test --package-path Packages/SpotlineKit
 ```
+
+Open a file with File > Open Media… (Command-O) or by dropping it on the video. `-OpenMedia <path>` opens one at launch.
 
 Run the UI tests:
 
@@ -43,7 +45,10 @@ xcodebuild test -project Spotline.xcodeproj -scheme Spotline -destination 'platf
 | `Packages/SpotlineKit/Sources/SubtitleCore` | Time, frame rates, SMPTE timecode, cues. No UI. |
 | `Packages/SpotlineKit/Sources/EditorCommands` | Every user action as a named command |
 | `Packages/SpotlineKit/Sources/SpotlineAccessibility` | Accessibility identifier catalog |
+| `Packages/SpotlineKit/Sources/PlaybackCore` | The playback engine interface, plus a simulated engine for tests |
+| `Packages/SpotlineKit/Sources/MPVPlayer` | libmpv player, OpenGL render layer and video view |
 | `Packages/SpotlineKit/Sources/EditorUI` | Editor views and state |
+| `Fixtures/` | Short test clips used by the player and UI tests |
 
 ## License
 

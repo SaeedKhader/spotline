@@ -14,7 +14,7 @@ public struct MainWindowView: View {
     public var body: some View {
         VSplitView {
             HSplitView {
-                VideoPlaceholderView()
+                VideoSurfaceView(editor: editor)
                     .frame(minWidth: 480, minHeight: 270)
                 InspectorPlaceholderView()
                     .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
@@ -35,20 +35,44 @@ public struct MainWindowView: View {
     }
 }
 
-struct VideoPlaceholderView: View {
+/// The player's video, or a prompt to open media when nothing is loaded.
+struct VideoSurfaceView: View {
+    let editor: EditorState
+
     var body: some View {
         ZStack {
             Color.black
-            VStack(spacing: 8) {
-                Image(systemName: "film")
-                    .font(.largeTitle)
-                Text("No Media")
+            if let videoView = editor.playback.videoView() {
+                HostedVideoView(view: videoView)
             }
-            .foregroundStyle(.secondary)
+            if !editor.hasMedia {
+                VStack(spacing: 12) {
+                    Image(systemName: "film")
+                        .font(.largeTitle)
+                    Text("No Media")
+                    Button(EditorCommand.openMedia.title) { editor.perform(.openMedia) }
+                        .accessibilityIdentifier(AccessibilityID.command(EditorCommand.openMedia.id))
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first(where: \.isFileURL) else { return false }
+            editor.open(url)
+            return true
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.Video.surface)
     }
+}
+
+/// Shows the engine's video view. The engine owns the view and returns the same
+/// one every time, because libmpv allows one render context per player.
+struct HostedVideoView: NSViewRepresentable {
+    let view: NSView
+
+    func makeNSView(context: Context) -> NSView { view }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 struct InspectorPlaceholderView: View {
@@ -87,6 +111,8 @@ struct TransportBar: View {
                 .accessibilityIdentifier(AccessibilityID.Transport.timecode)
             Text(editor.frameRate.description)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Frame rate")
+                .accessibilityValue(editor.frameRate.description)
                 .accessibilityIdentifier(AccessibilityID.Transport.frameRate)
         }
         .padding(.horizontal)

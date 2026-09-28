@@ -36,7 +36,10 @@ targets:
   SpotlineUITests:
     type: bundle.ui-testing
     platform: macOS
-    sources: [AppUITests]
+    sources:
+      - AppUITests
+      - path: Fixtures/testsrc-23.976.mp4
+        buildPhase: resources
     dependencies:
       - target: Spotline
       - package: SpotlineKit
