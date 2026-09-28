@@ -24,7 +24,7 @@ Confirmed by Saeed (2026-09-28): yes, AI automation, plus AI tools that work on 
 
 | Choice | Decision | Why |
 |---|---|---|
-| Min macOS | 14 (Sonoma) | `@Observable`, modern SwiftUI inspector/table APIs |
+| Min macOS | 15 (Sequoia) | `@Observable`, modern SwiftUI table/inspector APIs, `defaultLaunchBehavior` so the editor window reliably opens at launch |
 | Language | Swift 6, strict concurrency | mpv calls back on arbitrary threads; the compiler should police it |
 | UI | SwiftUI shell, AppKit for video, timeline, big text tables | SwiftUI `Table` struggles with 2,000+ editable rows; `NSTableView` does not |
 | Document model | `NSDocument` subclass (via `ReferenceFileDocument` or plain AppKit) | Free undo manager, autosave, versions, tabs, recent files |
@@ -136,6 +136,17 @@ Round-trip tests for every format live in `SubtitleFormats` with golden files.
 
 ## 7a. AI tools
 
+### Audio preparation pipeline (M6, shared by every AI tool)
+
+1. **Extract dialogue:** in a 5.1 or 7.1 source, take the center channel. Otherwise mix down to mono.
+2. **Resample to 16 kHz mono.** Decode with the FFmpeg libraries libmpv already bundles (libavformat/libswresample), not AVFoundation, which can't read MKV.
+3. **Detect speech (VAD):** split into chunks of about 30 s to a few minutes, cut at pauses. Store each chunk's start time so timestamps map back exactly.
+4. **Cache** the prepared audio in the project so transcription, diarization and gender tagging (section 7b) reuse it.
+5. **Encode for the destination:** on-device (WhisperKit) takes raw 16 kHz PCM. Cloud takes Opus at about 24 to 32 kbps per chunk (roughly 20 to 30 MB for 2 hours), staying under upload caps (about 25 MB on some APIs). Chunks upload in parallel and retry independently.
+6. **Privacy:** on-device by default. Cloud upload is opt-in per project with a warning, since pro content is often under NDA.
+
+### AI features
+
 All AI features share one rule: **AI proposes, the editor disposes.** Every AI job returns a `ProposedChangeSet` (new cues, text edits, timing edits) that the user reviews as a diff in the cue list and accepts per cue or all at once. Accepting applies it as one undoable edit. Nothing AI-generated lands silently.
 
 `AITools` package, provider-agnostic:
@@ -161,6 +172,18 @@ Design notes:
 - **Keys and privacy:** API keys in the Keychain; a per-project setting says whether media or text may leave the machine. Local providers work fully offline.
 - **Same tools for agents:** each AI feature is also an `EditorCommand`, so it appears in menus, Shortcuts and the MCP bridge.
 
+## 7b. Gender and addressee context for translation
+
+Some target languages (Arabic first; also Hebrew, French, Spanish, etc.) change the sentence depending on who speaks and who is addressed: "You are busy" is انت مشغول / انتِ مشغولة / انتما مشغولان / انتم مشغولون / انتن مشغولات. The AI fills this context in automatically and flags what it is unsure of; the user only fixes low-confidence lines. Nobody tags lines by hand.
+
+- **Speakers:** transcription runs voice diarization (Speaker A, B…), and a voice classifier guesses each speaker's gender. Names are optional. Speakers live in a project cast list (`Speaker { id, name?, gender, confidence }`), reusable across episodes.
+- **Per cue:** `speakerID` plus `addressee: Addressee` (`.male`, `.female`, `.dualMale`, `.dualFemale`, `.groupMale`, `.groupFemale`, `.groupMixed`, `.unknown`) with a confidence and a source (inferred / user-confirmed).
+- **Addressee inference:** the Translator reads the whole scene, not one cue: turn-taking (the previous speaker is usually the addressee), names, later "he/she" references, gender marked in the source language, and optionally a video frame sent to a vision model.
+- **Output:** for gendered lines with low confidence, the Translator returns every variant and marks its pick as a guess (`CueTranslation.variants`, `assumption`). The cue list shows a ♂/♀/group chip; one click swaps variants. Still reviewed as a diff (7a).
+- **Propagation:** confirming a speaker's gender updates all their lines. Confirming an addressee suggests the same for neighbouring cues in the scene (shot changes + pauses) and re-translates only those.
+- **Review filter:** "gender guesses" in the QC/issues panel, so the user reviews only flagged lines.
+- Milestone: model fields in M5 (Translation), inference and variants in M6 (AI tools).
+
 ## 8. Testing from day one
 
 - `SubtitleCore`, `SubtitleFormats`, `QualityControl`: Swift Testing unit tests, no app needed, run in seconds.
@@ -178,7 +201,7 @@ Design notes:
 | M3 | Timeline | Waveform, cue blocks draggable, shot changes, snapping |
 | M4 | Pro formats + QC | ASS, TTML/IMSC, QC engine with presets, live issues panel |
 | M5 | Translation | Source/target mode, glossary, translation memory, EBU STL |
-| M6 | AI tools | Transcription with timestamps → segmented cues, AI translation, profanity/cleanup transforms, review-as-diff |
+| M6 | AI tools | Audio preparation pipeline, transcription with timestamps → segmented cues, AI translation, profanity/cleanup transforms, review-as-diff |
 | M7 | Agent bridge | Local MCP server over the command catalog |
 
 ## 10. Decisions so far
@@ -186,3 +209,4 @@ Design notes:
 - Name: Spotline, repo SaeedKhader/spotline.
 - New repository, open source, licensed GPL-3.0 with a stock GPL libmpv (Saeed, 2026-09-28).
 - "UI tools ready" = AI and UI automation ready, plus AI subtitle tools (Saeed, 2026-09-28).
+- Gender/addressee context for Arabic and similar languages: AI infers speaker and addressee, flags low-confidence lines with variants, user only fixes those (Saeed, 2026-09-28). See 7b.

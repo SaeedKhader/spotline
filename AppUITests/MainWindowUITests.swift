@@ -44,15 +44,10 @@ final class MainWindowUITests: XCTestCase {
         app.launchArguments += ["-UITestMode", "-ApplePersistenceIgnoreState", "YES"]
         app.launch()
         app.activate()
-        // On GitHub's macOS runners the app starts with no window (menus only) until
-        // one is requested, so ask for one with New Window rather than depend on it.
-        let window = app.windows.firstMatch
-        if !window.waitForExistence(timeout: 5) {
-            app.typeKey("n", modifierFlags: .command)
-        }
+        // The editor window must appear at launch without being asked for.
         XCTAssertTrue(
-            window.waitForExistence(timeout: 15),
-            "No editor window. Accessibility hierarchy:\n\(app.debugDescription)"
+            app.windows.firstMatch.waitForExistence(timeout: 10),
+            "No editor window at launch. Accessibility hierarchy:\n\(app.debugDescription)"
         )
         return app
     }

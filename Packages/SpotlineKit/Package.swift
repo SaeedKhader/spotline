@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SpotlineKit",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "SubtitleCore", targets: ["SubtitleCore"]),
         .library(name: "SpotlineAccessibility", targets: ["SpotlineAccessibility"]),

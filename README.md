@@ -11,7 +11,7 @@ Status: early development (milestone M0, scaffold). See [docs/ARCHITECTURE.md](d
 
 ## Requirements
 
-- macOS 14 or later
+- macOS 15 or later
 - Xcode 16 or later
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
 
