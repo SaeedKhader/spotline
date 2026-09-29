@@ -37,6 +37,16 @@ final class ProjectUITests: XCTestCase {
         return launchApp(openFixture: false, prepared: app)
     }
 
+    /// Launches without waiting for the editor window, which a prompt comes before.
+    @MainActor
+    private func launchExpectingPrompt(project: URL) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += ["-UITestMode", "-ApplePersistenceIgnoreState", "YES", "-OpenProject", project.path]
+        app.launch()
+        app.activate()
+        return app
+    }
+
     @MainActor
     func testReopenedProjectShowsItsCuesAndVideo() throws {
         let fixture = try XCTUnwrap(Bundle(for: ProjectUITests.self).url(forResource: "testsrc-23.976.mp4", withExtension: nil))
@@ -46,14 +56,15 @@ final class ProjectUITests: XCTestCase {
         XCTAssertEqual(texts.count, 2)
         XCTAssertEqual(texts.element(boundBy: 0).value as? String, "Saved in the project")
         waitForValue(of: app.staticTexts[AccessibilityID.Transport.frameRate], toEqual: "23.976 fps")
-        XCTAssertTrue(app.windows.matching(NSPredicate(format: "title == 'Pilot'")).firstMatch.exists, "The window is named after the project")
+        // "Pilot", or "Pilot.spotline" where the Finder shows every extension.
+        XCTAssertTrue(app.windows.matching(NSPredicate(format: "title BEGINSWITH 'Pilot'")).firstMatch.exists, "The window is named after the project")
     }
 
     @MainActor
     func testProjectWithAMissingVideoStillOpensItsCues() throws {
-        let app = launch(project: try writeProject(named: "Moved", mediaPath: "/Volumes/Gone/Moved.mov"))
+        let app = launchExpectingPrompt(project: try writeProject(named: "Moved", mediaPath: "/Volumes/Gone/Moved.mov"))
         // Spotline asks where the video went; the cues open either way.
-        let withoutVideo = app.buttons["Open Without Video"]
+        let withoutVideo = app.buttons["Open Without Video"].firstMatch
         XCTAssertTrue(withoutVideo.waitForExistence(timeout: 10), "No prompt to locate the video")
         withoutVideo.click()
         let texts = app.cueCells(.text)

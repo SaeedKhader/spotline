@@ -108,12 +108,17 @@ public final class EditorWorkspace: ProjectActions {
     }
 
     public func openProject(at url: URL) {
-        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { [weak self] document, _, error in
+        let completion: (NSDocument?, Bool, (any Error)?) -> Void = { [weak self] document, _, error in
             MainActor.assumeIsolated {
                 if let document = document as? SpotlineDocument { self?.activeEditor = document.editor }
                 if let error, (error as NSError).code != NSUserCancelledError { NSApp.presentError(error) }
                 self?.refreshRecentProjects()
             }
+        }
+        if let controller = NSDocumentController.shared as? ProjectDocumentController {
+            controller.openProject(at: url, completionHandler: completion)
+        } else {
+            NSDocumentController.shared.openDocument(withContentsOf: url, display: true, completionHandler: completion)
         }
     }
 

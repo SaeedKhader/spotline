@@ -166,19 +166,26 @@ public final class ProjectDocumentController: NSDocumentController {
         withContentsOf url: URL, display displayDocument: Bool,
         completionHandler: @escaping (NSDocument?, Bool, (any Error)?) -> Void
     ) {
+        let isLaunchFile = MainActor.assumeIsolated {
+            let options = EditorWorkspace.shared.launchOptions
+            return [options.mediaURL, options.subtitlesURL, options.sourceSubtitlesURL, options.projectURL]
+                .contains { $0?.standardizedFileURL == url.standardizedFileURL }
+        }
+        // Launch flag values that are not files ("-ApplePersistenceIgnoreState YES") arrive too.
+        guard !isLaunchFile, FileManager.default.fileExists(atPath: url.path) else {
+            completionHandler(nil, false, nil)
+            return
+        }
         guard url.pathExtension != ProjectFile.fileExtension else {
             super.openDocument(withContentsOf: url, display: displayDocument, completionHandler: completionHandler)
             return
         }
-        MainActor.assumeIsolated {
-            let workspace = EditorWorkspace.shared
-            let options = workspace.launchOptions
-            let launchFiles = [options.mediaURL, options.subtitlesURL, options.sourceSubtitlesURL].compactMap { $0?.standardizedFileURL }
-            // Launch flag values that are not files ("-ApplePersistenceIgnoreState YES") arrive too.
-            if !launchFiles.contains(url.standardizedFileURL), FileManager.default.fileExists(atPath: url.path) {
-                workspace.openMediaInNewProject(url)
-            }
-        }
+        MainActor.assumeIsolated { EditorWorkspace.shared.openMediaInNewProject(url) }
         completionHandler(nil, false, nil)
+    }
+
+    /// Opens a project Spotline itself asked for (Open Recent, the launch project), without the skipping above.
+    func openProject(at url: URL, completionHandler: @escaping (NSDocument?, Bool, (any Error)?) -> Void) {
+        super.openDocument(withContentsOf: url, display: true, completionHandler: completionHandler)
     }
 }
