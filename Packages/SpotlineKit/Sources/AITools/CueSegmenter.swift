@@ -25,8 +25,15 @@ public struct CueSegmenter: Sendable {
     public var shotChanges: [Int64]
     /// A pause this long always starts a new cue.
     public var pauseSeconds = 0.8
+    /// A sentence shorter than this never ends a cue (see `endsCue`).
+    public var sentenceCharacters = 8
     /// How long a cue stays up after its last word, room permitting.
     public var lingerSeconds = 0.5
+    /// A gap shorter than this to the next cue closes to the preset's minimum
+    /// gap (chaining), so cues do not flash off and on between lines.
+    public var chainSeconds = 0.5
+    /// How far after the first word a cue may start to land on a shot change.
+    public var maxLateStartSeconds = 0.15
 
     public init(preset: QCPreset, frameRate: FrameRate, shotChanges: [Int64] = []) {
         self.preset = preset
@@ -60,7 +67,7 @@ public struct CueSegmenter: Sendable {
                 let text = Self.join(current.map(\.text) + [word.text])
                 let pause = (word.start - last.end).seconds
                 let tooLong = text.count > maxCharacters || (word.end - first.start).seconds > maxDuration
-                let sentenceEnded = Self.endsSentence(last.text) && Self.join(current.map(\.text)).count >= maxLineLength / 2
+                let sentenceEnded = Self.endsSentence(last.text) && endsCue(current, before: word)
                 // Two lines of text never fit one line's layout when a line would overflow.
                 let unbreakable = Self.layout(current.map(\.text) + [word.text], maxLineLength: maxLineLength)
                     .split(separator: "\n").contains { $0.count > maxLineLength }
@@ -73,6 +80,18 @@ public struct CueSegmenter: Sendable {
         }
         if !current.isEmpty { groups.append(current) }
         return groups
+    }
+
+    /// Whether a finished sentence makes a cue of its own: a long one always,
+    /// a short one when it can be read in the time until the next word (so
+    /// splitting does not make cues too fast or too short).
+    func endsCue(_ words: [TranscribedWord], before next: TranscribedWord) -> Bool {
+        let characters = Self.join(words.map(\.text)).count
+        if characters >= maxLineLength / 2 { return true }
+        guard characters >= sentenceCharacters else { return false }
+        let seconds = (next.start - words[0].start).seconds - Double(preset.minimumGapFrames) / frameRate.framesPerSecond
+        let speed = preset.maxCharactersPerSecond ?? .infinity
+        return seconds >= minDuration && Double(characters) / seconds <= speed
     }
 
     /// Word lists are joined with spaces, except before punctuation.
@@ -111,29 +130,40 @@ public struct CueSegmenter: Sendable {
         return score
     }
 
-    /// Ends cues a little after their last word, stretches short ones to the
-    /// minimum duration, keeps the minimum gap and snaps to nearby shot changes.
+    /// Ends cues a little after their last word, or long enough to be read at
+    /// the preset's reading speed, stretches short ones to the minimum
+    /// duration, closes short gaps (chaining), keeps the minimum gap and snaps
+    /// to nearby shot changes.
     func time(_ cues: inout [(start: Int64, end: Int64, text: String)]) {
+        let rate = frameRate.framesPerSecond
         let gap = preset.minimumGapFrames
-        let linger = Int64((lingerSeconds * frameRate.framesPerSecond).rounded())
-        let minimum = Int64((minDuration * frameRate.framesPerSecond).rounded(.up))
-        let maximum = Int64((maxDuration * frameRate.framesPerSecond).rounded(.down))
+        let linger = Int64((lingerSeconds * rate).rounded())
+        let chain = Int64((chainSeconds * rate).rounded())
+        let minimum = Int64((minDuration * rate).rounded(.up))
+        let maximum = Int64((maxDuration * rate).rounded(.down))
         let snap = preset.shotChangeFrames ?? 0
+        let lateStart = Int64((maxLateStartSeconds * rate).rounded())
         for index in cues.indices {
             var start = cues[index].start
             var end = max(cues[index].end, start + 1) + linger
             let previousEnd = index > 0 ? cues[index - 1].end : Int64.min
             let nextStart = index + 1 < cues.count ? cues[index + 1].start : Int64.max
-            if snap > 0 {
-                if let shot = shotChanges.first(where: { abs($0 - start) < snap && $0 >= previousEnd + gap }), shot < end {
-                    start = shot
-                }
-                if let shot = shotChanges.first(where: { $0 > start && abs($0 - end) < snap }) {
-                    end = max(shot - gap, start + 1)
-                }
+            // A cue may start early on a shot change, but only a little late: text after the voice reads as lag.
+            if snap > 0, let shot = shotChanges.first(where: { $0 - start < lateStart && start - $0 < snap && $0 >= previousEnd + gap }),
+               shot < end {
+                start = shot
             }
             end = max(end, start + minimum)
+            if let speed = preset.maxCharactersPerSecond, speed > 0 {
+                let characters = cues[index].text.filter { !$0.isNewline }.count
+                end = max(end, start + Int64((Double(characters) / speed * rate).rounded(.up)))
+            }
+            if nextStart != Int64.max, nextStart - gap - end < chain { end = max(end, nextStart - gap) }
             end = min(end, start + maximum, nextStart - gap)
+            // Last, the end moves onto a nearby shot change (the minimum gap before it).
+            if snap > 0, let shot = shotChanges.first(where: { $0 - gap > start && abs($0 - gap - end) < snap }) {
+                end = min(shot - gap, nextStart - gap)
+            }
             end = max(end, start + 1)
             cues[index].start = start
             cues[index].end = end
