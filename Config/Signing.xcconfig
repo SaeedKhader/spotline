@@ -1,0 +1,10 @@
+// Code signing for every target. CI and fresh clones sign ad hoc ("-").
+// Ad hoc signatures change on every build, so the Keychain forgets "Always Allow"
+// for the API keys. Run scripts/setup-local-signing.sh once to sign local builds
+// with your Apple Development certificate instead; it writes Config/Local.xcconfig,
+// which is not committed.
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"
