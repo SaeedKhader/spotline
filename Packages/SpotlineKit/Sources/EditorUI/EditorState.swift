@@ -154,6 +154,31 @@ public final class EditorState {
         @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void) async throws -> [MediaTime] =
         EditorState.shotChangeAnalyzer(cache: .standard)
 
+    /// The text subtitle tracks muxed into the open media, once read. Image-based
+    /// tracks (PGS, VobSub) are left out: they cannot be imported.
+    public private(set) var embeddedSubtitles: [EmbeddedSubtitleTrack] = []
+    /// Whether the sheet offering to import one of `embeddedSubtitles` is shown.
+    public private(set) var isEmbeddedSubtitlesSheetShown = false
+    /// How far reading the chosen embedded track has got, nil when not reading.
+    public private(set) var embeddedSubtitlesJob: AnalysisJob?
+    @ObservationIgnored private var embeddedSubtitlesTask: Task<Void, Never>?
+    /// Lists and reads the media's subtitle tracks off the main actor. Tests replace them.
+    @ObservationIgnored public var listEmbeddedSubtitles: @Sendable (URL) async throws -> [EmbeddedSubtitleTrack] = { url in
+        try await EditorState.runDetached { try MediaAnalyzer.subtitleTracks(in: url) }
+    }
+    @ObservationIgnored public var readEmbeddedSubtitles:
+        @Sendable (URL, Int, @escaping @Sendable (MediaAnalyzer.Progress<Int>) -> Void) async throws -> SubtitleTrack =
+        { url, streamIndex, progress in
+            try await EditorState.runDetached {
+                try MediaAnalyzer.subtitles(in: url, streamIndex: streamIndex) { report in
+                    progress(report)
+                    return !Task.isCancelled
+                }
+            }
+        }
+    /// The media files whose embedded subtitles were offered, so the offer shows once per file.
+    static let offeredEmbeddedSubtitlesKey = "OfferedEmbeddedSubtitles"
+
     /// The timeline's visible span in seconds, as it last reported it (view geometry).
     public private(set) var timelineViewport: ClosedRange<Double> = 0...0
     /// Asks the timeline to show a time; the mini-map sets it.
@@ -282,6 +307,8 @@ public final class EditorState {
         case EditorCommand.openMedia.id, EditorCommand.importSubtitles.id, EditorCommand.exportSubtitles.id,
              EditorCommand.addCue.id:
             true
+        case EditorCommand.importEmbeddedSubtitles.id:
+            hasMedia && !embeddedSubtitles.isEmpty
         case EditorCommand.undo.id:
             canUndo
         case EditorCommand.redo.id:
@@ -364,6 +391,8 @@ public final class EditorState {
             if let url = chooseMedia() { open(url) }
         case EditorCommand.importSubtitles.id:
             if let url = chooseSubtitlesToImport() { importSubtitles(from: url) }
+        case EditorCommand.importEmbeddedSubtitles.id:
+            isEmbeddedSubtitlesSheetShown = true
         case EditorCommand.exportSubtitles.id:
             if let destination = chooseExportDestination(subtitleFile ?? suggestedTranslationFile) { exportSubtitles(to: destination) }
         case EditorCommand.undo.id:
@@ -472,19 +501,24 @@ public final class EditorState {
     public func importSubtitles(from url: URL) {
         do {
             let (format, imported) = try SubtitleFile.read(from: url)
-            let source = sourceTrack
-            edit("Import Subtitles") { track in
-                track.cues = source.map { Alignment.link(imported.cues, to: $0.cues) } ?? imported.cues
-                track.styles = imported.styles
-                track.properties = imported.properties
-                track.languageCode = imported.languageCode
-            }
-            selectedCueID = nil
+            replaceTrack(with: imported)
             subtitleFile = SubtitleFileReference(url: url, format: format)
             hasUnsavedChanges = false
         } catch {
             reportError("“\(url.lastPathComponent)” could not be imported.", error)
         }
+    }
+
+    /// Replaces the working track with an imported one, linking its cues to the source's in translation mode.
+    private func replaceTrack(with imported: SubtitleTrack) {
+        let source = sourceTrack
+        edit("Import Subtitles") { track in
+            track.cues = source.map { Alignment.link(imported.cues, to: $0.cues) } ?? imported.cues
+            track.styles = imported.styles
+            track.properties = imported.properties
+            track.languageCode = imported.languageCode
+        }
+        selectedCueID = nil
     }
 
     public func exportSubtitles(to destination: SubtitleFileReference) {
@@ -933,11 +967,87 @@ public final class EditorState {
         // Analyze again when the player switches to another audio track than the waveform shows.
         let audioTrackChanged = status.audioStreamIndex.map { $0 != analyzedAudioStream } ?? false
         if mediaChanged {
+            findEmbeddedSubtitles()
             startWaveformAnalysis()
             startShotChangeAnalysis()
         } else if audioTrackChanged {
             startWaveformAnalysis()
         }
+    }
+
+    // MARK: - Embedded subtitles
+
+    /// Lists the new media's text subtitle tracks, and offers them the first time a file opens.
+    private func findEmbeddedSubtitles() {
+        embeddedSubtitlesTask?.cancel()
+        embeddedSubtitles = []
+        embeddedSubtitlesJob = nil
+        isEmbeddedSubtitlesSheetShown = false
+        guard let url = status.mediaURL else { return }
+        let list = listEmbeddedSubtitles
+        embeddedSubtitlesTask = Task { [weak self] in
+            let tracks = ((try? await list(url)) ?? []).filter(\.isText)
+            guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
+            self.embeddedSubtitles = tracks
+            if !tracks.isEmpty, self.markEmbeddedSubtitlesOffered(for: url) { self.isEmbeddedSubtitlesSheetShown = true }
+        }
+    }
+
+    /// Records that the file's subtitles were offered. False when they had been already.
+    private func markEmbeddedSubtitlesOffered(for url: URL) -> Bool {
+        guard let settings else { return true }
+        var offered = settings.stringArray(forKey: Self.offeredEmbeddedSubtitlesKey) ?? []
+        guard !offered.contains(url.path) else { return false }
+        offered.append(url.path)
+        settings.set(Array(offered.suffix(500)), forKey: Self.offeredEmbeddedSubtitlesKey)
+        return true
+    }
+
+    /// Replaces the cues with an embedded track's (undoable), then closes the
+    /// sheet. With `savesCopy`, asks where to save them as a file next.
+    public func importEmbeddedSubtitles(streamIndex: Int, savesCopy: Bool) {
+        guard let url = status.mediaURL, embeddedSubtitlesJob == nil,
+              let embedded = embeddedSubtitles.first(where: { $0.streamIndex == streamIndex }), embedded.isText
+        else { return }
+        embeddedSubtitlesJob = AnalysisJob()
+        let read = readEmbeddedSubtitles
+        let report: @Sendable (MediaAnalyzer.Progress<Int>) -> Void = { [weak self] progress in
+            guard let editor = self else { return }
+            Task { @MainActor in
+                guard editor.status.mediaURL == url, let next = editor.embeddedSubtitlesJob?.advanced(by: progress) else { return }
+                editor.embeddedSubtitlesJob = next
+            }
+        }
+        embeddedSubtitlesTask = Task { [weak self] in
+            let result: Result<SubtitleTrack, any Error>
+            do { result = .success(try await read(url, streamIndex, report)) } catch { result = .failure(error) }
+            guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
+            self.embeddedSubtitlesJob = nil
+            switch result {
+            case .success(let imported):
+                self.isEmbeddedSubtitlesSheetShown = false
+                self.replaceTrack(with: imported)
+                self.subtitleFile = nil
+                self.hasUnsavedChanges = true
+                if savesCopy, let format = embedded.fileFormat {
+                    let language = imported.languageCode == "und" ? "" : ".\(imported.languageCode)"
+                    let name = url.deletingPathExtension().lastPathComponent + language + "." + format.fileExtension
+                    let suggestion = SubtitleFileReference(url: url.deletingLastPathComponent().appending(path: name), format: format)
+                    if let destination = self.chooseExportDestination(suggestion) { self.exportSubtitles(to: destination) }
+                }
+            case .failure(let error):
+                self.reportError("“\(embedded.displayName)” could not be imported.", error)
+            }
+        }
+    }
+
+    /// Closes the embedded subtitles sheet, stopping a running import.
+    public func dismissEmbeddedSubtitles() {
+        if embeddedSubtitlesJob != nil {
+            embeddedSubtitlesTask?.cancel()
+            embeddedSubtitlesJob = nil
+        }
+        isEmbeddedSubtitlesSheetShown = false
     }
 
     // MARK: - Media analysis

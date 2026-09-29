@@ -36,6 +36,12 @@ public struct MainWindowView: View {
             .frame(minHeight: 170, idealHeight: 220)
         }
         .frame(minWidth: 960, minHeight: 600)
+        .sheet(isPresented: Binding(
+            get: { editor.isEmbeddedSubtitlesSheetShown },
+            set: { if !$0 { editor.dismissEmbeddedSubtitles() } }
+        )) {
+            EmbeddedSubtitlesSheet(editor: editor)
+        }
         .transaction { transaction in
             if editor.launchOptions.isUITestMode { transaction.disablesAnimations = true }
         }

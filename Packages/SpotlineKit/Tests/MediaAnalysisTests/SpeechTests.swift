@@ -38,8 +38,19 @@ struct SpeechDetectionTests {
     func findsTheSpokenPart() throws {
         let url = try Self.makeSpeechFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        let regions = try MediaAnalyzer.speech(in: url)
-        let region = try #require(regions.first)
+        // The system classifier on CI runners now and then hears nothing in a
+        // run (or fails); a few tries tell that apart from a detector that never works.
+        var regions: [SpeechRegion] = []
+        var attempts: [String] = []
+        for _ in 0..<3 where regions.isEmpty {
+            do {
+                regions = try MediaAnalyzer.speech(in: url)
+                if regions.isEmpty { attempts.append("no speech") }
+            } catch {
+                attempts.append(String(describing: error))
+            }
+        }
+        let region = try #require(regions.first, "Tries: \(attempts)")
         #expect(regions.count == 1, "\(regions)")
         #expect((1.2...2.6).contains(region.start.seconds), "\(region)")
         #expect((7.4...9.2).contains(region.end.seconds), "\(region)")

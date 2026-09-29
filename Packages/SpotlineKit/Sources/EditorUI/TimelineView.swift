@@ -104,11 +104,41 @@ final class TimelineView: NSView {
         NSRect(x: 0, y: Self.rulerHeight, width: bounds.width, height: max(bounds.height - Self.rulerHeight, 0))
     }
 
-    private func blockRect(start: MediaTime, end: MediaTime) -> NSRect {
+    /// A cue's block. A top cue and a bottom cue on screen together share the
+    /// block's height, the top one above, so neither hides the other.
+    private func blockRect(for cue: Cue, start: MediaTime, end: MediaTime) -> NSRect {
         let lane = laneRect
-        let top = lane.minY + lane.height * 0.45
+        var top = lane.minY + lane.height * 0.45
+        var bottom = lane.maxY - 4
+        if stackedCueIDs.contains(cue.id) {
+            let middle = (top + bottom) / 2
+            if cue.position == .top { bottom = middle - 1 } else { top = middle + 1 }
+        }
         let left = x(for: start)
-        return NSRect(x: left, y: top, width: max(x(for: end) - left, 2), height: lane.maxY - top - 4)
+        return NSRect(x: left, y: top, width: max(x(for: end) - left, 2), height: bottom - top)
+    }
+
+    private func blockRect(for cue: Cue) -> NSRect {
+        let (start, end) = timing(of: cue)
+        return blockRect(for: cue, start: start, end: end)
+    }
+
+    /// Cues that overlap a cue in the other position (a sign over dialogue).
+    private var stackedCueIDs: Set<Cue.ID> = []
+
+    static func stackedCueIDs(in cues: [Cue]) -> Set<Cue.ID> {
+        let sorted = cues.sorted { $0.start < $1.start }
+        var stacked: Set<Cue.ID> = []
+        for (index, cue) in sorted.enumerated() {
+            for other in sorted[(index + 1)...] {
+                guard other.start < cue.end else { break }
+                if other.position != cue.position, cue.start < other.end {
+                    stacked.insert(cue.id)
+                    stacked.insert(other.id)
+                }
+            }
+        }
+        return stacked
     }
 
     private var visibleSeconds: Double { Double(bounds.width) / scale }
@@ -132,6 +162,7 @@ final class TimelineView: NSView {
 
     private func contentDidChange(from old: TimelineContent) {
         guard content != old else { return }
+        if content.cues != old.cues { stackedCueIDs = Self.stackedCueIDs(in: content.cues) }
         let originBefore = originSeconds
         if content.scale != old.scale, let anchor = zoomAnchor {
             originSeconds = anchor.seconds - Double(anchor.x) / scale
@@ -312,8 +343,7 @@ final class TimelineView: NSView {
             .foregroundColor: NSColor.labelColor,
         ]
         for cue in content.cues {
-            let (start, end) = timing(of: cue)
-            let rect = blockRect(start: start, end: end)
+            let rect = blockRect(for: cue)
             guard rect.maxX >= 0, rect.minX <= bounds.width else { continue }
             let isSelected = cue.id == content.selectedCueID
             let color = isSelected ? NSColor.controlAccentColor : NSColor.systemTeal
@@ -360,7 +390,7 @@ final class TimelineView: NSView {
     private func hit(at point: NSPoint) -> (cue: Cue, part: CueDrag.Part)? {
         let ordered = content.cues.sorted { a, _ in a.id == content.selectedCueID }
         for cue in ordered {
-            let rect = blockRect(start: cue.start, end: cue.end)
+            let rect = blockRect(for: cue, start: cue.start, end: cue.end)
             let grab = rect.insetBy(dx: -Self.edgeGrabWidth / 2, dy: 0)
             guard grab.contains(point) else { continue }
             let edge = min(Self.edgeGrabWidth, rect.width / 3)
@@ -513,7 +543,7 @@ final class TimelineView: NSView {
             ))
         }
         for cue in content.cues {
-            let rect = blockRect(start: cue.start, end: cue.end)
+            let rect = blockRect(for: cue, start: cue.start, end: cue.end)
             guard rect.maxX >= 0, rect.minX <= bounds.width else { continue }
             let id = cue.id
             let element = TimelineElement(
