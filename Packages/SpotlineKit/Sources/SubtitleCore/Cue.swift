@@ -19,6 +19,8 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     /// Set when AI translation found the line could be translated more than one
     /// way: every variant, the one in use and why (docs/ARCHITECTURE.md, 7b).
     public var flag: TranslationFlag?
+    /// Words the transcriber was unsure of, for checking; cleared when the text is edited.
+    public var unsureWords: [String]?
     /// True while the text is as an AI tool wrote it (transcription, translation);
     /// cleared when the user edits it. The cue list tints these.
     public var isAIGenerated: Bool?
@@ -26,7 +28,7 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     public init(
         id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom,
         style: String? = nil, speaker: String? = nil, sourceCueID: UUID? = nil, voices: [String]? = nil,
-        flag: TranslationFlag? = nil
+        flag: TranslationFlag? = nil, unsureWords: [String]? = nil
     ) {
         self.id = id
         self.start = start
@@ -38,6 +40,7 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
         self.sourceCueID = sourceCueID
         self.voices = voices
         self.flag = flag
+        self.unsureWords = unsureWords
     }
 
     public var duration: MediaTime { end - start }

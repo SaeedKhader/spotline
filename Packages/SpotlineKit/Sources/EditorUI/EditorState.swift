@@ -285,6 +285,9 @@ public final class EditorState {
     /// Asks whether to export unsaved subtitles before new media replaces them. Tests replace it.
     @ObservationIgnored public var confirmReplacingSubtitles: @MainActor () -> ReplaceSubtitlesChoice =
         EditorPanels.confirmReplacingSubtitles
+    /// Asks whether to translate while cues still have words the transcription was unsure of. Tests replace it.
+    @ObservationIgnored public var confirmTranslatingUnsureCues: @MainActor (_ count: Int) -> UnsureTranscriptChoice =
+        EditorPanels.confirmTranslatingUnsureCues(count:)
     /// Shows a failed import or export to the user. Tests replace it.
     @ObservationIgnored public var reportError: @MainActor (_ title: String, _ error: any Error) -> Void = EditorPanels.showError
 
@@ -887,6 +890,7 @@ public final class EditorState {
             track.cues[index].text = text
             // Edited by hand: no longer the AI's text, and the choice between its variants is made.
             track.cues[index].isAIGenerated = nil
+            track.cues[index].unsureWords = nil
             if track.cues[index].flag?.isResolved == false { track.cues[index].flag?.isResolved = true }
         }
         textEditCueID = id
@@ -958,16 +962,23 @@ public final class EditorState {
         first.text = firstText
         // Variants are whole lines; they no longer fit either half.
         first.flag = nil
+        first.unsureWords = Self.words(cue.unsureWords, in: firstText)
         // Both halves still translate the same source cue and share its speaker.
         let second = Cue(
             start: at, end: cue.end, text: secondText, position: cue.position, style: cue.style, speaker: cue.speaker,
-            sourceCueID: cue.sourceCueID, voices: cue.voices
+            sourceCueID: cue.sourceCueID, voices: cue.voices, unsureWords: Self.words(cue.unsureWords, in: secondText)
         )
         edit("Split Cue") { track in
             track.cues[index] = first
             track.cues.insert(second, at: index + 1)
         }
         return true
+    }
+
+    /// The ones of `words` that `text` still has, nil when none.
+    static func words(_ words: [String]?, in text: String) -> [String]? {
+        let kept = (words ?? []).filter { text.localizedCaseInsensitiveContains($0) }
+        return kept.isEmpty ? nil : kept
     }
 
     static func splitText(_ text: String) -> (String, String) {
@@ -997,6 +1008,8 @@ public final class EditorState {
             merged.end = max(merged.end, next.end)
             merged.text = [merged.text, next.text].filter { !$0.isEmpty }.joined(separator: "\n")
             merged.flag = nil
+            let unsure = (merged.unsureWords ?? []) + (next.unsureWords ?? [])
+            merged.unsureWords = unsure.isEmpty ? nil : unsure
             let voices = (merged.voices ?? []) + (next.voices ?? []).filter { !(merged.voices ?? []).contains($0) }
             merged.voices = voices.isEmpty ? nil : voices
             track.cues[index] = merged
@@ -1487,6 +1500,14 @@ public struct AnalysisJob: Equatable, Sendable {
 }
 
 /// What to do with unsaved subtitles when new media replaces them.
+/// What to do when translating while the transcription has words to check.
+public enum UnsureTranscriptChoice: Sendable {
+    /// Show the cues to check first.
+    case review
+    case translateAnyway
+    case cancel
+}
+
 public enum ReplaceSubtitlesChoice: Sendable {
     case export
     case discard

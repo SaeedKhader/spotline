@@ -3,6 +3,7 @@ import EditorCommands
 import Foundation
 import MediaAnalysis
 import PlaybackCore
+import QualityControl
 import SubtitleCore
 import Testing
 @testable import EditorUI
@@ -210,6 +211,46 @@ struct AIStateTests {
         #expect(editor.track.cues.map(\.text) == ["[ar] Hello.", ""])
         #expect(reported == ["1 line was not translated."])
         #expect(editor.issues[editor.track.cues[1].id]?.contains { $0.kind == .notTranslated } == true)
+    }
+
+    @Test func unsureWordsNeedReviewUntilTheTextIsEdited() {
+        var line = cue("I'm Ser Duncan.", at: 0)
+        line.unsureWords = ["Duncan"]
+        let editor = makeEditor(cues: [line, cue("Hi.", at: 2)])
+        #expect(editor.issues[line.id]?.contains { $0.kind == .unsureWords(["Duncan"]) } == true)
+        #expect(editor.issues[line.id]?.contains { $0.message == "Check the transcription: “Duncan”" } == true)
+        editor.select(line.id)
+        #expect(editor.splitCue(line.id, at: nil))
+        #expect(editor.track.cues[0].unsureWords == nil && editor.track.cues[1].unsureWords == ["Duncan"], "The half with the word keeps it")
+        editor.setText("Ser Dunk.", forCue: editor.track.cues[1].id)
+        #expect(editor.track.cues[1].unsureWords == nil)
+        #expect(editor.issues[editor.track.cues[1].id]?.contains { if case .unsureWords = $0.kind { true } else { false } } != true)
+    }
+
+    @Test func translatingWarnsAboutWordsToCheck() async {
+        var unsure = cue("I'm Ser Duncan.", at: 1)
+        unsure.unsureWords = ["Duncan"]
+        let editor = makeEditor(cues: [cue("Hello.", at: 0), unsure])
+        var asked: [Int] = []
+        editor.confirmTranslatingUnsureCues = { count in
+            asked.append(count)
+            return .review
+        }
+        // Review: nothing is translated; the issues show, on the cue to check.
+        #expect(editor.perform(.translateWithAI))
+        #expect(asked == [1])
+        #expect(!editor.isTranslating && editor.aiTask == nil)
+        #expect(editor.isIssuesPanelShown)
+        #expect(editor.selectedCueID == unsure.id)
+        editor.confirmTranslatingUnsureCues = { _ in .cancel }
+        #expect(!editor.perform(.translateWithAI))
+        #expect(!editor.isTranslating)
+        // Translate anyway.
+        editor.confirmTranslatingUnsureCues = { _ in .translateAnyway }
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.track.cues.map(\.text) == ["[ar] Hello.", "[ar] I'm Ser Duncan."])
+        #expect(editor.issues[editor.track.cues[1].id]?.contains { $0.message == "Check the source transcription: “Duncan”" } == true)
     }
 
     @Test func transcribedCuesCanBeTranslatedDirectly() async throws {

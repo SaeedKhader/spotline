@@ -172,20 +172,40 @@ public struct ElevenLabsTranscriber: Transcriber {
         var form = MultipartForm(boundary: boundary)
         form.add(name: "model_id", value: Self.model)
         form.add(name: "timestamps_granularity", value: "word")
-        form.add(name: "tag_audio_events", value: "false")
+        // Sounds such as (laughter) and (music), for hearing-impaired subtitles.
+        form.add(name: "tag_audio_events", value: "true")
         // Who says each word, so a cue two people speak in becomes a dialogue cue.
         form.add(name: "diarize", value: "true")
         if let language { form.add(name: "language_code", value: Languages.base(language)) }
         form.add(name: "file", filename: "dialogue.ogg", contentType: "audio/ogg", data: encoded)
-        var request = URLRequest(url: endpoint, timeoutInterval: 1800)
+        var request = URLRequest(url: Self.withoutLogging(endpoint), timeoutInterval: 1800)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = form.finish()
-        let words = try Self.words(from: await http.send(request))
+        let data: Data
+        do {
+            data = try await http.send(request)
+        } catch AIError.provider(let message) where Self.isRetentionRefusal(message) {
+            // Only enterprise accounts may turn logging off; others transcribe as usual.
+            request.url = endpoint
+            data = try await http.send(request)
+        }
+        let words = try Self.words(from: data)
         found(words)
         progress(1)
         return words
+    }
+
+    /// The endpoint asking ElevenLabs to keep no copy of the audio or transcript (zero retention).
+    static func withoutLogging(_ endpoint: URL) -> URL {
+        endpoint.appending(queryItems: [URLQueryItem(name: "enable_logging", value: "false")])
+    }
+
+    /// True for ElevenLabs' refusal of zero retention, which only enterprise accounts may use.
+    static func isRetentionRefusal(_ message: String) -> Bool {
+        let lowered = message.lowercased()
+        return ["retention", "enable_logging", "logging", "enterprise"].contains { lowered.contains($0) }
     }
 
     /// The chunks on one timeline from zero, with silence where there was no speech.
@@ -208,9 +228,10 @@ public struct ElevenLabsTranscriber: Transcriber {
             var start: Double?
             var end: Double?
             var speakerID: String?
+            var logprob: Double?
 
             enum CodingKeys: String, CodingKey {
-                case text, type, start, end
+                case text, type, start, end, logprob
                 case speakerID = "speaker_id"
             }
         }
@@ -218,14 +239,19 @@ public struct ElevenLabsTranscriber: Transcriber {
         var words: [Word]
     }
 
-    /// Words only (not spacing or sound events), with the punctuation Scribe attaches to them.
+    /// Words and sound events ("(laughter)"), not spacing, with the punctuation Scribe
+    /// attaches to them and how sure it was of each (its log probability, as 0 to 1).
     static func words(from data: Data) throws -> [TranscribedWord] {
         try JSONDecoder().decode(Response.self, from: data).words.compactMap { word in
-            let text = word.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard word.type == "word", !text.isEmpty, let start = word.start else { return nil }
+            var text = word.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard word.type == "word" || word.type == "audio_event", !text.isEmpty, let start = word.start else { return nil }
+            if word.type == "audio_event", !text.hasPrefix("(") { text = "(\(text))" }
             let begin = MediaTime(value: Int64((start * 1000).rounded()), timescale: 1000)
             let end = MediaTime(value: Int64(((word.end ?? start) * 1000).rounded()), timescale: 1000)
-            return TranscribedWord(text: text, start: begin, end: max(end, begin), speaker: word.speakerID)
+            return TranscribedWord(
+                text: text, start: begin, end: max(end, begin), speaker: word.speakerID,
+                confidence: word.type == "word" ? word.logprob.map { min(max(exp($0), 0), 1) } : nil
+            )
         }
         .sorted { $0.start < $1.start }
     }
@@ -448,7 +474,8 @@ public struct ClaudeTranslator: CueTranslator {
                 spoken to, and first-person agreement for the speaker's gender. Work out who speaks and who is spoken to \
                 from the scene: who spoke just before, names and forms of address, later "he"/"she" references, plural or dual \
                 address, and the known people listed with the lines. Voice labels come from automatic speaker detection and are \
-                only a hint: one person is sometimes split over several labels, and two people sometimes share one.
+                only a hint: one person is sometimes split over several labels, and two people sometimes share one. Work out \
+                who is who from names and context, not from the labels alone.
                 - Flag every line whose \(target) wording depends on something the source leaves open: the listener's gender \
                 or number ("listener"), gendered verbs, adjectives or pronouns about someone ("genderedWords"), or who says it \
                 ("speaker"). Put the reasons in "reasons"; leave it empty for a line that reads one way only.
@@ -460,7 +487,8 @@ public struct ClaudeTranslator: CueTranslator {
                 empty for lines that are not flagged.
                 - People marked "confirmed" are facts the translator's user settled: never contradict them.
                 - In "cast", list the people you can identify in these lines and the context: their name as the dialogue uses \
-                it, their gender when the dialogue makes it clear, and the voice labels that are mostly theirs.
+                it, their gender when the dialogue makes it clear, and every voice label that is mostly theirs (one person \
+                often has several).
                 """
         }
         return prompt

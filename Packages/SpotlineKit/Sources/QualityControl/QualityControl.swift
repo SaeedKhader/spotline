@@ -22,6 +22,8 @@ public struct QCIssue: Hashable, Sendable {
         case notTranslated
         /// In translation mode: the source uses a glossary term, the target not its agreed translation.
         case glossaryTermNotUsed(source: String, target: String)
+        /// The transcriber was unsure of these words: check them against the audio.
+        case unsureWords([String])
     }
 
     public enum Severity: Int, Comparable, Sendable {
@@ -115,6 +117,9 @@ public enum QualityControl {
                     let offset = end - shot
                     add(.endNearShotChange(frames: offset), "Ends \(frames(abs(offset))) \(offset > 0 ? "after" : "before") a shot change")
                 }
+            }
+            if let words = cue.unsureWords, !words.isEmpty {
+                add(.unsureWords(words), "Check the transcription: \(words.map { "“\($0)”" }.joined(separator: ", "))")
             }
             if !issues.isEmpty { result[cue.id] = issues }
         }

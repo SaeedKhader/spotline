@@ -97,6 +97,20 @@ extension EditorState {
         switch command.id {
         case EditorCommand.transcribe.id: transcribe()
         case EditorCommand.translateWithAI.id:
+            // Words the transcription was unsure of would be translated wrong too: offer to check them first.
+            let unsure = cuesWithUnsureSource
+            if let first = unsure.first {
+                switch confirmTranslatingUnsureCues(unsure.count) {
+                case .review:
+                    if !isIssuesPanelShown { perform(.toggleIssuesPanel) }
+                    select(first.id)
+                    return true
+                case .cancel:
+                    return false
+                case .translateAnyway:
+                    break
+                }
+            }
             if !isTranslating { useCuesAsSource() }
             translateUntranslatedCues()
         case EditorCommand.reviewChoices.id: toggleChoiceReview()
@@ -371,6 +385,12 @@ extension EditorState {
             if let speaker = word.speaker, voices.last != speaker, !voices.contains(speaker) { voices.append(speaker) }
         }
         return voices.isEmpty ? nil : voices
+    }
+
+    /// The cues about to be translated whose source has words the transcription was unsure of.
+    var cuesWithUnsureSource: [Cue] {
+        guard isTranslating else { return track.cues.filter { $0.unsureWords?.isEmpty == false } }
+        return untranslatedCues.filter { sourceCues[$0.id]?.unsureWords?.isEmpty == false }
     }
 
     /// Target cues with no text whose source has some.

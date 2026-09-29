@@ -223,6 +223,10 @@ extension EditorState {
             default: throw AgentToolError("There are no cues for \(command.title).")
             }
         }
+        // Agents never see dialogs: they translate as asked.
+        let confirmUnsure = confirmTranslatingUnsureCues
+        confirmTranslatingUnsureCues = { _ in .translateAnyway }
+        defer { confirmTranslatingUnsureCues = confirmUnsure }
         if tool == .translate, let targetLanguage {
             if !isTranslating { useCuesAsSource() }
             setTargetLanguage(targetLanguage)
