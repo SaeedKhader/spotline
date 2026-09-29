@@ -75,6 +75,20 @@ enum EditorPanels {
         glossaryPanel?.makeKeyAndOrderFront(nil)
     }
 
+    static func confirmReplacingSubtitles() -> ReplaceSubtitlesChoice {
+        let alert = NSAlert()
+        alert.messageText = "Export your subtitle changes before opening new media?"
+        alert.informativeText = "The subtitles belong to the current media and are cleared when new media opens. Changes that aren't exported will be lost."
+        alert.addButton(withTitle: "Export…")
+        alert.addButton(withTitle: "Don't Export")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .export
+        case .alertSecondButtonReturn: return .discard
+        default: return .cancel
+        }
+    }
+
     static func showError(_ title: String, _ error: any Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning

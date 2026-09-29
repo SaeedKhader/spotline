@@ -52,9 +52,18 @@ public final class MPVPlayer: PlaybackEngine {
                 "hr-seek": "yes",
                 "hr-seek-framedrop": "no",
                 // Spotline draws the cues being edited itself. mpv never shows
-                // subtitles: not the file's own tracks, nor files next to it.
+                // subtitles: not the file's own tracks (including closed
+                // captions), not files next to it, and not as a second track.
+                // With the subtitle renderer hidden too, selecting a track
+                // (by mpv's defaults or a file's forced flag) still draws nothing.
                 "sid": "no",
+                "secondary-sid": "no",
                 "sub-auto": "no",
+                "sub-visibility": "no",
+                "secondary-sub-visibility": "no",
+                // No on-screen messages or bars either: the picture shows only the media.
+                "osd-level": "0",
+                "osd-bar": "no",
                 "keep-open": "always",
                 "idle": "yes",
                 "pause": "yes",
