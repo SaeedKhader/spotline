@@ -39,6 +39,10 @@ public struct AIProviderFactory {
                     guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                     guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
                     return OpenAITranscriber(apiKey: key)
+                case .elevenLabsScribe:
+                    guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
+                    guard let key = keys.key(for: .elevenLabs) else { throw AIError.missingAPIKey(provider: "ElevenLabs") }
+                    return ElevenLabsTranscriber(apiKey: key)
                 }
             },
             translator: { settings in
@@ -317,10 +321,12 @@ extension EditorState {
         }
         let stream = status.audioStreamIndex
         let language = transcriptionLanguage
-        let segmenter = CueSegmenter(preset: qcPreset, frameRate: frameRate, shotChanges: shotChangeFrames)
+        let pipeline = TranscriptionPipeline(
+            preset: qcPreset, frameRate: frameRate, shotChanges: shotChangeFrames, wordStartLead: transcriber.wordStartLead
+        )
         let existing = track.cues
         let prepare = prepareAudio
-        let accumulator = TranscriptAccumulator(segmenter: segmenter)
+        let accumulator = TranscriptAccumulator(pipeline: pipeline)
         startAITask("Transcription") { progress, propose in
             let audio = try await prepare(url, stream) { progress($0 * 0.15) }
             let words = try await transcriber.transcribe(audio, language: language) { progress(0.15 + $0 * 0.75) } found: { words in
@@ -431,10 +437,11 @@ extension EditorState {
             )
             let start = needsSpeakers ? 0.15 : 0
             let found = TranslationCollector()
+            let fixUp = TranslationPipeline(preset: self.qcPreset)
             let translations = try await translator.translate(request) { progress(start + $0 * (1 - start)) } found: { batch in
-                propose(Proposals.translation(found.add(batch), cues: cues))
+                propose(Proposals.translation(found.add(fixUp.fix(batch, request: request)), cues: cues))
             }
-            var proposal = Proposals.translation(translations, cues: cues)
+            var proposal = Proposals.translation(fixUp.fix(translations, request: request), cues: cues)
             if let speakers {
                 // The speakers found on the way go into the same review.
                 for index in proposal.changes.indices {

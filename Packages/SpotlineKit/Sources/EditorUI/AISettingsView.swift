@@ -8,6 +8,7 @@ public struct AISettingsView: View {
     private let keys: APIKeyStore
     @State private var openAIKey = ""
     @State private var anthropicKey = ""
+    @State private var elevenLabsKey = ""
     @State private var savedKeys: Set<APIKeyStore.Provider> = []
 
     public init(editor: EditorState, keys: APIKeyStore = APIKeyStore()) {
@@ -45,6 +46,7 @@ public struct AISettingsView: View {
                     .accessibilityIdentifier(AccessibilityID.AISettings.allowsCloud)
                 keyField("OpenAI API key", text: $openAIKey, provider: .openAI)
                 keyField("Anthropic API key", text: $anthropicKey, provider: .anthropic)
+                keyField("ElevenLabs API key", text: $elevenLabsKey, provider: .elevenLabs)
             } header: {
                 Text("Cloud")
             } footer: {
@@ -57,6 +59,7 @@ public struct AISettingsView: View {
         .onAppear {
             openAIKey = keys.key(for: .openAI) ?? ""
             anthropicKey = keys.key(for: .anthropic) ?? ""
+            elevenLabsKey = keys.key(for: .elevenLabs) ?? ""
             savedKeys = Set(APIKeyStore.Provider.allCases.filter { keys.key(for: $0) != nil })
         }
     }

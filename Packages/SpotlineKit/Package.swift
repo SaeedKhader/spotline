@@ -17,6 +17,8 @@ let package = Package(
         .library(name: "MediaAnalysis", targets: ["MediaAnalysis"]),
         .library(name: "AgentBridge", targets: ["AgentBridge"]),
         .library(name: "EditorUI", targets: ["EditorUI"]),
+        .library(name: "AIQuality", targets: ["AIQuality"]),
+        .executable(name: "spotline-bench", targets: ["SpotlineBench"]),
         .executable(name: "spotline-mcp", targets: ["SpotlineMCP"]),
     ],
     targets: [
@@ -51,6 +53,13 @@ let package = Package(
         // AI tools: transcription, translation, cleanup and speaker/addressee detection, on-device
         // (Apple Speech, Translation, sound analysis) or cloud (OpenAI transcription, Claude): fills cues directly, proposes rewrites for review.
         .target(name: "AITools", dependencies: ["SubtitleCore", "SubtitleTranslation", "MediaAnalysis", "QualityControl"]),
+        // Scores AI output against reference subtitles: word error rate, timing, segmentation, chrF, addressee forms.
+        .target(name: "AIQuality", dependencies: ["SubtitleCore", "SubtitleTranslation", "QualityControl"]),
+        // `swift run spotline-bench <samples>`: runs transcription and translation on clips with real subtitles and scores them.
+        .executableTarget(
+            name: "SpotlineBench",
+            dependencies: ["AIQuality", "AITools", "MediaAnalysis", "QualityControl", "SubtitleCore", "SubtitleFormats", "SubtitleTranslation"]
+        ),
         // The MCP server agents use to drive the app: tool catalog, JSON-RPC, and the local socket to the app.
         .target(name: "AgentBridge"),
         // The stdio helper agents launch (bundled in the app as Contents/MacOS/spotline-mcp).
@@ -71,6 +80,7 @@ let package = Package(
         .testTarget(name: "QualityControlTests", dependencies: ["QualityControl"]),
         .testTarget(name: "SubtitleTranslationTests", dependencies: ["SubtitleTranslation"]),
         .testTarget(name: "AIToolsTests", dependencies: ["AITools", "MediaAnalysis"]),
+        .testTarget(name: "AIQualityTests", dependencies: ["AIQuality", "QualityControl"]),
         .testTarget(name: "EditorCommandsTests", dependencies: ["EditorCommands"]),
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore"]),
         .testTarget(name: "MPVPlayerTests", dependencies: ["MPVPlayer"]),

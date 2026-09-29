@@ -10,6 +10,10 @@ import Translation
 /// after `confirmDownload` agrees. Nothing leaves the Mac.
 public struct AppleSpeechTranscriber: Transcriber {
     public var name: String { "Apple Speech (on this Mac)" }
+    /// Its word times start about a tenth of a second early: measured with
+    /// `spotline-bench` on synthesized speech with exact onsets (0.09 s
+    /// early) and on a TV episode's subtitles (0.13 s).
+    public var wordStartLead: Double { 0.1 }
     /// Asked before macOS downloads a language's speech model; gets the language's name.
     public var confirmDownload: @Sendable (String) async -> Bool
 
@@ -131,30 +135,51 @@ public struct AppleTranslator: CueTranslator {
         default: throw AIError.languageNotSupported("\(Languages.name(request.sourceLanguage)) to \(Languages.name(request.targetLanguage))")
         }
         let session = TranslationSession(installedSource: source, target: target)
+        // How the model renders each glossary term on its own, to swap for the agreed translation.
+        let terms = request.glossary.filter { !$0.source.isEmpty && !$0.target.isEmpty }
+        let rendered = terms.isEmpty ? [] : try await session.translations(
+            from: terms.map { TranslationSession.Request(sourceText: $0.source) }
+        ).map(\.targetText)
+        let glossary = GlossaryEnforcer(terms: zip(terms, rendered).map { ($0.source, $0.target, $1) })
         var results: [CueTranslation] = []
-        // A small first batch shows results quickly.
-        let batches = Self.batches(of: request.lines.count, first: 10, size: 50).map { Array(request.lines[$0]) }
-        for batch in batches {
+        // A sentence that runs over several cues is translated whole (the model
+        // has no other context), then shared out again. A small first batch shows results quickly.
+        let sentences = SentenceSpans.groups(request.lines.map { (Self.sourceText($0.source), $0.start, $0.end) })
+        for range in Self.batches(of: sentences.count, first: 5, size: 30) {
             try Task.checkCancellation()
-            // Line breaks are translated as sentence breaks; each line of a cue is kept apart.
-            let requests = batch.map { line in
+            let batch = Array(sentences[range])
+            let requests = batch.map { group in
                 TranslationSession.Request(
-                    sourceText: SubtitleText.visibleLines(of: line.source).joined(separator: "\n"),
-                    clientIdentifier: line.cueID.uuidString
+                    sourceText: group.map { Self.sourceText(request.lines[$0].source) }.joined(separator: " "),
+                    clientIdentifier: request.lines[group[0]].cueID.uuidString
                 )
             }
             let responses = try await session.translations(from: requests)
             let before = results.count
             for response in responses {
                 guard let id = response.clientIdentifier.flatMap(UUID.init(uuidString:)),
-                      let line = batch.first(where: { $0.cueID == id })
+                      let group = batch.first(where: { request.lines[$0[0]].cueID == id })
                 else { continue }
-                results.append(CueTranslation(cueID: id, text: response.targetText, addressee: request.targetIsGendered ? line.addressee : nil))
+                let sources = group.map { Self.sourceText(request.lines[$0].source) }
+                let whole = glossary.apply(to: response.targetText, source: sources.joined(separator: " "))
+                for (index, text) in zip(group, SentenceSpans.split(whole, like: sources)) {
+                    let line = request.lines[index]
+                    results.append(CueTranslation(cueID: line.cueID, text: text, addressee: request.targetIsGendered ? line.addressee : nil))
+                }
             }
             found(Array(results[before...]))
             progress(Double(results.count) / Double(max(request.lines.count, 1)))
         }
         return results
+    }
+
+    /// What the model gets for a cue. It translates each line on its own (a
+    /// line break ends a sentence), so a sentence broken over two lines is sent
+    /// as one line; `TranslationPipeline` breaks the translation again. A
+    /// dialogue cue ("- Hi.\n- Hello.") keeps one line per speaker.
+    static func sourceText(_ source: String) -> String {
+        let lines = SubtitleText.visibleLines(of: source).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return lines.joined(separator: TranslationPipeline.isDialogue(lines) ? "\n" : " ")
     }
 
     /// Ranges of `count` lines: a small first batch, then full ones.
