@@ -17,6 +17,9 @@ struct CueDrag: Equatable {
     let start: MediaTime
     let end: MediaTime
     let rate: FrameRate
+    /// The room the cue may use without overlapping its neighbours (see `EditorState.room(for:)`).
+    var earliestStart: MediaTime = .zero
+    var latestEnd: MediaTime?
 
     var actionName: String {
         switch part {
@@ -34,11 +37,12 @@ struct CueDrag: Equatable {
             var proposed = MediaTime(frame: max(start.firstFrame(at: rate) + frames, 0), rate: rate)
             if let target = nearest(to: proposed, in: snapTargets, within: tolerance) { proposed = target }
             let latest = MediaTime(frame: (end - oneFrame).firstFrame(at: rate), rate: rate)
-            return (max(min(proposed, latest), .zero), end)
+            return (max(min(proposed, latest), earliestStart, .zero), end)
         case .outPoint:
             var proposed = MediaTime(frame: end.firstFrame(at: rate) + frames, rate: rate)
             if let target = nearest(to: proposed, in: snapTargets, within: tolerance) { proposed = target }
             let earliest = MediaTime(frame: (start + oneFrame).firstFrame(at: rate), rate: rate)
+            if let latestEnd { proposed = min(proposed, latestEnd) }
             return (start, max(proposed, earliest))
         case .body:
             let duration = end - start
@@ -56,7 +60,8 @@ struct CueDrag: Equatable {
             case (nil, nil):
                 break
             }
-            if newStart < .zero { newStart = .zero }
+            if let latestEnd, newStart + duration > latestEnd { newStart = latestEnd - duration }
+            newStart = max(newStart, earliestStart, .zero)
             return (newStart, newStart + duration)
         }
     }

@@ -224,7 +224,8 @@ struct TimelineStateTests {
         editor.seek(toFrame: 5)
 
         let targets = Set(editor.snapTargets(excluding: editor.track.cues[0].id))
-        #expect(targets == [f(40), f(75), f(5), f(50), f(60)])
+        // Neighbouring cues are targets at the two-frame minimum gap.
+        #expect(targets == [f(40), f(75), f(5), f(48), f(62)])
         #expect(editor.isOn(.toggleSnapping) == true)
         editor.perform(.toggleSnapping)
         #expect(editor.isOn(.toggleSnapping) == false)

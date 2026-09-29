@@ -181,6 +181,7 @@ Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
 - `Review` flags empty cues, overlaps, more than 20 c/s, lines over 42 characters and more than 2 lines; the footer counts them and ⌥⌘↑/⌥⌘↓ step through them. Full QC presets remain M4.
 - New commands: Split Cue (⌥⌘S), Merge with Next (⌥⌘J), Show Cue at Top (⌥⌘T), J/K/L shuttle (backward, pause, forward, faster on repeat; mpv plays backward), and ⌘↑/⌘↓ now also work while typing, keeping the cursor in the text.
 - Per-frame state (`position`, `currentCueID`) is observed separately from everything else, so only the timecode, timeline, overlay and mini-map playhead redraw during playback.
+- No overlaps (Saeed, 2026-09-29): edits keep cues in the same position at least 2 frames apart (`EditorState.room(for:)` clamps drags, typed times, Set In/Out and new cues; snapping targets the gap). A top cue may run alongside bottom ones. Overlaps in imported files are kept, flagged for review, and Cue › Fix Overlaps trims them.
 - The window uses the dark appearance.
 
 ## 7. Pro workflow features (backlog, roughly in order)

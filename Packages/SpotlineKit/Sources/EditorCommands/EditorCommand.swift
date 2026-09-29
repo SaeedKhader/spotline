@@ -89,6 +89,9 @@ extension EditorCommand {
         id: "cue.togglePositionTop", title: "Show Cue at Top", category: .cue,
         defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .option])
     )
+    public static let fixOverlaps = EditorCommand(
+        id: "cue.fixOverlaps", title: "Fix Overlaps", category: .cue
+    )
     public static let previousIssue = EditorCommand(
         id: "navigation.previousIssue", title: "Previous Cue Needing Review", category: .navigation,
         defaultShortcut: KeyShortcut(.upArrow, modifiers: [.command, .option])
@@ -162,7 +165,7 @@ extension EditorCommand {
     public static let all: [EditorCommand] = [
         openMedia, importSubtitles, exportSubtitles,
         undo, redo,
-        addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
+        addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop, fixOverlaps,
         previousCue, nextCue, previousIssue, nextIssue, previousShotChange, nextShotChange,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, nextAudioTrack,

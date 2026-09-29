@@ -4,7 +4,7 @@
 /// presets (minimum gaps, durations, shot-change distance) comes in M4.
 public enum ReviewIssue: Hashable, Sendable {
     case empty
-    /// The cue is still showing when the next one starts.
+    /// The cue is still showing when the next one in the same position starts.
     case overlapsNext
     /// Characters per second above `SubtitleGuidelines.maxCharactersPerSecond`.
     case readingSpeed(Double)
@@ -40,7 +40,10 @@ public enum Review {
                 }
                 if cue.readingSpeed > SubtitleGuidelines.maxCharactersPerSecond { issues.append(.readingSpeed(cue.readingSpeed)) }
             }
-            if index + 1 < cues.count, cues[index + 1].start < cue.end { issues.append(.overlapsNext) }
+            // A top cue (a sign) may run alongside bottom dialogue; only the same position overlaps.
+            if let next = cues[(index + 1)...].first(where: { $0.position == cue.position }), next.start < cue.end {
+                issues.append(.overlapsNext)
+            }
             if !issues.isEmpty { result[cue.id] = issues }
         }
         return result

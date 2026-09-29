@@ -377,7 +377,10 @@ final class TimelineView: NSView {
             editor.select(cue.id)
             drag = ActiveDrag(
                 cueID: cue.id,
-                model: CueDrag(part: part, start: cue.start, end: cue.end, rate: content.frameRate),
+                model: CueDrag(
+                    part: part, start: cue.start, end: cue.end, rate: content.frameRate,
+                    earliestStart: editor.room(for: cue.id).earliestStart, latestEnd: editor.room(for: cue.id).latestEnd
+                ),
                 startX: point.x
             )
             cursor(for: part).set()
@@ -542,7 +545,10 @@ final class TimelineView: NSView {
     /// Moves a cue edge by whole frames (accessibility increment and decrement).
     private func nudge(_ id: Cue.ID, part: CueDrag.Part, by frames: Int64) {
         guard let cue = content.cues.first(where: { $0.id == id }) else { return }
-        let model = CueDrag(part: part, start: cue.start, end: cue.end, rate: content.frameRate)
+        let model = CueDrag(
+                    part: part, start: cue.start, end: cue.end, rate: content.frameRate,
+                    earliestStart: editor.room(for: cue.id).earliestStart, latestEnd: editor.room(for: cue.id).latestEnd
+                )
         let timing = model.timing(movedBy: frames, snapTargets: [], tolerance: .zero)
         editor.setTiming(start: timing.start, end: timing.end, forCue: id, actionName: model.actionName)
     }

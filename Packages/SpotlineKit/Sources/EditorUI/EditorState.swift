@@ -197,6 +197,8 @@ public final class EditorState {
             selectedCueIndex.map { $0 < track.cues.count - 1 } ?? false
         case EditorCommand.previousIssue.id, EditorCommand.nextIssue.id:
             !issues.isEmpty
+        case EditorCommand.fixOverlaps.id:
+            issues.values.contains { $0.contains(.overlapsNext) }
         case EditorCommand.toggleMilliseconds.id:
             true
         // Commands that depend on where the playhead is are enabled whenever they
@@ -266,7 +268,9 @@ public final class EditorState {
             undoManager.redo()
             refreshUndoState()
         case EditorCommand.addCue.id:
-            addCueAtPlayhead()
+            return addCueAtPlayhead()
+        case EditorCommand.fixOverlaps.id:
+            fixOverlaps()
         case EditorCommand.deleteCue.id:
             deleteSelectedCue()
         case EditorCommand.splitCue.id:
@@ -485,18 +489,39 @@ public final class EditorState {
         guard isSnappingEnabled else { return [] }
         var targets = shotChangeFrames.map { MediaTime(frame: $0, rate: frameRate) }
         if hasMedia { targets.append(currentTime) }
+        let position = cueID.flatMap(cue(withID:))?.position
         for cue in track.cues where cue.id != cueID {
-            targets.append(cue.start)
-            targets.append(cue.end)
+            // Cues in the same position are neighbours: snap to the minimum gap from them.
+            let gap = cue.position == position ? minimumGap : .zero
+            targets.append(cue.start - gap)
+            targets.append(cue.end + gap)
         }
         return targets
+    }
+
+    /// `SubtitleGuidelines.minimumGapFrames` at the current rate.
+    public var minimumGap: MediaTime { MediaTime(frame: SubtitleGuidelines.minimumGapFrames, rate: frameRate) }
+
+    /// How far a cue can reach without overlapping its neighbours in the same
+    /// position, keeping the minimum gap: from the previous one's end to the
+    /// next one's start. A top cue may overlap bottom cues and the other way round.
+    public func room(for id: Cue.ID) -> (earliestStart: MediaTime, latestEnd: MediaTime?) {
+        guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return (.zero, nil) }
+        let cue = track.cues[index]
+        let previous = track.cues[..<index].last { $0.position == cue.position }
+        let next = track.cues[(index + 1)...].first { $0.position == cue.position }
+        return (previous.map { $0.end + minimumGap } ?? .zero, next.map { $0.start - minimumGap })
     }
 
     // MARK: - Editing
 
     /// Sets a cue's start and end in one undoable step (a timeline drag or nudge).
+    /// Clamped to the cue's room (see `room(for:)`), so edits never create overlaps.
     public func setTiming(start: MediaTime, end: MediaTime, forCue id: Cue.ID, actionName: String) {
-        guard start < end, start >= .zero, let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
+        let room = room(for: id)
+        let start = max(start, room.earliestStart, .zero)
+        let end = room.latestEnd.map { min(end, $0) } ?? end
+        guard start < end, let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
         edit(actionName) { track in
             track.cues[index].start = start
             track.cues[index].end = end
@@ -513,19 +538,41 @@ public final class EditorState {
         textEditCueID = id
     }
 
-    private func addCueAtPlayhead() {
-        let start = currentTime
+    /// Adds a bottom cue at the playhead, or just after the cue already showing
+    /// there. Returns false when there is no room before the next cue.
+    private func addCueAtPlayhead() -> Bool {
+        var start = currentTime
+        let bottom = track.cues.filter { $0.position == .bottom }
+        if let showing = bottom.last(where: { $0.start <= start && start < $0.end + minimumGap }) {
+            start = MediaTime(frame: (showing.end + minimumGap).firstFrame(at: frameRate), rate: frameRate)
+        }
         let newCueFrames = MediaTime(value: Self.newCueSeconds, timescale: 1).nearestFrame(at: frameRate)
         var end = start + MediaTime(frame: newCueFrames, rate: frameRate)
-        if let next = track.cues.first(where: { $0.start > start }), next.start < end {
-            end = next.start
+        if let next = bottom.first(where: { $0.start > start }) {
+            end = min(end, next.start - minimumGap)
         }
+        guard start < end else { return false }
         let cue = Cue(start: start, end: end, text: "")
         edit("Add Cue") { track in
             track.cues.append(cue)
         }
         selectedCueID = cue.id
         textFocusRequest += 1
+        return true
+    }
+
+    /// Ends each cue that overlaps the next one in the same position the minimum gap before it.
+    private func fixOverlaps() {
+        edit("Fix Overlaps") { track in
+            for index in track.cues.indices {
+                let cue = track.cues[index]
+                guard let next = track.cues[(index + 1)...].first(where: { $0.position == cue.position }),
+                      next.start < cue.end
+                else { continue }
+                let withGap = next.start - minimumGap
+                track.cues[index].end = withGap > cue.start ? withGap : next.start
+            }
+        }
     }
 
     /// New cues last two seconds, or until the next cue starts.
@@ -589,9 +636,10 @@ public final class EditorState {
         let start = MediaTime(frame: (track.cues[index].end + gap).firstFrame(at: frameRate), rate: frameRate)
         let newCueFrames = MediaTime(value: Self.newCueSeconds, timescale: 1).nearestFrame(at: frameRate)
         var end = start + MediaTime(frame: newCueFrames, rate: frameRate)
-        if index + 1 < track.cues.count, track.cues[index + 1].start > start {
-            end = min(end, track.cues[index + 1].start)
+        if let next = track.cues[(index + 1)...].first(where: { $0.position == .bottom }) {
+            end = min(end, next.start - gap)
         }
+        guard start < end else { return }
         let cue = Cue(start: start, end: end, text: "")
         edit("Add Cue") { track in
             track.cues.insert(cue, at: index + 1)
@@ -619,13 +667,19 @@ public final class EditorState {
 
     /// Moves the selected cue's start to the playhead. When that passes the
     /// cue's end, the cue keeps its duration.
+    /// Moves the selected cue's start to the playhead. Past the cue's end it keeps
+    /// its duration (shortened to fit before the next cue). Never overlaps a neighbour.
     private func setInAtPlayhead() -> Bool {
         guard let index = selectedCueIndex, track.cues[index].start != currentTime else { return false }
+        let cue = track.cues[index]
+        let room = room(for: cue.id)
         let time = currentTime
+        guard time >= room.earliestStart, room.latestEnd.map({ time < $0 }) ?? true else { return false }
+        var end = time >= cue.end ? time + cue.duration : cue.end
+        if let latest = room.latestEnd { end = min(end, latest) }
         edit("Set In") { track in
-            let cue = track.cues[index]
-            if time >= cue.end { track.cues[index].end = time + cue.duration }
             track.cues[index].start = time
+            track.cues[index].end = end
         }
         return true
     }
@@ -635,7 +689,7 @@ public final class EditorState {
         guard let index = selectedCueIndex else { return false }
         let cue = track.cues[index]
         let time = currentTime
-        guard cue.start < time, cue.end != time else { return false }
+        guard cue.start < time, cue.end != time, room(for: cue.id).latestEnd.map({ time <= $0 }) ?? true else { return false }
         edit("Set Out") { track in
             track.cues[index].end = time
         }

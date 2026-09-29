@@ -119,7 +119,7 @@ struct EditingTests {
         let editor = try makeEditor(subtitles: Self.threeCues)
         step(editor, to: 60)  // 2.5 s, before "Two" at 3 s
         editor.perform(.addCue)
-        #expect(editor.selectedCue?.end == MediaTime(value: 3, timescale: 1))
+        #expect(editor.selectedCue?.end == MediaTime(value: 3, timescale: 1) - frame(2))
         #expect(editor.track.cues.map(\.text) == ["One", "", "Two", "Three"])
         #expect(editor.selectedCueIndex == 1)
     }
@@ -177,15 +177,83 @@ struct EditingTests {
 
     @Test func setInPastTheOutKeepsTheDuration() throws {
         let editor = try makeEditor(subtitles: Self.threeCues)
-        editor.select(editor.track.cues[0].id)
+        editor.select(editor.track.cues[2].id)  // "Three", 5 to 6 s, the last cue
         step(editor, to: 200)
-        editor.perform(.setIn)
+        #expect(editor.perform(.setIn))
         let cue = try #require(editor.selectedCue)
         #expect(cue.start == frame(200))
         #expect(cue.duration == MediaTime(value: 1, timescale: 1))
-        // Cues stay ordered by start time; "One" now comes last.
-        #expect(editor.track.cues.map(\.text) == ["Two", "Three", "One"])
-        #expect(editor.selectedCueIndex == 2)
+    }
+
+    @Test func setInCannotJumpOverTheNextCue() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        editor.select(editor.track.cues[0].id)  // "One", 1 to 2 s; "Two" starts at 3 s
+        step(editor, to: 200)
+        #expect(!editor.perform(.setIn))
+        step(editor, to: 60)  // 2.5 s: past its end, so it keeps its duration, shortened to fit
+        #expect(editor.perform(.setIn))
+        #expect(editor.selectedCue?.start == frame(60))
+        #expect(editor.selectedCue?.end == MediaTime(value: 3, timescale: 1) - frame(2))
+    }
+
+    @Test func editsKeepTheMinimumGap() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        let one = editor.track.cues[0].id, two = editor.track.cues[1].id
+        // Typed or dragged times are clamped two frames from the neighbours.
+        editor.setTiming(start: frame(10), end: frame(100), forCue: one, actionName: "Set Out")
+        #expect(editor.cue(withID: one)?.end == MediaTime(value: 3, timescale: 1) - frame(2))
+        editor.setTiming(start: frame(1), end: frame(90), forCue: two, actionName: "Set In")
+        #expect(editor.cue(withID: two)?.start == editor.cue(withID: one)!.end + frame(2))
+        // Set Out past the next cue's start is refused.
+        editor.select(one)
+        step(editor, to: 120)
+        #expect(!editor.perform(.setOut))
+        #expect(editor.issues.isEmpty)
+    }
+
+    @Test func topCuesMayOverlapBottomOnes() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        let sign = editor.track.cues[1].id
+        editor.setPosition(.top, forCue: sign)
+        editor.setTiming(start: frame(10), end: frame(140), forCue: sign, actionName: "Move Cue")
+        #expect(editor.cue(withID: sign)?.start == frame(10))
+        #expect(editor.cue(withID: sign)?.end == frame(140))
+        #expect(editor.issues.isEmpty)
+        #expect(editor.room(for: sign).latestEnd == nil)
+    }
+
+    @Test func addAtPlayheadInsideACueGoesAfterIt() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        step(editor, to: 30)  // inside "One" (1 to 2 s)
+        #expect(editor.perform(.addCue))
+        let added = try #require(editor.selectedCue)
+        #expect(added.start == MediaTime(frame: (MediaTime(value: 2, timescale: 1) + frame(2)).firstFrame(at: rate), rate: rate))
+        #expect(added.end == MediaTime(value: 3, timescale: 1) - frame(2))
+    }
+
+    @Test func fixOverlapsTrimsImportedOverlaps() throws {
+        let editor = try makeEditor(subtitles: """
+            1
+            00:00:01,000 --> 00:00:03,500
+            One
+
+            2
+            00:00:03,000 --> 00:00:04,000
+            Two
+
+            3
+            00:00:03,800 --> 00:00:05,000
+            {\\an8}Sign on the wall
+
+            """)
+        #expect(editor.issues.count == 1, "The top sign does not count")
+        #expect(editor.perform(.fixOverlaps))
+        #expect(editor.track.cues[0].end == MediaTime(value: 3, timescale: 1) - frame(2))
+        #expect(editor.track.cues[2].start == MediaTime(value: 19, timescale: 5), "Top cue untouched")
+        #expect(editor.issues.isEmpty)
+        #expect(!editor.canPerform(.fixOverlaps))
+        editor.perform(.undo)
+        #expect(editor.issues.count == 1)
     }
 
     @Test func timingCommandsNeedASelection() throws {
@@ -343,7 +411,7 @@ struct EditingTests {
         #expect(editor.selectedCueIndex == 1)
         // "One" ends at 2 s (frame 47.95, so frame 48 is the first without it); two frames later.
         #expect(added.start == frame(50))
-        #expect(added.end == MediaTime(value: 3, timescale: 1), "Stops where the next cue starts")
+        #expect(added.end == MediaTime(value: 3, timescale: 1) - frame(2), "Stops two frames before the next cue")
         #expect(editor.textFocusRequest == 1)
     }
 
