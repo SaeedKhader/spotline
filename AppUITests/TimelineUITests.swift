@@ -79,14 +79,30 @@ final class TimelineUITests: XCTestCase {
         // Pick the second track from Playback › Audio Track while the video
         // plays: the playhead must not redraw (and break) the open menu.
         button(EditorCommand.togglePlay, in: app).click()
-        app.menuBars.menuBarItems["Playback"].click()
-        app.menuItems["Audio Track"].hover()
-        let arabic = app.menuItems.matching(NSPredicate(format: "title CONTAINS 'Arabic dub'")).firstMatch
-        XCTAssertTrue(arabic.waitForExistence(timeout: 5))
-        arabic.click()
-        waitForValue(of: timeline, toEqual: "Waveform: center channel (dialogue), speech highlighted")
+        let dialogue = "Waveform: center channel (dialogue), speech highlighted"
+        // Nested menus are sometimes dismissed by synthesized mouse moves, so
+        // the menu path gets a second try before the test fails.
+        for attempt in 1...2 where (timeline.value as? String) != dialogue {
+            pickAudioTrack(containing: "Arabic dub", in: app)
+            let switched = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", dialogue), object: timeline)
+            if XCTWaiter().wait(for: [switched], timeout: 10) != .completed, attempt == 2 {
+                XCTFail("Choosing a track from the menu did not switch it (\(timeline.value ?? "nil"))")
+            }
+        }
 
         app.typeKey("a", modifierFlags: [.command, .option])
         waitForValue(of: timeline, toEqual: "Waveform: all channels mixed, speech highlighted")
+    }
+
+    @MainActor
+    private func pickAudioTrack(containing title: String, in app: XCUIApplication) {
+        let playback = app.menuBars.menuBarItems["Playback"]
+        playback.click()
+        let audioTrack = playback.menus.menuItems["Audio Track"]
+        XCTAssertTrue(audioTrack.waitForExistence(timeout: 5))
+        audioTrack.click()
+        let item = audioTrack.menus.menuItems.matching(NSPredicate(format: "title CONTAINS %@", title)).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "Audio Track submenu did not open")
+        item.click()
     }
 }

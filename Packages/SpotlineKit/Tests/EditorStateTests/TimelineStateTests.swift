@@ -18,6 +18,7 @@ struct TimelineStateTests {
     /// An editor whose media "analysis" finds cuts at frames 40 and 75.
     func makeEditor() async throws -> EditorState {
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
+        editor.analyzeSpeech = { _, _, _ in [] }
         let cuts = [f(40), f(75)]
         let halfway = f(50)
         editor.analyzeWaveform = { _, _, _ in
@@ -27,10 +28,14 @@ struct TimelineStateTests {
             progress(ShotProgress(fraction: 0.5, analyzedUntil: halfway, partial: nil))
             return cuts
         }
+        editor.analyzeSpeech = { _, _, _ in [] }
         editor.open(URL(fileURLWithPath: "/tmp/cuts.mov"))
         #expect(editor.waveformJob == AnalysisJob())
         #expect(editor.shotChangesJob == AnalysisJob())
-        for _ in 0..<100 where editor.waveformJob != nil || editor.shotChangesJob != nil { await Task.yield() }
+        #expect(editor.speechJob == AnalysisJob())
+        for _ in 0..<100 where editor.waveformJob != nil || editor.shotChangesJob != nil || editor.speechJob != nil {
+            await Task.yield()
+        }
         try #require(editor.shotChanges != nil && editor.audioAnalysis != nil)
         return editor
     }
@@ -46,6 +51,7 @@ struct TimelineStateTests {
 
     @Test func theWaveformDoesNotWaitForShotChanges() async throws {
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
+        editor.analyzeSpeech = { _, _, _ in [] }
         let finishShots = AsyncStream<Void>.makeStream()
         editor.analyzeWaveform = { _, _, _ in AudioAnalysis(waveform: Waveform(peaks: [1, 2]), audioStreamIndex: 1) }
         editor.analyzeShotChanges = { _, _ in
@@ -65,6 +71,7 @@ struct TimelineStateTests {
 
     @Test func partialShotChangesShowBeforeTheEnd() async throws {
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: SimulatedPlaybackEngine(frameRate: rate))
+        editor.analyzeSpeech = { _, _, _ in [] }
         let (reports, continuation) = AsyncStream<ShotProgress>.makeStream()
         let finish = AsyncStream<Void>.makeStream()
         let final = [f(40), f(75)]
@@ -97,6 +104,7 @@ struct TimelineStateTests {
     @Test func switchingAudioTracksRedoesOnlyTheWaveform() async throws {
         let engine = SimulatedPlaybackEngine(frameRate: rate)
         let editor = EditorState(launchOptions: LaunchOptions(isUITestMode: true), playback: engine)
+        editor.analyzeSpeech = { _, _, _ in [] }
         let requests = Requests()
         editor.analyzeWaveform = { _, stream, _ in
             await requests.append(stream)
@@ -131,6 +139,7 @@ struct TimelineStateTests {
             launchOptions: LaunchOptions(isUITestMode: true),
             playback: SimulatedPlaybackEngine(frameRate: rate, audioTracks: tracks)
         )
+        editor.analyzeSpeech = { _, _, _ in [] }
         editor.analyzeWaveform = { _, stream, _ in AudioAnalysis(waveform: Waveform(peaks: [1]), audioStreamIndex: stream ?? 1) }
         editor.analyzeShotChanges = { _, _ in [] }
         #expect(!editor.canPerform(.nextAudioTrack))
@@ -154,6 +163,7 @@ struct TimelineStateTests {
             launchOptions: LaunchOptions(isUITestMode: true),
             playback: SimulatedPlaybackEngine(frameRate: rate, audioTracks: tracks)
         )
+        editor.analyzeSpeech = { _, _, _ in [] }
         let region = SpeechRegion(start: f(10), end: f(30), confidence: 0.9)
         editor.analyzeWaveform = { _, stream, _ in AudioAnalysis(waveform: Waveform(peaks: [1]), audioStreamIndex: stream ?? 1) }
         editor.analyzeShotChanges = { _, _ in [] }
