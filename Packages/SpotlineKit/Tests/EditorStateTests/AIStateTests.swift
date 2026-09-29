@@ -120,6 +120,23 @@ struct AIStateTests {
         #expect(editor.track.cues[0].text == "[ar] Where are you going? ♀")
     }
 
+    @Test func transcribedCuesCanBeTranslatedDirectly() async throws {
+        var line = cue("Where are you going?", at: 1)
+        let speaker = Speaker(gender: .male, confidence: 0.9)
+        line.speakerID = speaker.id
+        let editor = makeEditor(cues: [line, cue("Home.", at: 3)])
+        #expect(!editor.isTranslating)
+        #expect(editor.canPerform(.translateWithAI))
+        #expect(editor.perform(.translateWithAI))
+        #expect(editor.isTranslating)
+        #expect(editor.sourceTrack?.cues.map(\.text) == ["Where are you going?", "Home."])
+        #expect(editor.track.languageCode == "ar")
+        #expect(editor.track.cues[0].speakerID == speaker.id)
+        await finish(editor)
+        editor.perform(.acceptAllChanges)
+        #expect(editor.track.cues.map(\.text) == ["[ar] Where are you going? ♀", "[ar] Home."])
+    }
+
     @Test func cancellingStopsWithoutProposing() async {
         let editor = makeEditor()
         editor.prepareAudio = { _, _, _ in

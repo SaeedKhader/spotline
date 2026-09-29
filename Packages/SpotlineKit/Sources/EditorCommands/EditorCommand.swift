@@ -210,8 +210,9 @@ extension EditorCommand {
     /// Makes cues from the media's dialogue, with speakers (proposed for review).
     public static let transcribe = EditorCommand(id: "ai.transcribe", title: "Transcribe Audio", category: .ai)
     /// Translates the empty target cues with context, glossary and memory (proposed for review).
+    /// Outside translation mode the current cues become the source first.
     public static let translateWithAI = EditorCommand(
-        id: "ai.translate", title: "Translate Untranslated Cues", category: .ai,
+        id: "ai.translate", title: "Translate with AI", category: .ai,
         defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .control])
     )
     /// Finds who speaks each cue (voice) and who it addresses (scene), for gendered translations.

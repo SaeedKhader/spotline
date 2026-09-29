@@ -70,7 +70,8 @@ extension EditorState {
         case EditorCommand.transcribe.id:
             return idle && hasMedia
         case EditorCommand.translateWithAI.id:
-            return idle && isTranslating && !untranslatedCues.isEmpty
+            // Outside translation mode, the cues being edited become the source.
+            return idle && (isTranslating ? !untranslatedCues.isEmpty : track.cues.contains { !$0.text.isEmpty })
         case EditorCommand.detectSpeakers.id:
             return idle && hasMedia && track.cues.contains { !$0.text.isEmpty }
         case EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id:
@@ -89,7 +90,9 @@ extension EditorState {
     func performAI(_ command: EditorCommand) -> Bool {
         switch command.id {
         case EditorCommand.transcribe.id: transcribe()
-        case EditorCommand.translateWithAI.id: translateUntranslatedCues()
+        case EditorCommand.translateWithAI.id:
+            if !isTranslating { useCuesAsSource() }
+            translateUntranslatedCues()
         case EditorCommand.detectSpeakers.id: detectSpeakers()
         case EditorCommand.maskProfanity.id: runCleanup(.maskProfanity)
         case EditorCommand.removeHearingImpaired.id: runCleanup(.removeHearingImpaired)
@@ -369,6 +372,27 @@ extension EditorState {
             }
             return proposal
         }
+    }
+
+    /// Starts a translation of the cues being edited (a transcription, an
+    /// imported file): they become the read-only source, and the target is
+    /// their timing with no text, keeping speakers and addressees. One undoable edit.
+    func useCuesAsSource() {
+        var source = track
+        if source.languageCode == "und" { source.languageCode = Self.detectLanguage(of: source.cues) ?? transcriptionLanguage ?? "und" }
+        let target = defaultTargetLanguage(avoiding: source.languageCode)
+        edit("Translate Cues") { track in
+            track.cues = source.cues.map { cue in
+                var empty = Alignment.template(from: [cue])[0]
+                empty.speakerID = cue.speakerID
+                empty.addressee = cue.addressee
+                return empty
+            }
+            track.languageCode = target
+        }
+        sourceFile = subtitleFile
+        sourceTrack = source
+        translationPairDidChange()
     }
 
     // MARK: Audio
