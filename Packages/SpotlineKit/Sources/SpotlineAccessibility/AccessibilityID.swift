@@ -49,6 +49,11 @@ public enum AccessibilityID {
         public static func action(_ cueID: UUID, _ commandID: String) -> String { "\(row(cueID)).\(command(commandID))" }
         /// The footer counting cues that need review; its value is e.g. "7 cues need review".
         public static let reviewSummary = "cueList.review"
+        /// In translation mode, the n-th glossary term found in a cue's source (0-based);
+        /// its value is the agreed translation and whether the target uses it.
+        public static func glossaryTerm(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).glossary.\(index)" }
+        /// The n-th translation memory suggestion under the selected cue (0-based); its value is the suggested text.
+        public static func memoryMatch(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).memory.\(index)" }
 
         public enum Column: String, CaseIterable, Sendable {
             case number
@@ -60,6 +65,23 @@ public enum AccessibilityID {
             /// Review warnings; the value lists them.
             case issues
             case text
+            /// In translation mode, the source cue's text (read-only).
+            case source
+            /// Who the line addresses (♂, ♀, group), once a tool has tagged it.
+            case addressee
+        }
+    }
+
+    /// The glossary panel (Translation › Show Glossary).
+    public enum Glossary {
+        public static let root = "glossary"
+        public static let addEntry = "glossary.add"
+        public static let removeEntries = "glossary.remove"
+        /// One term's field: `glossary.entry.<id>.source`, `.target` or `.note`.
+        public static func field(_ entryID: UUID, _ field: Field) -> String { "glossary.entry.\(entryID.uuidString).\(field.rawValue)" }
+
+        public enum Field: String, CaseIterable, Sendable {
+            case source, target, note
         }
     }
 

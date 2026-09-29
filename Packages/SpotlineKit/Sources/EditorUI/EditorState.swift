@@ -7,6 +7,7 @@ import QualityControl
 import SubtitleCore
 import MediaAnalysis
 import SubtitleFormats
+import Translation
 
 /// The editor's observable state and the single place commands are executed.
 ///
@@ -33,13 +34,63 @@ public final class EditorState {
     public var frameRate: FrameRate {
         didSet { if frameRate != oldValue { updateIssues() } }
     }
+    /// The subtitles being edited; in translation mode, the target (translation).
     public private(set) var track: SubtitleTrack {
         didSet {
+            if track.languageCode != oldValue.languageCode { translationPairDidChange() }
             guard track.cues != oldValue.cues else { return }
+            updateSourceCues()
             updateIssues()
             updateCurrentCue()
         }
     }
+
+    // MARK: Translation state
+
+    /// The source-language subtitles a translation is made from, shown read-only
+    /// beside each target cue. Nil outside translation mode.
+    public internal(set) var sourceTrack: SubtitleTrack? {
+        didSet {
+            updateSourceCues()
+            updateGlossaryHits()
+            updateIssues()
+        }
+    }
+    /// The file the source subtitles were read from.
+    public internal(set) var sourceFile: SubtitleFileReference?
+    /// Each target cue's source cue (by link, else by overlap), in translation mode.
+    public internal(set) var sourceCues: [Cue.ID: Cue] = [:]
+    /// Agreed translations of names and terms for the language pair.
+    public internal(set) var glossary = Glossary() {
+        didSet {
+            guard glossary != oldValue else { return }
+            glossaryIndex = GlossaryIndex(glossary)
+            updateGlossaryHits()
+            updateIssues()
+            if !isLoadingTranslationResources { try? translationStore?.save(glossary, pair: translationPair) }
+        }
+    }
+    /// Translations already made for the language pair, suggested for similar lines.
+    public internal(set) var memory = TranslationMemory() {
+        didSet { memoryMatchCache = [:] }
+    }
+    /// Where glossaries and memories are kept; nil keeps them in memory only (tests).
+    @ObservationIgnored let translationStore: TranslationStore?
+    @ObservationIgnored var glossaryIndex = GlossaryIndex(Glossary())
+    /// Glossary entries found in each source cue, by source cue ID.
+    @ObservationIgnored var glossaryHits: [Cue.ID: [Glossary.Entry]] = [:]
+    /// Memory suggestions by source cue ID, until the memory changes.
+    @ObservationIgnored var memoryMatchCache: [Cue.ID: [TranslationMemory.Match]] = [:]
+    /// The pair the glossary and memory belong to, e.g. "en-ar".
+    @ObservationIgnored var translationPair = "und-und"
+    /// True while the glossary and memory are replaced by the new pair's, which needs no saving.
+    @ObservationIgnored var isLoadingTranslationResources = false
+    /// The last target language chosen, for new translations.
+    static let targetLanguageKey = "TranslationTargetLanguage"
+    /// Opens (or brings forward) the glossary panel. Tests replace it.
+    @ObservationIgnored public var showGlossaryPanel: @MainActor (EditorState) -> Void = EditorPanels.showGlossary(editor:)
+    /// Asks for a glossary file to import. Tests replace it.
+    @ObservationIgnored public var chooseGlossaryToImport: @MainActor () -> URL? = EditorPanels.chooseGlossary
     /// The cue on screen at the playhead. Kept apart from `position` so the
     /// cue list redraws only when it changes, not every frame.
     public private(set) var currentCueID: Cue.ID?
@@ -57,7 +108,7 @@ public final class EditorState {
     /// Whether the issues panel under the cue list is open.
     public private(set) var isIssuesPanelShown = false
     /// Where the chosen QC preset is remembered; nil in tests.
-    @ObservationIgnored private let settings: UserDefaults?
+    @ObservationIgnored let settings: UserDefaults?
     static let qcPresetKey = "QCPreset"
     /// Show times as HH:MM:SS,mmm instead of SMPTE frames.
     public private(set) var showsMilliseconds = false
@@ -140,7 +191,8 @@ public final class EditorState {
         playback: any PlaybackEngine,
         frameRate: FrameRate = .fps23_976,
         track: SubtitleTrack = SubtitleTrack(),
-        settings: UserDefaults? = nil
+        settings: UserDefaults? = nil,
+        translationStore: TranslationStore? = nil
     ) {
         self.launchOptions = launchOptions
         self.playback = playback
@@ -149,6 +201,7 @@ public final class EditorState {
         self.frameRate = frameRate
         self.track = track
         self.settings = settings
+        self.translationStore = translationStore
         self.qcPreset = settings?.string(forKey: Self.qcPresetKey).flatMap(QCPreset.named) ?? .standard
         self.undoManager = UndoManager()
         updateIssues()
@@ -166,6 +219,12 @@ public final class EditorState {
             undoManager.removeAllActions()
             refreshUndoState()
         }
+        if let url = launchOptions.sourceSubtitlesURL {
+            openSourceSubtitles(from: url)
+            undoManager.removeAllActions()
+            refreshUndoState()
+            hasUnsavedChanges = false
+        }
     }
 
     /// An editor playing through libmpv, configured for UI tests when launched with `-UITestMode`.
@@ -177,8 +236,11 @@ public final class EditorState {
         } catch {
             fatalError("libmpv failed to start: \(error)")
         }
-        // UI tests start from the default preset every time.
-        self.init(launchOptions: launchOptions, playback: player, settings: testMode ? nil : .standard)
+        // UI tests start from the default preset, an empty glossary and an empty memory every time.
+        self.init(
+            launchOptions: launchOptions, playback: player, settings: testMode ? nil : .standard,
+            translationStore: testMode ? nil : .standard
+        )
     }
 
     // MARK: - Derived state
@@ -234,6 +296,17 @@ public final class EditorState {
             issues.values.contains { $0.contains { $0.kind.isTimingConflict } }
         case EditorCommand.toggleMilliseconds.id, EditorCommand.toggleIssuesPanel.id:
             true
+        case EditorCommand.openSourceSubtitles.id:
+            true
+        case EditorCommand.closeSourceSubtitles.id, EditorCommand.addTranslationsToMemory.id, EditorCommand.showGlossary.id,
+             EditorCommand.importGlossary.id:
+            isTranslating
+        case EditorCommand.copySourceToTarget.id:
+            selectedCue.flatMap { sourceCues[$0.id] } != nil
+        case EditorCommand.useMemoryMatch.id:
+            selectedCue.map { !memoryMatches(for: $0.id).isEmpty } ?? false
+        case EditorCommand.fillExactMatches.id:
+            isTranslating && !memory.entries.isEmpty
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
         // anything, so their menu items do not redraw on every frame.
@@ -292,7 +365,7 @@ public final class EditorState {
         case EditorCommand.importSubtitles.id:
             if let url = chooseSubtitlesToImport() { importSubtitles(from: url) }
         case EditorCommand.exportSubtitles.id:
-            if let destination = chooseExportDestination(subtitleFile) { exportSubtitles(to: destination) }
+            if let destination = chooseExportDestination(subtitleFile ?? suggestedTranslationFile) { exportSubtitles(to: destination) }
         case EditorCommand.undo.id:
             endTextEditSession()
             undoManager.undo()
@@ -321,6 +394,24 @@ public final class EditorState {
             showsMilliseconds.toggle()
         case EditorCommand.toggleIssuesPanel.id:
             isIssuesPanelShown.toggle()
+        case EditorCommand.openSourceSubtitles.id:
+            if let url = chooseSubtitlesToImport() { openSourceSubtitles(from: url) }
+        case EditorCommand.closeSourceSubtitles.id:
+            closeSourceSubtitles()
+        case EditorCommand.copySourceToTarget.id:
+            guard let cue = selectedCue, let source = sourceCues[cue.id] else { return false }
+            replaceText(of: cue.id, with: source.text, actionName: EditorCommand.copySourceToTarget.title)
+        case EditorCommand.useMemoryMatch.id:
+            guard let cue = selectedCue, let match = memoryMatches(for: cue.id).first else { return false }
+            useMemoryMatch(match, forCue: cue.id)
+        case EditorCommand.fillExactMatches.id:
+            return fillExactMatches()
+        case EditorCommand.addTranslationsToMemory.id:
+            addTranslationsToMemory()
+        case EditorCommand.showGlossary.id:
+            showGlossaryPanel(self)
+        case EditorCommand.importGlossary.id:
+            if let url = chooseGlossaryToImport() { importGlossary(from: url) }
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
         case EditorCommand.shuttleBackward.id:
@@ -381,8 +472,9 @@ public final class EditorState {
     public func importSubtitles(from url: URL) {
         do {
             let (format, imported) = try SubtitleFile.read(from: url)
+            let source = sourceTrack
             edit("Import Subtitles") { track in
-                track.cues = imported.cues
+                track.cues = source.map { Alignment.link(imported.cues, to: $0.cues) } ?? imported.cues
                 track.styles = imported.styles
                 track.properties = imported.properties
                 track.languageCode = imported.languageCode
@@ -397,7 +489,9 @@ public final class EditorState {
 
     public func exportSubtitles(to destination: SubtitleFileReference) {
         do {
-            try SubtitleFile.write(track, as: destination.format, to: destination.url)
+            try SubtitleFile.write(track, as: destination.format, frameRate: frameRate, to: destination.url)
+            // A delivered translation is a reviewed one: remember it.
+            if isTranslating { addTranslationsToMemory() }
             subtitleFile = destination
             hasUnsavedChanges = false
         } catch {
@@ -411,6 +505,8 @@ public final class EditorState {
     public func select(_ id: Cue.ID?) {
         guard id != selectedCueID else { return }
         endTextEditSession()
+        // Leaving a translated cue stores it, so the rest of the file can reuse it.
+        if let previous = selectedCueID { recordTranslation(of: previous) }
         selectedCueID = id
         if let cue = selectedCue, hasMedia {
             playback.seek(toFrame: cue.start.firstFrame(at: frameRate), rate: frameRate)
@@ -464,7 +560,8 @@ public final class EditorState {
     /// Recomputes `issues`; it changes (and redraws its observers) only when the result differs.
     private func updateIssues() {
         let context = QualityControl.Context(frameRate: frameRate, shotChanges: shotChangeFrames)
-        let found = QualityControl.check(track.cues, preset: qcPreset, context: context)
+        var found = QualityControl.check(track.cues, preset: qcPreset, context: context)
+        addTranslationIssues(to: &found)
         if found != issues { issues = found }
     }
 
@@ -658,7 +755,11 @@ public final class EditorState {
         var first = cue
         first.end = at
         first.text = firstText
-        let second = Cue(start: at, end: cue.end, text: secondText, position: cue.position)
+        // Both halves still translate the same source cue and share its speaker.
+        let second = Cue(
+            start: at, end: cue.end, text: secondText, position: cue.position, style: cue.style, speaker: cue.speaker,
+            sourceCueID: cue.sourceCueID, speakerID: cue.speakerID, addressee: cue.addressee
+        )
         edit("Split Cue") { track in
             track.cues[index] = first
             track.cues.insert(second, at: index + 1)
@@ -762,7 +863,7 @@ public final class EditorState {
 
     /// Applies one undoable change to the track and keeps cues ordered by start time.
     /// With `coalescing`, the change joins the previous undo step.
-    private func edit(_ actionName: String, coalescing: Bool = false, _ change: (inout SubtitleTrack) -> Void) {
+    func edit(_ actionName: String, coalescing: Bool = false, _ change: (inout SubtitleTrack) -> Void) {
         let before = Snapshot(track: track, selectedCueID: selectedCueID)
         var edited = track
         change(&edited)

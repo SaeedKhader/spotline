@@ -1,6 +1,8 @@
 import AppKit
 import EditorCommands
+import SpotlineAccessibility
 import SubtitleFormats
+import SwiftUI
 import UniformTypeIdentifiers
 
 /// The open and save panels and alerts `EditorState` shows. Tests replace them.
@@ -38,6 +40,39 @@ enum EditorPanels {
         }
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return SubtitleFileReference(url: url, format: format.selected)
+    }
+
+    static func chooseGlossary() -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = EditorCommand.importGlossary.title
+        panel.message = "Choose a CSV or tab-separated file: source term, translation and an optional note on each line."
+        panel.allowedContentTypes = [.commaSeparatedText, .tabSeparatedText, .plainText]
+        panel.allowsMultipleSelection = false
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// The glossary's floating panel, kept while the app runs.
+    private static var glossaryPanel: NSPanel?
+
+    /// Shows the glossary beside the editor window, where it stays while translating.
+    static func showGlossary(editor: EditorState) {
+        if glossaryPanel == nil {
+            let panel = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 520, height: 420),
+                styleMask: [.titled, .closable, .resizable, .utilityWindow],
+                backing: .buffered, defer: false
+            )
+            panel.contentViewController = NSHostingController(rootView: GlossaryView(editor: editor))
+            panel.identifier = NSUserInterfaceItemIdentifier(AccessibilityID.Glossary.root)
+            panel.appearance = NSAppearance(named: .darkAqua)
+            panel.isFloatingPanel = true
+            panel.hidesOnDeactivate = true
+            panel.isReleasedWhenClosed = false
+            panel.setFrameAutosaveName("GlossaryPanel")
+            panel.center()
+            glossaryPanel = panel
+        }
+        glossaryPanel?.makeKeyAndOrderFront(nil)
     }
 
     static func showError(_ title: String, _ error: any Error) {
@@ -80,7 +115,7 @@ enum EditorPanels {
 
 extension SubtitleFormat {
     var contentType: UTType? {
-        UTType(filenameExtension: fileExtension, conformingTo: .text)
+        UTType(filenameExtension: fileExtension, conformingTo: isBinary ? .data : .text)
     }
 
     /// Every file type the format reads, including alternative extensions (.dfxp, .xml).
