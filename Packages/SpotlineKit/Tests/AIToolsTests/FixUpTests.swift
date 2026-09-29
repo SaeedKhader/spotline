@@ -63,6 +63,42 @@ struct TranscriptionFixUpTests {
     }
 }
 
+struct DialogueCueTests {
+    let rate = FrameRate.fps25
+
+    func words(_ list: [(String, Double, Double, String)]) -> [TranscribedWord] {
+        list.map {
+            TranscribedWord(text: $0.0, start: MediaTime(seconds: $0.1, timescale: 1000), end: MediaTime(seconds: $0.2, timescale: 1000), speaker: $0.3)
+        }
+    }
+
+    @Test func aQuickExchangeBecomesOneCueWithALinePerSpeaker() {
+        let cues = CueSegmenter(preset: .netflix, frameRate: rate).cues(from: words([
+            ("Rick?", 0.0, 0.3, "a"), ("What", 0.35, 0.5, "b"), ("now?", 0.5, 0.8, "b"),
+        ]))
+        #expect(cues.map(\.text) == ["- Rick?\n- What now?"])
+    }
+
+    @Test func aThirdSpeakerOrALongLineStartsANewCue() {
+        let segmenter = CueSegmenter(preset: .netflix, frameRate: rate)
+        let three = segmenter.cues(from: words([("Hi.", 0.0, 0.2, "a"), ("Hey.", 0.25, 0.45, "b"), ("Yo.", 0.5, 0.7, "c")]))
+        #expect(three.map(\.text) == ["- Hi.\n- Hey.", "Yo."])
+        // Words the second speaker says that would not fit one dialogue line.
+        let long = segmenter.cues(from: words(
+            [("Wait,", 0.0, 0.2, "a")] + "no no no no no no no no no no no no no no".split(separator: " ").enumerated().map {
+                (String($0.element), 0.25 + Double($0.offset) * 0.1, 0.3 + Double($0.offset) * 0.1, "b")
+            }
+        ))
+        #expect(long.count == 2)
+        #expect(!long[0].text.contains("\n") || long[0].text.split(separator: "\n").allSatisfy { $0.count <= 42 })
+    }
+
+    @Test func oneSpeakerStaysPlainText() {
+        let cues = CueSegmenter(preset: .netflix, frameRate: rate).cues(from: words([("Hello", 0.0, 0.3, "a"), ("there.", 0.3, 0.6, "a")]))
+        #expect(cues.map(\.text) == ["Hello there."])
+    }
+}
+
 struct TranslationFixUpTests {
     let pipeline = TranslationPipeline(preset: .netflix)
     let request = TranslationRequest(lines: [], sourceLanguage: "en", targetLanguage: "ar")
@@ -112,15 +148,16 @@ struct ElevenLabsTests {
     @Test func scribeWordsKeepPunctuationAndSkipSpacingAndEvents() throws {
         let json = """
             {"language_code": "en", "text": "Morty, come on.", "words": [
-              {"text": "Morty,", "type": "word", "start": 3.12, "end": 3.5},
+              {"text": "Morty,", "type": "word", "start": 3.12, "end": 3.5, "speaker_id": "speaker_0"},
               {"text": " ", "type": "spacing", "start": 3.5, "end": 3.52},
               {"text": "(laughs)", "type": "audio_event", "start": 3.52, "end": 3.9},
-              {"text": "come", "type": "word", "start": 3.9, "end": 4.1},
-              {"text": "on.", "type": "word", "start": 4.1, "end": 4.3}
+              {"text": "come", "type": "word", "start": 3.9, "end": 4.1, "speaker_id": "speaker_1"},
+              {"text": "on.", "type": "word", "start": 4.1, "end": 4.3, "speaker_id": "speaker_1"}
             ]}
             """
         let words = try ElevenLabsTranscriber.words(from: Data(json.utf8))
         #expect(words.map(\.text) == ["Morty,", "come", "on."])
+        #expect(words.map(\.speaker) == ["speaker_0", "speaker_1", "speaker_1"])
         #expect(words[0].start == MediaTime(value: 3120, timescale: 1000))
     }
 

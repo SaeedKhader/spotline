@@ -42,6 +42,8 @@ public struct RuleCounts: Codable, Sendable, Equatable {
     public var overlaps = 0
     /// Starts or ends near a shot change but not on it.
     public var offShotChange = 0
+    /// Cues two people speak in, a dash line each (not a rule break).
+    public var dialogueCues = 0
 
     public init() {}
 
@@ -49,6 +51,10 @@ public struct RuleCounts: Codable, Sendable, Equatable {
         let sorted = cues.sorted { $0.start < $1.start }
         self.cues = sorted.count
         lines = sorted.reduce(0) { $0 + SubtitleText.visibleLines(of: $1.text).count }
+        dialogueCues = sorted.count { cue in
+            let lines = SubtitleText.visibleLines(of: cue.text).map { $0.trimmingCharacters(in: .whitespaces.union(["\u{200F}", "\u{202B}", "\u{200E}"])) }
+            return lines.count > 1 && lines.allSatisfy { $0.hasPrefix("-") }
+        }
         for issues in QualityControl.check(sorted, preset: preset, context: context).values {
             for issue in issues {
                 switch issue.kind {
@@ -64,6 +70,28 @@ public struct RuleCounts: Codable, Sendable, Equatable {
                 }
             }
         }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cues, lines, linesTooLong, tooManyLines, readingSpeedTooFast, tooShort, tooLong, gapTooShort, overlaps, offShotChange
+        case dialogueCues
+    }
+
+    /// Reads reports from before a count was added (it reads as 0).
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func count(_ key: CodingKeys) throws -> Int { try container.decodeIfPresent(Int.self, forKey: key) ?? 0 }
+        cues = try count(.cues)
+        lines = try count(.lines)
+        linesTooLong = try count(.linesTooLong)
+        tooManyLines = try count(.tooManyLines)
+        readingSpeedTooFast = try count(.readingSpeedTooFast)
+        tooShort = try count(.tooShort)
+        tooLong = try count(.tooLong)
+        gapTooShort = try count(.gapTooShort)
+        overlaps = try count(.overlaps)
+        offShotChange = try count(.offShotChange)
+        dialogueCues = try count(.dialogueCues)
     }
 
     /// Cues breaking a layout or reading rule, over all cues (lines too long count per line).
@@ -83,6 +111,7 @@ public struct RuleCounts: Codable, Sendable, Equatable {
         sum.gapTooShort = lhs.gapTooShort + rhs.gapTooShort
         sum.overlaps = lhs.overlaps + rhs.overlaps
         sum.offShotChange = lhs.offShotChange + rhs.offShotChange
+        sum.dialogueCues = lhs.dialogueCues + rhs.dialogueCues
         return sum
     }
 }

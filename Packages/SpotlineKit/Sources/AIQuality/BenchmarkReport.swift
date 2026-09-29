@@ -148,6 +148,7 @@ public struct BenchmarkReport: Codable, Sendable {
     static func rules(_ counts: RuleCounts) -> String {
         "\(counts.cues) cues, \(counts.linesTooLong) long lines, \(counts.tooManyLines) with too many lines, "
             + "\(counts.readingSpeedTooFast) too fast to read, \(counts.tooShort) too short, \(counts.tooLong) too long, "
-            + "\(counts.gapTooShort) gaps too short, \(counts.overlaps) overlaps, \(counts.offShotChange) off a shot change"
+            + "\(counts.gapTooShort) gaps too short, \(counts.overlaps) overlaps, \(counts.offShotChange) off a shot change "
+            + "(\(counts.dialogueCues) two-speaker cues)"
     }
 }

@@ -7,11 +7,14 @@ public struct TranscribedWord: Sendable, Equatable, Codable {
     public var text: String
     public var start: MediaTime
     public var end: MediaTime
+    /// Who said it ("speaker_0"), when the transcriber tells speakers apart.
+    public var speaker: String?
 
-    public init(text: String, start: MediaTime, end: MediaTime) {
+    public init(text: String, start: MediaTime, end: MediaTime, speaker: String? = nil) {
         self.text = text
         self.start = start
         self.end = end
+        self.speaker = speaker
     }
 }
 
@@ -50,27 +53,64 @@ public struct CueSegmenter: Sendable {
     public func cues(from words: [TranscribedWord]) -> [Cue] {
         let groups = group(words.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty })
         var frames: [(start: Int64, end: Int64, text: String)] = groups.map { group in
-            (group.first!.start.firstFrame(at: frameRate), group.last!.end.firstFrame(at: frameRate), Self.layout(group.map(\.text), maxLineLength: maxLineLength))
+            (group.first!.start.firstFrame(at: frameRate), group.last!.end.firstFrame(at: frameRate), text(of: group))
         }
         time(&frames)
         return frames.map { Cue(start: MediaTime(frame: $0.start, rate: frameRate), end: MediaTime(frame: $0.end, rate: frameRate), text: $0.text) }
     }
 
+    /// A cue's text: two balanced lines at most, or, when two people speak
+    /// in it, a line for each starting with a dash ("- Hi.\n- Hello.").
+    func text(of words: [TranscribedWord]) -> String {
+        let turns = Self.turns(words)
+        guard turns.count == 2 else { return Self.layout(words.map(\.text), maxLineLength: maxLineLength) }
+        return turns.map { "- " + Self.join($0.map(\.text)) }.joined(separator: "\n")
+    }
+
+    /// The words split where the speaker changes. Words without a speaker belong to the one before.
+    static func turns(_ words: [TranscribedWord]) -> [[TranscribedWord]] {
+        var turns: [[TranscribedWord]] = []
+        for word in words {
+            if let speaker = word.speaker, let previous = turns.last?.last(where: { $0.speaker != nil })?.speaker, speaker != previous {
+                turns.append([word])
+            } else if turns.isEmpty {
+                turns.append([word])
+            } else {
+                turns[turns.count - 1].append(word)
+            }
+        }
+        return turns
+    }
+
     /// Splits the words where a cue has to end: a long pause, the text or
-    /// duration limit, or (once a cue has some text) the end of a sentence.
+    /// duration limit, (once a cue has some text) the end of a sentence, or a
+    /// new speaker who does not fit a two-line dialogue cue.
     func group(_ words: [TranscribedWord]) -> [[TranscribedWord]] {
         let maxCharacters = maxLineLength * maxLines
+        // A dialogue line starts with "- ".
+        let maxDialogueLine = maxLineLength - 2
         var groups: [[TranscribedWord]] = []
         var current: [TranscribedWord] = []
         for word in words {
             if let last = current.last, let first = current.first {
-                let text = Self.join(current.map(\.text) + [word.text])
+                let turns = Self.turns(current + [word])
                 let pause = (word.start - last.end).seconds
-                let tooLong = text.count > maxCharacters || (word.end - first.start).seconds > maxDuration
-                let sentenceEnded = Self.endsSentence(last.text) && endsCue(current, before: word)
-                // Two lines of text never fit one line's layout when a line would overflow.
-                let unbreakable = Self.layout(current.map(\.text) + [word.text], maxLineLength: maxLineLength)
-                    .split(separator: "\n").contains { $0.count > maxLineLength }
+                let tooLong: Bool
+                let unbreakable: Bool
+                let sentenceEnded: Bool
+                if turns.count > 1 {
+                    // A dialogue cue: two speakers, a line each.
+                    tooLong = turns.count > 2 || (word.end - first.start).seconds > maxDuration
+                    unbreakable = turns.contains { Self.join($0.map(\.text)).count > maxDialogueLine }
+                    let newSpeaker = turns.count == 2 && turns[1].count == 1
+                    sentenceEnded = (Self.endsSentence(last.text) || newSpeaker) && endsCue(current, before: word, speakerChanges: newSpeaker)
+                } else {
+                    tooLong = Self.join(current.map(\.text) + [word.text]).count > maxCharacters || (word.end - first.start).seconds > maxDuration
+                    // Two lines of text never fit one line's layout when a line would overflow.
+                    unbreakable = Self.layout(current.map(\.text) + [word.text], maxLineLength: maxLineLength)
+                        .split(separator: "\n").contains { $0.count > maxLineLength }
+                    sentenceEnded = Self.endsSentence(last.text) && endsCue(current, before: word)
+                }
                 if pause >= pauseSeconds || tooLong || sentenceEnded || unbreakable {
                     groups.append(current)
                     current = []
@@ -84,13 +124,15 @@ public struct CueSegmenter: Sendable {
 
     /// Whether a finished sentence makes a cue of its own: a long one always,
     /// a short one when it can be read in the time until the next word (so
-    /// splitting does not make cues too fast or too short).
-    func endsCue(_ words: [TranscribedWord], before next: TranscribedWord) -> Bool {
+    /// splitting does not make cues too fast or too short). Before a new
+    /// speaker, only when it can be read: else the two make a dialogue cue.
+    func endsCue(_ words: [TranscribedWord], before next: TranscribedWord, speakerChanges: Bool = false) -> Bool {
         let characters = Self.join(words.map(\.text)).count
-        if characters >= maxLineLength / 2 { return true }
+        if characters >= maxLineLength / 2, !speakerChanges { return true }
         guard characters >= sentenceCharacters else { return false }
         let seconds = (next.start - words[0].start).seconds - Double(preset.minimumGapFrames) / frameRate.framesPerSecond
-        let speed = preset.maxCharactersPerSecond ?? .infinity
+        // A new speaker gets a cue of their own whenever the line before can stay up the minimum time.
+        let speed = speakerChanges ? .infinity : preset.maxCharactersPerSecond ?? .infinity
         return seconds >= minDuration && Double(characters) / seconds <= speed
     }
 

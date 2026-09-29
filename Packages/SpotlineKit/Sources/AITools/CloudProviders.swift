@@ -173,6 +173,8 @@ public struct ElevenLabsTranscriber: Transcriber {
         form.add(name: "model_id", value: Self.model)
         form.add(name: "timestamps_granularity", value: "word")
         form.add(name: "tag_audio_events", value: "false")
+        // Who says each word, so a cue two people speak in becomes a dialogue cue.
+        form.add(name: "diarize", value: "true")
         if let language { form.add(name: "language_code", value: Languages.base(language)) }
         form.add(name: "file", filename: "dialogue.ogg", contentType: "audio/ogg", data: encoded)
         var request = URLRequest(url: endpoint, timeoutInterval: 1800)
@@ -205,6 +207,12 @@ public struct ElevenLabsTranscriber: Transcriber {
             var type: String
             var start: Double?
             var end: Double?
+            var speakerID: String?
+
+            enum CodingKeys: String, CodingKey {
+                case text, type, start, end
+                case speakerID = "speaker_id"
+            }
         }
 
         var words: [Word]
@@ -217,7 +225,7 @@ public struct ElevenLabsTranscriber: Transcriber {
             guard word.type == "word", !text.isEmpty, let start = word.start else { return nil }
             let begin = MediaTime(value: Int64((start * 1000).rounded()), timescale: 1000)
             let end = MediaTime(value: Int64(((word.end ?? start) * 1000).rounded()), timescale: 1000)
-            return TranscribedWord(text: text, start: begin, end: max(end, begin))
+            return TranscribedWord(text: text, start: begin, end: max(end, begin), speaker: word.speakerID)
         }
         .sorted { $0.start < $1.start }
     }
