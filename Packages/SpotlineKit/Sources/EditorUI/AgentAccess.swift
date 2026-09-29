@@ -23,27 +23,33 @@ public final class AgentAccess {
         }
     }
     public let socketPath: String
-    @ObservationIgnored private let editor: EditorState
+    @ObservationIgnored private let run: @MainActor (AgentTool, [String: JSONValue]) async throws -> JSONValue
     @ObservationIgnored private let settings: UserDefaults?
     @ObservationIgnored private var server: AgentSocketServer?
     static let enabledKey = "AgentAccessEnabled"
 
     /// `enabled` overrides the stored setting (UI tests turn access on with `-EnableAgentAccess`).
-    public init(editor: EditorState, settings: UserDefaults?, enabled: Bool? = nil, socketPath: String = AgentSocketPath.default) {
-        self.editor = editor
+    /// `run` runs a tool call on the project window agents work in.
+    public init(
+        settings: UserDefaults?, enabled: Bool? = nil, socketPath: String = AgentSocketPath.default,
+        run: @escaping @MainActor (AgentTool, [String: JSONValue]) async throws -> JSONValue
+    ) {
+        self.run = run
         self.settings = settings
         self.socketPath = socketPath
         self.isEnabled = enabled ?? settings?.bool(forKey: Self.enabledKey) ?? false
         update()
     }
 
-    /// The app's access setting, with the stored choice or the launch option.
-    public convenience init(editor: EditorState) {
-        let options = editor.launchOptions
-        self.init(
-            editor: editor, settings: options.isUITestMode ? nil : .standard,
-            enabled: options.enablesAgentAccess ? true : nil
-        )
+    /// The app's access setting, with the stored choice or the launch option. Agents
+    /// work in the project window in front (see `EditorWorkspace.runAgentTool`).
+    public convenience init(workspace: EditorWorkspace) {
+        let options = workspace.launchOptions
+        self.init(settings: options.isUITestMode ? nil : .standard, enabled: options.enablesAgentAccess ? true : nil) {
+            [weak workspace] tool, arguments in
+            guard let workspace else { throw AgentToolError("Spotline is quitting.") }
+            return try await workspace.runAgentTool(tool, arguments: arguments)
+        }
     }
 
     /// Stops listening, e.g. when the app quits.
@@ -59,9 +65,9 @@ public final class AgentAccess {
             return
         }
         guard server == nil else { return }
-        let editor = editor
+        let run = run
         let mcp = MCPServer(version: Self.appVersion) { tool, arguments in
-            try await editor.runAgentTool(tool, arguments: arguments)
+            try await run(tool, arguments)
         }
         let server = AgentSocketServer(path: socketPath) { line in await mcp.handle(line: line) }
         do {

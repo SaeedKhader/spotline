@@ -7,8 +7,8 @@ import SubtitleCore
 /// again. Waveforms are also keyed by audio stream, so switching tracks redoes
 /// only the waveform.
 ///
-/// Project packages will hold their own copy (docs/ARCHITECTURE.md, section 5);
-/// until Spotline has project files, this cache lives in ~/Library/Caches.
+/// Project packages hold their own copy (docs/ARCHITECTURE.md, section 5); this
+/// cache in ~/Library/Caches serves untitled projects and prepared audio.
 public struct AnalysisCache: Sendable {
     /// Bumped whenever the analyzer's output changes, so old entries are ignored.
     public static let formatVersion = 4

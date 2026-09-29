@@ -31,6 +31,10 @@ public final class SimulatedPlaybackEngine: PlaybackEngine {
         ))
     }
 
+    public func unload() {
+        update(PlaybackStatus())
+    }
+
     public func setPaused(_ paused: Bool) {
         guard status.hasMedia else { return }
         var next = status

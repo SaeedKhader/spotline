@@ -108,7 +108,7 @@ struct SubtitleProject { var media: MediaReference; var frameRate: FrameRate; va
 
 - Times snap to frames on edit; SMPTE display handles drop-frame and a program start offset (e.g. 01:00:00:00 or 10:00:00:00).
 - Every mutation goes through `SubtitleCore` operations that register undo, so undo works identically from UI, commands and tests.
-- Project file: a `.mtproj` package (JSON manifest + one file per track + cached waveform), with the media as a security-scoped bookmark plus path fallback for relinking.
+- Project file: a `.spotline` package (JSON manifest + one file per track + cached analysis and AI results), with the media as a security-scoped bookmark plus path fallback for relinking. Built in M9 (below).
 
 As built in M2:
 - `SubtitleFormats` reads and writes SRT and WebVTT. Cue text is kept as written (inline tags and entities included), times are exact rationals (an SRT `00:00:01,5` is 3/2 s), so import then export changes only layout. Reading is lenient (missing cue numbers, `.` separators, CRLF, BOM, UTF-16, Windows-1252); writing is canonical UTF-8. WebVTT cue identifiers and settings are dropped until cues gain positioning (M4).
@@ -116,7 +116,15 @@ As built in M2:
 - Shortcuts that are typing keys (I, O, Space, arrows, ⌘⌫) are disabled in the menus while the cue text editor has focus (`KeyShortcut.conflictsWithTextEditing`), so typing never triggers them. Escape leaves the text editor.
 - Parameterized edits (`select`, `setText`) are `EditorState` methods that share the same undo path; the agent bridge (M7) passes them as tool arguments.
 - Cue in/out are shown as the first frame showing the cue and the first frame without it (`MediaTime.firstFrame(at:)`); selecting a cue seeks to its first frame.
-- There is no project file yet: the app keeps a single AppKit-owned window, shows the subtitle file's name and an edited dot, and asks to export unsaved changes on quit. NSDocument arrives with the `.mtproj` project format.
+- M2 had no project file: one AppKit-owned window that asked to export unsaved changes on quit. M9 replaced it with project documents.
+
+As built in M9 (project files):
+- `SpotlineDocument` (an `NSDocument`) per project window, each with its own `EditorState` and player; `EditorWorkspace` tracks the window in front for the menus and agents, and shares Settings › AI between windows. With no window open, the menus read a stand-in editor that only allows New Project, Open Project and Open Media.
+- The package (`ProjectFile`): `project.json` (format version, video reference, frame rate, QC preset, subtitle and source files, selection, playhead), `subtitles.json` and `source.json` (the tracks as Codable, so AI tint, speakers, addressees and variants survive), `Analysis/` (waveform and speech per audio stream, shot changes) and `AI/` (each transcriber's raw words). Reading is lenient about the caches; a newer format version is refused.
+- Standard Mac behaviour from AppKit: autosave in place, File › Revert To (last saved version, or browse all versions), window restoration, Open Recent. The editor keeps its own undo stack and reports each change to the document (`ProjectChange`: edit, undo, redo, other), which drives the edited state and autosave.
+- The first AI tool run on an untitled project with a video saves it beside the video (`Episode 1.spotline`, or `Episode 1 2.spotline` when taken) without asking, so results are never lost. Transcribing again reuses the saved words instead of uploading the audio again. Reopening a project analyzes nothing: stored waveforms, speech and shot changes are used (`~/Library/Caches` stays a second cache).
+- The video is found by bookmark (follows moves and renames on its disk), then by its path, then by its path from the project, then beside the project. Otherwise Spotline asks where it went; the cues open either way, the project keeps pointing at the video, and opening the video later relinks it.
+- Opening media in a window that already has a video opens a new project window (agents too), so nothing is replaced. SRT, ASS, TTML, STL and the rest stay imports and exports.
 
 ### Formats (priority order)
 1. SRT, WebVTT (import/export) — M2
@@ -214,7 +222,7 @@ Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
 - **Languages.** Source and target languages come from the file, else `NLLanguageRecognizer`; a new translation's target is the last one chosen (Arabic by default). Translation › Target Language changes it (undoable; exports carry it).
 - **Glossary** (`Translation.Glossary`): source term, agreed translation, note, per language pair. Terms match whole words ignoring case, accents, Arabic/Hebrew vowel marks, hamza forms, tatweel and ى/ي, ة/ه (`MatchText`). A row shows the terms its source uses, green when the target uses the translation and orange when not. Translation › Show Glossary (⌥⌘G) opens a floating panel to edit terms; Import Glossary… reads CSV or tab-separated files (source, target, note; header optional).
 - **Translation memory** (`SubtitleTranslation.TranslationMemory`): pairs are stored when you leave a translated cue, on export, and with Add All Translations to Memory. The selected row lists up to three suggestions (exact 100%, fuzzy from 70% by word-level edit distance); click one, or Use Best Memory Match (⌃⌘M). Fill Untranslated Cues from Memory fills every empty cue with an exact match in one undoable edit. Copy Source to Target (⌥⌘C) copies names and signs.
-- **Storage.** Until project files exist, glossary and memory live in `~/Library/Application Support/<bundle id>/Translation/<source>-<target>/` (`glossary.json`, `memory.json`). The glossary moves into the project package later; the memory stays shared. UI tests use neither.
+- **Storage.** Glossary and memory live in `~/Library/Application Support/<bundle id>/Translation/<source>-<target>/` (`glossary.json`, `memory.json`). They are shared by every project with that language pair (M9 kept them out of the package). UI tests use neither.
 - **QC on the target.** M4's presets, issues panel and Review menu check the target. Translation adds: an empty target whose source has text is "Not translated" (an error), a glossary term whose translation is missing is a warning, and an unsure addressee guess is a warning.
 - **Gender and addressee fields (7b).** `SubtitleTrack.speakers` (`Speaker`: name, gender, confidence, source inferred/confirmed), `Cue.speakerID` and `Cue.addressee` (`AddresseeTag`: male, female, dual, group male/female/mixed, unknown, with confidence and source). No manual tagging UI: M6's AI fills them. A tagged cue shows a ♂/♀/group chip, orange when it is a guess below 75% (`needsReview`), and QC lists those guesses.
 - **EBU STL** (`SubtitleFormats.EBUSTL`): reads and writes the GSI and TTI blocks. `STL25.01` is 25 fps; `STL30.01` is read and written as 29.97 non-drop. Character tables: Latin (ISO 6937, with accents as prefix diacritics), Cyrillic, Arabic, Greek and Hebrew (ISO 8859-5 to -8), chosen on export from the text's script. Italics and underline map to `<i>`/`<u>`; teletext colour, double-height and box codes are dropped on read; rows in the top half make top cues; extension blocks join and long text is split across them; comments and user data are skipped; times are taken from the programme start (TCP), which is kept (`EBU.TCP`) with the title, translator, publisher and country. Written as teletext (DSC 1, 23 rows, 40 characters), centred, bottom lines ending on row 22. Characters the table lacks become "?". A text `.stl` (Spruce STL) is not read.
@@ -325,6 +333,7 @@ Some target languages (Arabic first; also Hebrew, French, Spanish, etc.) change 
 | M6 | AI tools | Audio preparation pipeline, transcription with timestamps → segmented cues, AI translation, profanity/cleanup transforms, review-as-diff |
 | M7 | Agent bridge | Local MCP server over the command catalog |
 | M8 | UI revision | One look across every milestone: AI tint, fewer duplicate buttons, menus, Settings, dark everywhere, RTL rows, dialogue |
+| M9 | Project files | `.spotline` documents with autosave, versions and window restoration; cached analysis and AI results; relinking a moved video |
 
 ## 10. Decisions so far
 

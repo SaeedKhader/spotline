@@ -19,7 +19,9 @@ targets:
   Spotline:
     type: application
     platform: macOS
-    sources: [App]
+    sources:
+      - path: App
+        excludes: [Info.plist]
     dependencies:
       - package: SpotlineKit
         product: EditorUI
@@ -36,6 +38,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.saeedkhader.spotline
         PRODUCT_NAME: Spotline
         GENERATE_INFOPLIST_FILE: YES
+        # The project document type (.spotline); merged with the generated keys below.
+        INFOPLIST_FILE: App/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Spotline
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.video
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Saeed Khader. GPL-3.0-or-later."

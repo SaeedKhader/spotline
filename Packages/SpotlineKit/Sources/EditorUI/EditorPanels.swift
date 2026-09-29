@@ -11,8 +11,7 @@ enum EditorPanels {
     static func chooseMedia() -> URL? {
         let panel = NSOpenPanel()
         panel.title = EditorCommand.openMedia.title
-        panel.allowedContentTypes = [.movie, .audiovisualContent, .audio]
-            + ["mkv", "webm", "mxf", "ts", "m2ts"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = mediaTypes
         panel.allowsMultipleSelection = false
         return panel.runModal() == .OK ? panel.url : nil
     }
@@ -62,7 +61,6 @@ enum EditorPanels {
                 styleMask: [.titled, .closable, .resizable, .utilityWindow],
                 backing: .buffered, defer: false
             )
-            panel.contentViewController = NSHostingController(rootView: GlossaryView(editor: editor))
             panel.identifier = NSUserInterfaceItemIdentifier(AccessibilityID.Glossary.root)
             panel.isFloatingPanel = true
             panel.hidesOnDeactivate = true
@@ -71,6 +69,8 @@ enum EditorPanels {
             panel.center()
             glossaryPanel = panel
         }
+        // The glossary of the project window that asked (each has its own language pair).
+        glossaryPanel?.contentViewController = NSHostingController(rootView: GlossaryView(editor: editor))
         glossaryPanel?.makeKeyAndOrderFront(nil)
     }
 
@@ -95,6 +95,24 @@ enum EditorPanels {
         alert.informativeText = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
         alert.runModal()
     }
+
+    /// Asks where a project's video went, when it is no longer where it was.
+    static func locateMissingMedia(fileName: String) -> URL? {
+        let alert = NSAlert()
+        alert.messageText = "Where is “\(fileName)”?"
+        alert.informativeText = "The project's video was moved, renamed or is on a disk that isn't connected. Locate it to keep working with the picture and sound; the cues open either way."
+        alert.addButton(withTitle: "Locate…")
+        alert.addButton(withTitle: "Open Without Video")
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let panel = NSOpenPanel()
+        panel.title = "Locate “\(fileName)”"
+        panel.allowedContentTypes = mediaTypes
+        panel.allowsMultipleSelection = false
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    static let mediaTypes: [UTType] = [.movie, .audiovisualContent, .audio]
+        + ["mkv", "webm", "mxf", "ts", "m2ts"].compactMap { UTType(filenameExtension: $0) }
 
     /// Asks before macOS downloads a speech model (once per language).
     static func confirmSpeechModelDownload(language: String) async -> Bool {

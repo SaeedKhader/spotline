@@ -3,15 +3,28 @@ import SwiftUI
 
 /// Builds the app's command menus from `EditorCommand.all`.
 public struct EditorMenuCommands: Commands {
-    let editor: EditorState
+    let workspace: EditorWorkspace
+    /// The project window in front, or the stand-in while none is open.
+    var editor: EditorState { workspace.menuEditor }
 
-    public init(editor: EditorState) {
-        self.editor = editor
+    public init(workspace: EditorWorkspace) {
+        self.workspace = workspace
     }
 
     public var body: some Commands {
-        CommandGroup(after: .newItem) {
-            buttons(for: .file)
+        CommandGroup(replacing: .newItem) {
+            buttons(for: .file, only: [.newProject, .openProject])
+            OpenRecentMenu(workspace: workspace)
+            Divider()
+            buttons(for: .file, only: [.openMedia, .importSubtitles, .importEmbeddedSubtitles])
+        }
+        CommandGroup(replacing: .saveItem) {
+            buttons(for: .file, only: [.saveProject, .duplicateProject])
+            Menu("Revert To") {
+                buttons(for: .file, only: [.revertProject, .browseProjectVersions])
+            }
+            Divider()
+            buttons(for: .file, only: [.exportSubtitles])
         }
         // The editor's undo stack also covers typing in the cue text editor,
         // so it replaces the text system's Undo and Redo.
@@ -77,6 +90,22 @@ public struct EditorMenuCommands: Commands {
             }
             .keyboardShortcut(command.defaultShortcut?.keyboardShortcut)
             .disabled(!editor.isShortcutEnabled(for: command))
+        }
+    }
+}
+
+/// File › Open Recent: projects opened lately.
+struct OpenRecentMenu: View {
+    let workspace: EditorWorkspace
+
+    var body: some View {
+        Menu("Open Recent") {
+            ForEach(workspace.recentProjects, id: \.self) { url in
+                Button(url.deletingPathExtension().lastPathComponent) { workspace.openProject(at: url) }
+            }
+            if !workspace.recentProjects.isEmpty { Divider() }
+            Button("Clear Menu") { workspace.clearRecentProjects() }
+                .disabled(workspace.recentProjects.isEmpty)
         }
     }
 }

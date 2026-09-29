@@ -70,11 +70,15 @@ struct VideoSurfaceView: View {
             }
             SubtitleOverlayHost(editor: editor)
             if !editor.hasMedia {
-                let hint = "Drop a video here (\(EditorCommand.openMedia.menuHint("File")))"
+                // A project whose video was moved: opening it again relinks the project.
+                let missing = editor.missingMediaName
+                let hint = missing == nil
+                    ? "Drop a video here (\(EditorCommand.openMedia.menuHint("File")))"
+                    : "Drop it here to relink the project (\(EditorCommand.openMedia.menuHint("File")))"
                 VStack(spacing: 10) {
-                    Image(systemName: "film")
+                    Image(systemName: missing == nil ? "film" : "questionmark.video")
                         .font(.largeTitle)
-                    Text("No Media")
+                    Text(missing.map { "“\($0)” Not Found" } ?? "No Media")
                         .font(.title3)
                     Text(hint)
                         .font(.callout)

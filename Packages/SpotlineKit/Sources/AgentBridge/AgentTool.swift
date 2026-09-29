@@ -66,7 +66,7 @@ public enum AgentTool: String, CaseIterable, Sendable {
         case .pause:
             "Pauses playback."
         case .openMedia:
-            "Opens a video or audio file. Opening media starts a new project: unsaved subtitles are lost, so this fails when there are some unless discard_unsaved_changes is true."
+            "Opens a video or audio file. When the project window in front already has a video, it opens in a new project window, so nothing is lost; later tools work there."
         case .importSubtitles:
             "Replaces the cues with a subtitle file's (SRT, WebVTT, ASS/SSA, TTML/IMSC, EBU STL). Undoable."
         case .openSourceSubtitles:
