@@ -207,7 +207,6 @@ extension EditorState {
         let command: EditorCommand = switch tool {
         case .transcribe: .transcribe
         case .translate: .translateWithAI
-        case .detectSpeakers: .detectSpeakers
         case .maskProfanity: .maskProfanity
         case .removeHearingImpaired: .removeHearingImpaired
         case .fixPunctuation: .fixPunctuation
@@ -218,8 +217,8 @@ extension EditorState {
                 throw AgentToolError("\(review.title) changes are waiting for the person to accept or reject them in Spotline.")
             }
             switch tool {
-            case .transcribe, .detectSpeakers:
-                throw AgentToolError(hasMedia ? "There are no cues with text to find speakers for." : "No media is open.")
+            case .transcribe:
+                throw AgentToolError("No media is open.")
             case .translate: throw AgentToolError(isTranslating ? "Every cue with source text is translated already." : "There are no cues with text to translate.")
             default: throw AgentToolError("There are no cues for \(command.title).")
             }
@@ -318,8 +317,17 @@ extension EditorState {
             "position": .string(cue.position.rawValue),
             "characters_per_second": JSONValue((cue.readingSpeed * 10).rounded() / 10),
         ]
-        if let speaker = cue.speakerID.flatMap(speakerLabel) ?? cue.speaker { json["speaker"] = .string(speaker) }
-        if let addressee = cue.addressee { json["addressee"] = .string(String(describing: addressee.addressee)) }
+        if let speaker = cue.speaker { json["speaker"] = .string(speaker) }
+        if let voices = cue.voices { json["voices"] = .array(voices.map(JSONValue.string)) }
+        if let flag = cue.flag {
+            json["translation_choice"] = [
+                "why": .string(flag.note),
+                "confidence": JSONValue(flag.confidence),
+                "decided": JSONValue(flag.isResolved),
+                "variants": .array(flag.variants.map { .string($0.text) }),
+                "chosen": JSONValue(flag.chosen + 1),
+            ]
+        }
         if cue.isAIGenerated == true { json["written_by_ai"] = true }
         if let source = sourceCues[cue.id] { json["source_text"] = .string(source.text) }
         if let found = issues[cue.id] { json["issues"] = .array(found.map { .string($0.message) }) }

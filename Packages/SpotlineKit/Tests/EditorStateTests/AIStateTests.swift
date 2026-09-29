@@ -88,7 +88,7 @@ struct AIStateTests {
         #expect(editor.track.cues.map(\.text) == ["Who's there?"])
     }
 
-    @Test func translationProposesAddresseeVariants() async throws {
+    @Test func translationFlagsLinesThatReadMoreThanOneWay() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "AIStateTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let source = directory.appending(path: "Pilot.en.srt")
@@ -102,25 +102,107 @@ struct AIStateTests {
         await finish(editor)
         #expect(editor.pendingReview == nil)
         let first = editor.track.cues[0]
+        // The recommendation goes straight in, tinted, with the other variants and the reason kept.
         #expect(first.text == "[ar] Where are you going? ♀")
-        #expect(first.addressee?.needsReview == true)
-        #expect(first.variants?.count == 3)
-        #expect(editor.track.cues[1].text == "[ar] Home.")
+        #expect(first.isAIGenerated == true)
+        #expect(first.flag?.variants.count == 3)
+        #expect(first.flag?.note == "Beth answered last")
+        #expect(first.flag?.isResolved == false)
+        #expect(editor.track.cues[1].flag == nil)
+        #expect(editor.track.cast.map(\.name) == ["Beth", "Jerry"], "The translator's cast is kept")
+        #expect(editor.cuesToChoose.map(\.id) == [first.id])
         #expect(!editor.canPerform(.translateWithAI), "Everything is translated")
 
-        // One click on the chip picks the male wording and confirms it.
-        editor.chooseAddressee(.male, forCue: first.id)
+        // One click picks another variant and settles the choice, as one undoable step.
+        editor.chooseVariant(1, forCue: first.id)
         #expect(editor.track.cues[0].text == "[ar] Where are you going? ♂")
-        #expect(editor.track.cues[0].addressee == AddresseeTag(.male, confidence: 1, source: .confirmed))
-        #expect(editor.issues[first.id]?.contains { $0.kind == .addresseeGuess } != true)
+        #expect(editor.track.cues[0].flag?.isResolved == true)
+        #expect(editor.track.cast.member(named: "Jerry")?.isConfirmed == true)
+        #expect(editor.cuesToChoose.isEmpty)
         editor.perform(.undo)
         #expect(editor.track.cues[0].text == "[ar] Where are you going? ♀")
+        #expect(editor.track.cues[0].flag?.isResolved == false)
+        #expect(editor.track.cast.member(named: "Jerry")?.isConfirmed == false)
+    }
+
+    /// Two open choices about Beth, the second less sure; and one about Jerry.
+    func flaggedCues() -> [Cue] {
+        func line(_ at: Int64, _ confidence: Double, _ variants: [TranslationVariant]) -> Cue {
+            var cue = cue(variants[0].text, at: at)
+            cue.isAIGenerated = true
+            cue.flag = TranslationFlag(reasons: [.listener], variants: variants, confidence: confidence, note: "")
+            return cue
+        }
+        return [
+            line(0, 0.7, [
+                TranslationVariant(text: "انت مستعد؟", listeners: ["Beth"], listenerGender: .male, listenerCount: .one),
+                TranslationVariant(text: "انتِ مستعدة؟", listeners: ["Beth"], listenerGender: .female, listenerCount: .one),
+            ]),
+            line(2, 0.4, [
+                TranslationVariant(text: "هل انت جائع؟", listeners: ["Beth"], listenerGender: .male, listenerCount: .one),
+                TranslationVariant(text: "هل انتِ جائعة؟", listeners: ["Beth"], listenerGender: .female, listenerCount: .one),
+                TranslationVariant(text: "هل انتم جائعون؟", listeners: ["Beth", "Jerry"], listenerGender: .mixed, listenerCount: .two),
+            ]),
+            line(4, 0.9, [
+                TranslationVariant(text: "اجلس.", listeners: ["Jerry"], listenerGender: .male, listenerCount: .one),
+                TranslationVariant(text: "اجلسي.", listeners: ["Jerry"], listenerGender: .female, listenerCount: .one),
+            ]),
+        ]
+    }
+
+    @Test func aPickAboutSomeoneReranksTheirOtherLines() {
+        let cues = flaggedCues()
+        let editor = makeEditor(cues: cues)
+        // Least sure first.
+        #expect(editor.cuesToChoose.map(\.id) == [cues[1].id, cues[0].id, cues[2].id])
+        // Beth is a woman: her other line switches to the feminine form and is settled,
+        // the line to Beth and Jerry keeps its choice open, Jerry's line is untouched.
+        editor.chooseVariant(1, forCue: cues[1].id)
+        #expect(editor.track.cues[1].text == "هل انتِ جائعة؟")
+        #expect(editor.track.cast.member(named: "Beth")?.gender == .female)
+        #expect(editor.track.cues[0].text == "انتِ مستعدة؟")
+        #expect(editor.track.cues[0].flag?.isResolved == true)
+        #expect(editor.track.cues[2].text == "اجلس.")
+        #expect(editor.track.cues[2].flag?.isResolved == false)
+        // All of it is one undo step.
+        editor.perform(.undo)
+        #expect(editor.track.cues.map(\.text) == cues.map(\.text))
+        #expect(editor.track.cast.isEmpty)
+    }
+
+    @Test func reviewingShowsOnlyOpenChoicesAndAcceptingTheRestEndsIt() {
+        let cues = flaggedCues()
+        let editor = makeEditor(cues: cues)
+        #expect(editor.isOn(.reviewChoices) == false)
+        #expect(editor.perform(.reviewChoices))
+        #expect(editor.isReviewingChoices)
+        #expect(editor.selectedCueID == cues[1].id, "The least sure line is selected")
+        // Up and down move through the flagged lines in the review's order.
+        #expect(editor.perform(.nextCue))
+        #expect(editor.selectedCueID == cues[0].id)
+        // A pick moves on to the next open choice.
+        editor.chooseVariant(0, forCue: cues[0].id)
+        #expect(editor.selectedCueID == cues[2].id)
+        #expect(editor.perform(.acceptRemainingChoices))
+        #expect(!editor.isReviewingChoices)
+        #expect(editor.cuesToChoose.isEmpty)
+        #expect(editor.track.cues[2].text == "اجلس.", "Accepting keeps the translator's picks")
+        #expect(!editor.canPerform(.reviewChoices))
+        editor.perform(.undo)
+        #expect(editor.cuesToChoose.count == 2)
+    }
+
+    @Test func typingSettlesTheChoice() {
+        let cues = flaggedCues()
+        let editor = makeEditor(cues: cues)
+        editor.setText("انتِ جاهزة؟", forCue: cues[0].id)
+        #expect(editor.track.cues[0].flag?.isResolved == true)
+        #expect(editor.track.cues[0].isAIGenerated == nil)
     }
 
     @Test func transcribedCuesCanBeTranslatedDirectly() async throws {
         var line = cue("Where are you going?", at: 1)
-        let speaker = Speaker(gender: .male, confidence: 0.9)
-        line.speakerID = speaker.id
+        line.voices = ["speaker_0"]
         let editor = makeEditor(cues: [line, cue("Home.", at: 3)])
         #expect(!editor.isTranslating)
         #expect(editor.canPerform(.translateWithAI))
@@ -128,7 +210,7 @@ struct AIStateTests {
         #expect(editor.isTranslating)
         #expect(editor.sourceTrack?.cues.map(\.text) == ["Where are you going?", "Home."])
         #expect(editor.track.languageCode == "ar")
-        #expect(editor.track.cues[0].speakerID == speaker.id)
+        #expect(editor.voices(for: editor.track.cues[0]) == ["speaker_0"], "The source's voices go to the translator")
         await finish(editor)
         #expect(editor.track.cues.map(\.text) == ["[ar] Where are you going? ♀", "[ar] Home."])
     }
@@ -192,12 +274,14 @@ struct AIStateTests {
     }
 
     @Test func splittingDropsVariants() {
-        var withVariants = Cue(start: .zero, end: MediaTime(value: 2, timescale: 1), text: "انت مشغول\nجدا")
-        withVariants.variants = [TextVariant(addressee: .male, text: "انت مشغول\nجدا")]
-        let editor = makeEditor(cues: [withVariants])
-        editor.select(withVariants.id)
+        var flagged = Cue(start: .zero, end: MediaTime(value: 2, timescale: 1), text: "انت مشغول\nجدا")
+        flagged.flag = TranslationFlag(reasons: [.listener], variants: [
+            TranslationVariant(text: "انت مشغول\nجدا"), TranslationVariant(text: "انتِ مشغولة\nجدا"),
+        ], confidence: 0.5, note: "")
+        let editor = makeEditor(cues: [flagged])
+        editor.select(flagged.id)
         editor.perform(.splitCue)
-        #expect(editor.track.cues.allSatisfy { $0.variants == nil })
+        #expect(editor.track.cues.allSatisfy { $0.flag == nil })
     }
 }
 

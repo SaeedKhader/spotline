@@ -56,7 +56,18 @@ public struct CueSegmenter: Sendable {
             (group.first!.start.firstFrame(at: frameRate), group.last!.end.firstFrame(at: frameRate), text(of: group))
         }
         time(&frames)
-        return frames.map { Cue(start: MediaTime(frame: $0.start, rate: frameRate), end: MediaTime(frame: $0.end, rate: frameRate), text: $0.text) }
+        return zip(frames, groups).map { frame, group in
+            Cue(
+                start: MediaTime(frame: frame.start, rate: frameRate), end: MediaTime(frame: frame.end, rate: frameRate), text: frame.text,
+                voices: Self.voices(of: group)
+            )
+        }
+    }
+
+    /// Who says the words, one label per turn, nil when the transcriber did not tell voices apart.
+    static func voices(of words: [TranscribedWord]) -> [String]? {
+        let voices = turns(words).compactMap { $0.first(where: { $0.speaker != nil })?.speaker }
+        return voices.isEmpty ? nil : voices
     }
 
     /// A cue's text: two balanced lines at most, or, when two people speak
@@ -250,7 +261,7 @@ public final class TranscriptAccumulator: @unchecked Sendable {
             let frame = cue.start.firstFrame(at: pipeline.segmenter.frameRate)
             let id = ids[frame] ?? cue.id
             ids[frame] = id
-            return Cue(id: id, start: cue.start, end: cue.end, text: cue.text)
+            return Cue(id: id, start: cue.start, end: cue.end, text: cue.text, voices: cue.voices)
         }
     }
 }

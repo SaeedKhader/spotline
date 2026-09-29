@@ -34,25 +34,36 @@ final class AIToolsUITests: XCTestCase {
     }
 
     @MainActor
-    func testTranslationGuessesTheAddresseeAndSwapsInOneClick() throws {
+    func testTranslationFlagsLinesAndAPickSwapsInOneClick() throws {
         let app = launchApp(source: "translation-source-23.976.srt")
         XCTAssertTrue(app.cueCells(.source).firstMatch.waitForExistence(timeout: 10), "No source cells")
         chooseAIMenuItem(.translateWithAI, in: app)
 
-        let text = app.cueCells(.text).element(boundBy: 0)
-        waitForValue(of: text, toEqual: "[ar] Where are you going? ♀")
+        let texts = app.cueCells(.text)
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♀")
         XCTAssertFalse(app.descendants(matching: .any)[AccessibilityID.CueList.aiReview].exists, "Translation is not reviewed")
-        // The unsure guess is flagged; one click on its chip picks another addressee's wording.
-        let chip = app.cueCells(.addressee).firstMatch
-        XCTAssertTrue(chip.waitForExistence(timeout: 10), "No addressee chip")
-        XCTAssertEqual(chip.value as? String, "female")
-        chip.click()
+        // Both lines read more than one way; each shows its variants.
+        let summary = app.descendants(matching: .any)[AccessibilityID.CueList.choicesSummary]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices summary")
+        waitForValue(of: summary, toEqual: "2 lines to choose")
+        XCTAssertEqual(app.cueCells(.choices).count, 2)
+
+        // The review shows only those lines; one click on a variant uses it.
+        summary.click()
+        XCTAssertTrue(app.descendants(matching: .any)[AccessibilityID.CueList.choiceReview].waitForExistence(timeout: 10), "No review")
         let male = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH 'cueList.row.' AND identifier ENDSWITH '.addressee.male'")
+            NSPredicate(format: "identifier BEGINSWITH 'cueList.row.' AND identifier ENDSWITH '.choices.1'")
         ).firstMatch
-        XCTAssertTrue(male.waitForExistence(timeout: 10), "No addressee menu")
+        XCTAssertTrue(male.waitForExistence(timeout: 10), "No variants")
         male.click()
-        waitForValue(of: text, toEqual: "[ar] Where are you going? ♂")
-        waitForValue(of: chip, toEqual: "male")
+        waitForValue(of: summary, toEqual: "1 line to choose")
+
+        // Accepting the rest keeps the translator's pick and ends the review.
+        chooseAIMenuItem(.acceptRemainingChoices, in: app)
+        let ended = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: summary)
+        XCTAssertEqual(XCTWaiter().wait(for: [ended], timeout: 10), .completed, "Choices remain")
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♂")
+        waitForValue(of: texts.element(boundBy: 1), toEqual: "[ar] Where are you going, John? ♀")
+        XCTAssertEqual(app.cueCells(.choices).count, 0)
     }
 }

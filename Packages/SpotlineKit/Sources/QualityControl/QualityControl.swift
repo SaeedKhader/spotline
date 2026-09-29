@@ -22,8 +22,6 @@ public struct QCIssue: Hashable, Sendable {
         case notTranslated
         /// In translation mode: the source uses a glossary term, the target not its agreed translation.
         case glossaryTermNotUsed(source: String, target: String)
-        /// A tool guessed who the line addresses and was unsure (docs/ARCHITECTURE.md, 7b).
-        case addresseeGuess
     }
 
     public enum Severity: Int, Comparable, Sendable {

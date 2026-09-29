@@ -24,6 +24,7 @@ struct CueEditorList: View {
     var body: some View {
         VStack(spacing: 0) {
             AIReviewBar(editor: editor)
+            if editor.isReviewingChoices { ChoiceReviewHeader(editor: editor) }
             if editor.track.cues.isEmpty && editor.proposedInserts.isEmpty {
                 CueListEmptyState(editor: editor)
             } else if editor.isIssuesPanelShown {
@@ -91,8 +92,13 @@ struct CueEditorList: View {
         }
     }
 
-    /// The cues, with the new cues an AI tool proposes in their places.
+    /// The cues, with the new cues an AI tool proposes in their places. While
+    /// reviewing translation choices, only the flagged cues, least confident first.
     private var listItems: [CueListItem] {
+        if editor.isReviewingChoices {
+            let numbers = Dictionary(editor.track.cues.enumerated().map { ($0.element.id, $0.offset + 1) }, uniquingKeysWith: { first, _ in first })
+            return editor.cuesToChoose.map { CueListItem.cue($0, number: numbers[$0.id] ?? 0) }
+        }
         let cues = editor.track.cues.enumerated().map { CueListItem.cue($0.element, number: $0.offset + 1) }
         let inserts = editor.proposedInserts
         guard !inserts.isEmpty else { return cues }
@@ -182,6 +188,9 @@ private struct CueRow: View {
                 }
                 if let change = editor.proposedChange(forCue: cue.id), !change.changesText {
                     ProposalBox(editor: editor, change: change)
+                }
+                if let flag = cue.flag, !flag.isResolved {
+                    ChoiceBox(editor: editor, cue: cue, flag: flag, direction: directions.target)
                 }
                 if isHovered || isSelected {
                     actions
@@ -278,13 +287,6 @@ private struct CueRow: View {
                     .help("Shown at the top of the picture")
                     .accessibilityHidden(true)
             }
-            if let speakerID = cue.speakerID {
-                SpeakerChip(editor: editor, speakerID: speakerID, cueID: cue.id)
-            }
-            if let tag = cue.addressee {
-                // Filled in by the AI tools; a guess can be fixed in one click, never entered by hand.
-                AddresseeChip(editor: editor, cue: cue, tag: tag)
-            }
             if !issues.isEmpty {
                 let messages = issues.map(\.message).joined(separator: "\n")
                 let severity = issues.map(\.severity).max() ?? .warning
@@ -319,6 +321,9 @@ private struct CueRow: View {
             rowCommand(.splitCue, systemImage: "scissors")
             rowCommand(.mergeWithNext, systemImage: "arrow.right.and.line.vertical.and.arrow.left")
             rowCommand(.deleteCue, systemImage: "trash")
+            if let flag = cue.flag, flag.isResolved {
+                VariantsMenu(editor: editor, cue: cue, flag: flag)
+            }
         }
         .font(.callout)
     }

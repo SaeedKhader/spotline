@@ -47,9 +47,16 @@ public struct TranslationPipeline: Sendable {
         translations.map { translation in
             var fixed = translation
             fixed.text = layout(translation.text)
-            fixed.variants = translation.variants?.map { TextVariant(addressee: $0.addressee, text: layout($0.text)) }
+            if var flag = translation.flag {
+                for index in flag.variants.indices { flag.variants[index].text = layout(flag.variants[index].text) }
+                fixed.flag = flag
+            }
             return fixed
         }
+    }
+
+    public func fix(_ batch: TranslationBatch, request: TranslationRequest) -> TranslationBatch {
+        TranslationBatch(translations: fix(batch.translations, request: request), cast: batch.cast)
     }
 
     /// One line when it fits the preset's line length, else two balanced lines,

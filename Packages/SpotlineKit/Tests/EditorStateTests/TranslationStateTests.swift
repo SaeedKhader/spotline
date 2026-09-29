@@ -201,16 +201,4 @@ struct TranslationStateTests {
         #expect(editor.perform(.splitCue))
         #expect(editor.track.cues[1].sourceCueID == first.sourceCueID)
     }
-
-    @Test func unsureAddresseeGuessesNeedReview() throws {
-        let editor = makeEditor()
-        let url = try write("1\n00:00:01,000 --> 00:00:02,000\nYou are busy\n", name: "a.srt")
-        editor.importSubtitles(from: url)
-        #expect(editor.issues.isEmpty)
-        #expect(AddresseeTag(.female, confidence: 0.6).needsReview)
-        #expect(!AddresseeTag(.female, confidence: 0.6, source: .confirmed).needsReview)
-        #expect(!AddresseeTag(.groupMixed, confidence: 0.9).needsReview)
-        #expect(Addressee.dualFemale.count == .two)
-        #expect(Addressee.groupMale.gender == .male)
-    }
 }

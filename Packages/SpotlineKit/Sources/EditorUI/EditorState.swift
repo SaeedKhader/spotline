@@ -40,6 +40,8 @@ public final class EditorState {
         didSet {
             if track.languageCode != oldValue.languageCode { translationPairDidChange() }
             guard track.cues != oldValue.cues else { return }
+            // The review ends when no choice is left open.
+            if isReviewingChoices, !track.cues.contains(where: { $0.flag?.isResolved == false }) { isReviewingChoices = false }
             updateSourceCues()
             updateIssues()
             updateCurrentCue()
@@ -144,6 +146,8 @@ public final class EditorState {
     }
     /// Whether the issues panel under the cue list is open.
     public private(set) var isIssuesPanelShown = false
+    /// True while the cue list shows only the lines AI translation flagged, least confident first.
+    public internal(set) var isReviewingChoices = false
     /// Where the chosen QC preset is remembered; nil in tests.
     @ObservationIgnored let settings: UserDefaults?
     static let qcPresetKey = "QCPreset"
@@ -414,7 +418,7 @@ public final class EditorState {
             selectedCue.map { !memoryMatches(for: $0.id).isEmpty } ?? false
         case EditorCommand.fillExactMatches.id:
             isTranslating && !memory.entries.isEmpty
-        case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.detectSpeakers.id,
+        case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.reviewChoices.id, EditorCommand.acceptRemainingChoices.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
@@ -464,6 +468,7 @@ public final class EditorState {
         case EditorCommand.toggleSpeechHighlight.id: isSpeechHighlighted
         case EditorCommand.toggleMilliseconds.id: showsMilliseconds
         case EditorCommand.toggleIssuesPanel.id: isIssuesPanelShown
+        case EditorCommand.reviewChoices.id: isReviewingChoices
         case EditorCommand.togglePositionTop.id: selectedCue.map { $0.position == .top }
         default: nil
         }
@@ -531,7 +536,7 @@ public final class EditorState {
             showGlossaryPanel(self)
         case EditorCommand.importGlossary.id:
             if let url = chooseGlossaryToImport() { importGlossary(from: url) }
-        case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.detectSpeakers.id,
+        case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.reviewChoices.id, EditorCommand.acceptRemainingChoices.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
@@ -622,6 +627,7 @@ public final class EditorState {
         endTextEditSession()
         shuttleRate = 0
         selectedCueID = nil
+        isReviewingChoices = false
         track = SubtitleTrack()
         subtitleFile = nil
         if sourceTrack != nil { closeSourceSubtitles() }
@@ -698,11 +704,14 @@ public final class EditorState {
 
     /// Selects the previous or next cue. While typing, the cursor moves to its text.
     private func selectNeighbour(offset: Int) {
-        guard !track.cues.isEmpty else { return }
-        let index = selectedCueIndex.map { $0 + offset } ?? (offset > 0 ? 0 : track.cues.count - 1)
-        guard track.cues.indices.contains(index) else { return }
+        // While reviewing choices, the neighbours are the flagged cues in the list's order.
+        let cues = isReviewingChoices ? cuesToChoose : track.cues
+        guard !cues.isEmpty else { return }
+        let current = selectedCueID.flatMap { id in cues.firstIndex { $0.id == id } }
+        let index = current.map { $0 + offset } ?? (offset > 0 ? 0 : cues.count - 1)
+        guard cues.indices.contains(index) else { return }
         let keepTyping = isEditingText
-        select(track.cues[index].id)
+        select(cues[index].id)
         if keepTyping { textFocusRequest += 1 }
     }
 
@@ -876,8 +885,9 @@ public final class EditorState {
         guard let index = track.cues.firstIndex(where: { $0.id == id }), track.cues[index].text != text else { return }
         edit("Typing", coalescing: textEditCueID == id) { track in
             track.cues[index].text = text
-            // Edited by hand: no longer the AI's text.
+            // Edited by hand: no longer the AI's text, and the choice between its variants is made.
             track.cues[index].isAIGenerated = nil
+            if track.cues[index].flag?.isResolved == false { track.cues[index].flag?.isResolved = true }
         }
         textEditCueID = id
     }
@@ -947,11 +957,11 @@ public final class EditorState {
         first.end = at
         first.text = firstText
         // Variants are whole lines; they no longer fit either half.
-        first.variants = nil
+        first.flag = nil
         // Both halves still translate the same source cue and share its speaker.
         let second = Cue(
             start: at, end: cue.end, text: secondText, position: cue.position, style: cue.style, speaker: cue.speaker,
-            sourceCueID: cue.sourceCueID, speakerID: cue.speakerID, addressee: cue.addressee
+            sourceCueID: cue.sourceCueID, voices: cue.voices
         )
         edit("Split Cue") { track in
             track.cues[index] = first
@@ -986,7 +996,9 @@ public final class EditorState {
             var merged = track.cues[index]
             merged.end = max(merged.end, next.end)
             merged.text = [merged.text, next.text].filter { !$0.isEmpty }.joined(separator: "\n")
-            merged.variants = nil
+            merged.flag = nil
+            let voices = (merged.voices ?? []) + (next.voices ?? []).filter { !(merged.voices ?? []).contains($0) }
+            merged.voices = voices.isEmpty ? nil : voices
             track.cues[index] = merged
             track.cues.remove(at: index + 1)
         }

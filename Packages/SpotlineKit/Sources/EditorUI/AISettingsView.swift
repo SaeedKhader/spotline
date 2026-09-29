@@ -43,7 +43,7 @@ public struct AISettingsView: View {
             } header: {
                 Text("Providers")
             } footer: {
-                Text("On this Mac, audio and text never leave your computer. Speakers, addressees and cleanup always run here.")
+                Text("On this Mac, audio and text never leave your computer. Cleanup always runs here.")
                     .foregroundStyle(.secondary)
             }
 

@@ -120,17 +120,17 @@ struct ProposedChangeTests {
         var track = SubtitleTrack(cues: [a, b])
         var edited = b
         edited.text = "Deux"
-        let speaker = Speaker(gender: .female, confidence: 0.9)
-        var inserted = c
-        inserted.speakerID = speaker.id
+        track.cast = [CastMember(name: "Beth", gender: .female, isConfirmed: true)]
         let set = ProposedChangeSet(title: "Test", changes: [
             ProposedChange(kind: .delete, cue: a),
             ProposedChange.update(from: b, to: edited)!,
-            ProposedChange(kind: .insert, cue: inserted),
-        ], newSpeakers: [speaker, Speaker()])
+            ProposedChange(kind: .insert, cue: c),
+        ], cast: [CastMember(name: "beth", gender: .male, voices: ["speaker_2"]), CastMember(name: "Morty", gender: .male)])
         set.apply(to: &track)
         #expect(track.cues.map(\.text) == ["Deux", "Three"])
-        #expect(track.speakers == [speaker], "Only speakers the applied cues use are added")
+        #expect(track.cast.map(\.name) == ["Beth", "Morty"], "People are matched by name")
+        #expect(track.cast[0].gender == .female, "A confirmed gender stays")
+        #expect(track.cast[0].voices == ["speaker_2"])
     }
 
     @Test func applyingSomeChangesLeavesTheOthers() {
@@ -145,16 +145,19 @@ struct ProposedChangeTests {
         #expect(set.removing([b.id]).changes.map(\.cueID) == [a.id])
     }
 
-    @Test func confirmedAddresseesAreKept() {
-        var a = cue("You're late.", at: 0)
-        a.addressee = AddresseeTag(.female, confidence: 1, source: .confirmed)
-        var guess = a
-        guess.addressee = AddresseeTag(.male, confidence: 0.6)
-        guess.text = "Tu es en retard."
-        var track = SubtitleTrack(cues: [a])
-        ProposedChangeSet(title: "Test", changes: [.update(from: a, to: guess)!]).apply(to: &track)
-        #expect(track.cues[0].text == "Tu es en retard.")
-        #expect(track.cues[0].addressee?.addressee == .female)
+    @Test func appliedFlagsFollowWhatWasConfirmedMeanwhile() {
+        // The user said Jerry is a man while the batch was on its way.
+        let a = cue("", at: 0)
+        var translated = a
+        translated.text = "انتِ متأخرة."
+        translated.flag = TranslationFlag(reasons: [.listener], variants: [
+            TranslationVariant(text: "انتِ متأخرة.", listeners: ["Jerry"], listenerGender: .female, listenerCount: .one),
+            TranslationVariant(text: "انت متأخر.", listeners: ["Jerry"], listenerGender: .male, listenerCount: .one),
+        ], confidence: 0.6, note: "")
+        var track = SubtitleTrack(cues: [a], cast: [CastMember(name: "Jerry", gender: .male, isConfirmed: true)])
+        ProposedChangeSet(title: "Test", changes: [.update(from: a, to: translated)!]).apply(to: &track)
+        #expect(track.cues[0].text == "انت متأخر.")
+        #expect(track.cues[0].flag?.isResolved == true)
     }
 
     @Test func textDiffMarksChangedWords() {
@@ -172,15 +175,23 @@ struct ProposedChangeTests {
         #expect(set.changes.allSatisfy { $0.kind == .insert })
     }
 
-    @Test func translationUsesTheConfirmedAddresseesVariant() {
-        var target = cue("", at: 0)
-        target.addressee = AddresseeTag(.male, confidence: 1, source: .confirmed)
-        let translation = CueTranslation(
-            cueID: target.id, text: "انتِ مشغولة", addressee: AddresseeTag(.female, confidence: 0.6),
-            variants: [TextVariant(addressee: .female, text: "انتِ مشغولة"), TextVariant(addressee: .male, text: "انت مشغول")]
-        )
-        let set = Proposals.translation([translation], cues: [target])
-        #expect(set.changes.first?.cue.text == "انت مشغول")
-        #expect(set.changes.first?.cue.addressee?.source == .confirmed)
+    @Test func translationCarriesFlagsAndCast() {
+        let target = cue("", at: 0)
+        let flag = TranslationFlag(reasons: [.listener], variants: [
+            TranslationVariant(text: "انتِ مشغولة", listenerGender: .female), TranslationVariant(text: "انت مشغول", listenerGender: .male),
+        ], confidence: 0.6, note: "She answered last")
+        let batch = TranslationBatch(translations: [CueTranslation(cueID: target.id, text: "انتِ مشغولة", flag: flag)], cast: [CastMember(name: "Beth")])
+        let set = Proposals.translation(batch, cues: [target])
+        #expect(set.changes.first?.cue.text == "انتِ مشغولة")
+        #expect(set.changes.first?.cue.flag == flag)
+        #expect(set.cast.map(\.name) == ["Beth"])
+    }
+
+    @Test func segmentedCuesKeepTheirVoices() {
+        let words = [("Hi", 0.0, 0.3, "speaker_0"), ("Morty.", 0.35, 0.8, "speaker_0"), ("Hey", 1.0, 1.3, "speaker_1"), ("Rick.", 1.35, 1.8, "speaker_1")]
+            .map { TranscribedWord(text: $0.0, start: MediaTime(seconds: $0.1, timescale: 1000), end: MediaTime(seconds: $0.2, timescale: 1000), speaker: $0.3) }
+        let cues = CueSegmenter(preset: .standard, frameRate: rate).cues(from: words)
+        #expect(cues.first?.voices == ["speaker_0", "speaker_1"] || cues.map(\.voices) == [["speaker_0"], ["speaker_1"]])
+        #expect(CueSegmenter.voices(of: [TranscribedWord(text: "Hi", start: .zero, end: .zero)]) == nil)
     }
 }
