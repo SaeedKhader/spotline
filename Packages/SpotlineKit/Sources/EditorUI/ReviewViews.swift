@@ -21,12 +21,12 @@ struct ProposedText: View {
                         DiffText(old: before.text, new: change.cue.text)
                     } else {
                         Text(change.cue.text)
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(Color.aiTint)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .font(.system(size: 15))
+                .font(SpotlineStyle.cueFont)
                 .environment(\.layoutDirection, direction.layoutDirection)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 ReviewButtons(editor: editor, cueID: change.cueID)
@@ -36,8 +36,8 @@ struct ProposedText: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(minHeight: 58, alignment: .top)
-        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentColor.opacity(0.5)))
+        .background(Color.aiTint.opacity(0.1), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(Color.aiTint.opacity(0.5)))
         .help("Proposed by \(editor.pendingReview?.title ?? "an AI tool"): accept or reject")
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Proposed text")
@@ -55,7 +55,7 @@ struct ProposalBox: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "sparkles")
-                .foregroundStyle(.tint)
+                .foregroundStyle(Color.aiTint)
             if case .delete = change.kind {
                 Text("Remove this cue")
                     .foregroundStyle(.red)
@@ -67,7 +67,7 @@ struct ProposalBox: View {
         .font(.callout)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+        .background(Color.aiTint.opacity(0.1), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Proposed change")
         .accessibilityValue(change.cue.text)
@@ -137,8 +137,8 @@ struct DiffText: View {
                 result += piece
             case .added(let text):
                 var piece = AttributedString(text)
-                piece.foregroundColor = .accentColor
-                piece.backgroundColor = Color.accentColor.opacity(0.15)
+                piece.foregroundColor = .aiTint
+                piece.backgroundColor = Color.aiTint.opacity(0.15)
                 result += piece
             }
         }
@@ -185,7 +185,7 @@ struct ProposedCueRow: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "sparkles")
                 .font(.callout)
-                .foregroundStyle(.tint)
+                .foregroundStyle(Color.aiTint)
                 .frame(width: 32, alignment: .trailing)
                 .padding(.top, 6)
             VStack(alignment: .leading, spacing: 6) {
@@ -203,8 +203,8 @@ struct ProposedCueRow: View {
             }
             HStack(alignment: .top, spacing: 6) {
                 Text(cue.text)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.tint)
+                    .font(SpotlineStyle.cueFont)
+                    .foregroundStyle(Color.aiTint)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .environment(\.layoutDirection, direction.layoutDirection)
@@ -216,17 +216,18 @@ struct ProposedCueRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .frame(minHeight: 58, alignment: .top)
-            .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentColor.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            .background(Color.aiTint.opacity(0.1), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(Color.aiTint.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .environment(\.layoutDirection, TextDirections(source: direction, target: direction).rowLayout(isTranslating: editor.isTranslating))
         .background(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.CueList.proposedRow(cue.id))
     }
 
-    /// A start or end in the same box as a real cue's time field, not editable.
+    /// A start or end laid out like a real cue's time field, not editable.
     private func time(_ edge: String, _ time: MediaTime) -> some View {
         HStack(spacing: 0) {
             Text(edge)
@@ -241,8 +242,7 @@ struct ProposedCueRow: View {
                 .padding(.horizontal, 6)
         }
         .padding(.vertical, 4)
-        .background(.background.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator.opacity(0.5)))
+        .environment(\.layoutDirection, .leftToRight)
     }
 }
 
@@ -352,7 +352,7 @@ struct AIReviewBar: View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: "sparkles")
-                        .foregroundStyle(.tint)
+                        .foregroundStyle(Color.aiTint)
                     if let review = editor.pendingReview {
                         let count = review.changes.count
                         let text = "\(review.title): \(count == 1 ? "1 change" : "\(count) changes") to review"
@@ -365,6 +365,7 @@ struct AIReviewBar: View {
                         let text = "\(task.title) \(Int((task.fraction * 100).rounded()))%"
                         ProgressView(value: task.fraction)
                             .progressViewStyle(.linear)
+                            .tint(Color.aiTint)
                             .frame(width: 80)
                         Text(text)
                             .monospacedDigit()
@@ -379,12 +380,13 @@ struct AIReviewBar: View {
                         CommandButton(command: .rejectAllChanges, editor: editor)
                         CommandButton(command: .acceptAllChanges, editor: editor)
                             .buttonStyle(.borderedProminent)
+                            .tint(Color.aiTint)
                     }
                 }
                 .font(.callout)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.accentColor.opacity(0.08))
+                .background(Color.aiTint.opacity(0.08))
                 Divider()
             }
             .accessibilityElement(children: .contain)

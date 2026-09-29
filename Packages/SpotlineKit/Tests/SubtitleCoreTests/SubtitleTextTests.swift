@@ -12,6 +12,13 @@ struct SubtitleTextTests {
     @Test func unmatchedBraceIsText() {
         #expect(SubtitleText.visibleLines(of: "A { B") == ["A { B"])
     }
+
+    @Test func dashLinesAreDialogue() {
+        #expect(SubtitleText.isDialogue(["- Rick?", "- What now?"]))
+        #expect(SubtitleText.isDialogue(["-مرحبا", "\u{200F}- أهلاً"]))
+        #expect(!SubtitleText.isDialogue(["- Rick?"]))
+        #expect(!SubtitleText.isDialogue(["- Rick?", "What now?"]))
+    }
 }
 
 struct FirstFrameTests {

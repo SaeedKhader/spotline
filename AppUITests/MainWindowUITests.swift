@@ -22,6 +22,17 @@ final class MainWindowUITests: XCTestCase {
     func testFixtureOpensAtItsFrameRate() throws {
         let app = launchApp()
         waitForValue(of: app.staticTexts[AccessibilityID.Transport.frameRate], toEqual: "23.976 fps")
+        XCTAssertFalse(app.descendants(matching: .any)[AccessibilityID.Video.emptyState].exists)
+    }
+
+    @MainActor
+    func testEmptyWindowPointsAtTheMenus() throws {
+        let app = launchApp(openFixture: false)
+        let video = app.descendants(matching: .any)[AccessibilityID.Video.emptyState]
+        XCTAssertTrue(video.waitForExistence(timeout: 10))
+        XCTAssertTrue((video.value as? String ?? "").contains(EditorCommand.openMedia.title))
+        XCTAssertTrue(app.descendants(matching: .any)[AccessibilityID.CueList.emptyState].exists)
+        // Hints, not buttons: the menus own these commands.
         XCTAssertFalse(app.buttons[AccessibilityID.command(EditorCommand.openMedia.id)].exists)
     }
 

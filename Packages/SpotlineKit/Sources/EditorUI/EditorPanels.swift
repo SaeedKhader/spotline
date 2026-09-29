@@ -64,7 +64,6 @@ enum EditorPanels {
             )
             panel.contentViewController = NSHostingController(rootView: GlossaryView(editor: editor))
             panel.identifier = NSUserInterfaceItemIdentifier(AccessibilityID.Glossary.root)
-            panel.appearance = NSAppearance(named: .darkAqua)
             panel.isFloatingPanel = true
             panel.hidesOnDeactivate = true
             panel.isReleasedWhenClosed = false

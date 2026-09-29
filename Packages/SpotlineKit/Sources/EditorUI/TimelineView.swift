@@ -346,7 +346,8 @@ final class TimelineView: NSView {
             let rect = blockRect(for: cue)
             guard rect.maxX >= 0, rect.minX <= bounds.width else { continue }
             let isSelected = cue.id == content.selectedCueID
-            let color = isSelected ? NSColor.controlAccentColor : NSColor.systemTeal
+            // Selection in the accent colour; text an AI tool wrote in the AI tint until edited.
+            let color = isSelected ? NSColor.controlAccentColor : cue.isAIGenerated == true ? NSColor.aiTint : NSColor.systemTeal
             let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
             color.withAlphaComponent(isSelected ? 0.55 : 0.3).setFill()
             path.fill()

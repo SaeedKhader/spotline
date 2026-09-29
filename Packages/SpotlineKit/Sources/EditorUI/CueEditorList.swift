@@ -25,17 +25,7 @@ struct CueEditorList: View {
         VStack(spacing: 0) {
             AIReviewBar(editor: editor)
             if editor.track.cues.isEmpty && editor.proposedInserts.isEmpty {
-                ContentUnavailableView {
-                    Label("No Subtitles", systemImage: "captions.bubble")
-                } description: {
-                    Text("Import a subtitle file or add a cue at the playhead.")
-                } actions: {
-                    HStack {
-                        CommandButton(command: .importSubtitles, editor: editor)
-                        CommandButton(command: .addCue, editor: editor)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                CueListEmptyState(editor: editor)
             } else if editor.isIssuesPanelShown {
                 VSplitView {
                     rows.frame(minHeight: 120)
@@ -44,8 +34,6 @@ struct CueEditorList: View {
             } else {
                 rows
             }
-            Divider()
-            ReviewFooter(editor: editor)
         }
         .onChange(of: focusedText) { _, id in
             editor.isEditingText = id != nil
@@ -137,9 +125,15 @@ private enum CueListItem: Identifiable {
 }
 
 /// Which way source and target text run.
-private struct TextDirections: Equatable {
+struct TextDirections: Equatable {
     var source: TextDirection
     var target: TextDirection
+
+    /// Rows mirror for a right-to-left track, except in translation mode,
+    /// where the source column stays on the left and the target on the right.
+    func rowLayout(isTranslating: Bool) -> LayoutDirection {
+        !isTranslating && target == .rightToLeft ? .rightToLeft : .leftToRight
+    }
 }
 
 extension TextDirection {
@@ -168,8 +162,8 @@ private struct CueRow: View {
                 .accessibilityValue("\(number)")
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .number))
             VStack(alignment: .leading, spacing: 6) {
-                TimeField(editor: editor, cue: cue, edge: .start)
-                TimeField(editor: editor, cue: cue, edge: .end)
+                TimeField(editor: editor, cue: cue, edge: .start, showsFrame: isHovered || isSelected)
+                TimeField(editor: editor, cue: cue, edge: .end, showsFrame: isHovered || isSelected)
                 speedAndIssues
             }
             VStack(alignment: .trailing, spacing: 6) {
@@ -196,6 +190,8 @@ private struct CueRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        // An Arabic or Hebrew track reads from the right: number and times go there too.
+        .environment(\.layoutDirection, directions.rowLayout(isTranslating: editor.isTranslating))
         .background(rowBackground)
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .contain)
@@ -217,18 +213,18 @@ private struct CueRow: View {
                     get: { editor.cue(withID: cue.id)?.text ?? "" },
                     set: { editor.setText($0, forCue: cue.id) }
                 ))
-                .font(.system(size: 15))
+                .font(SpotlineStyle.cueFont)
                 .scrollContentBackground(.hidden)
                 .scrollDisabled(true)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .frame(minHeight: 58)
-                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
+                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
                 // Text an AI tool wrote is tinted until someone edits it.
-                .background(cue.isAIGenerated == true ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .background(cue.isAIGenerated == true ? Color.aiTint.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .strokeBorder(cue.isAIGenerated == true ? AnyShapeStyle(Color.accentColor.opacity(0.45)) : AnyShapeStyle(.separator))
+                    RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius)
+                        .strokeBorder(cue.isAIGenerated == true ? AnyShapeStyle(Color.aiTint.opacity(0.5)) : AnyShapeStyle(.separator))
                 )
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
@@ -242,7 +238,7 @@ private struct CueRow: View {
                     if cue.isAIGenerated == true {
                         Image(systemName: "sparkles")
                             .font(.caption2)
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(Color.aiTint)
                             .padding(5)
                             .help("Written by \(editor.aiToolName(for: cue)); edit it to make it yours")
                             .accessibilityHidden(true)
@@ -275,6 +271,13 @@ private struct CueRow: View {
                 .help("Reading speed in characters per second")
                 .accessibilityValue("\(speed)")
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .readingSpeed))
+            if cue.position == .top {
+                Image(systemName: "arrow.up.to.line")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help("Shown at the top of the picture")
+                    .accessibilityHidden(true)
+            }
             if let speakerID = cue.speakerID {
                 SpeakerChip(editor: editor, speakerID: speakerID, cueID: cue.id)
             }
@@ -298,17 +301,17 @@ private struct CueRow: View {
 
     private var actions: some View {
         HStack(spacing: 10) {
-            Picker("Position", selection: Binding(
-                get: { cue.position },
-                set: { editor.setPosition($0, forCue: cue.id) }
-            )) {
-                Text("Default").tag(CuePosition.bottom)
-                Text("Top").tag(CuePosition.top)
+            let isTop = cue.position == .top
+            Button {
+                editor.setPosition(isTop ? .bottom : .top, forCue: cue.id)
+            } label: {
+                Label(EditorCommand.togglePositionTop.title, systemImage: "arrow.up.to.line")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(isTop ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("Show this cue at the bottom (default) or top of the picture")
+            .buttonStyle(.borderless)
+            .help(isTop ? "Shown at the top of the picture. Click to show it at the bottom." : EditorCommand.togglePositionTop.title)
+            .accessibilityValue(isTop ? "top" : "bottom")
             .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .position))
             RowButton(title: "Add Cue After", systemImage: "plus", id: AccessibilityID.CueList.action(cue.id, EditorCommand.addCue.id)) {
                 editor.addCue(after: cue.id)
@@ -341,13 +344,13 @@ private struct SourceText: View {
         let text = source.map { SubtitleText.visibleLines(of: $0.text).joined(separator: "\n") } ?? ""
         VStack(alignment: .leading, spacing: 4) {
             Text(text.isEmpty ? "No source cue" : text)
-                .font(.system(size: 15))
+                .font(SpotlineStyle.cueFont)
                 .foregroundStyle(text.isEmpty ? .tertiary : .secondary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, minHeight: 50, alignment: .topLeading)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
                 .help("Source")
                 .accessibilityLabel("Source")
                 .accessibilityValue(text)
@@ -423,7 +426,7 @@ private struct MemorySuggestions: View {
             }
             .font(.callout)
             .padding(6)
-            .background(.background.opacity(0.4), in: RoundedRectangle(cornerRadius: 7))
+            .background(.background.opacity(0.4), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
         }
     }
 }
@@ -451,6 +454,8 @@ private struct TimeField: View {
     let editor: EditorState
     let cue: Cue
     let edge: Edge
+    /// The field's box shows only on the hovered or selected row, or while typing.
+    let showsFrame: Bool
     @State private var draft = ""
     @FocusState private var isFocused: Bool
 
@@ -463,7 +468,7 @@ private struct TimeField: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
-            Divider().frame(height: 18)
+            Divider().frame(height: 18).opacity(showsFrame || isFocused ? 1 : 0)
             TextField(edge == .start ? "Start" : "End", text: $draft)
                 .textFieldStyle(.plain)
                 .font(.system(.callout, design: .monospaced))
@@ -478,8 +483,10 @@ private struct TimeField: View {
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, edge == .start ? .inPoint : .outPoint))
         }
         .padding(.vertical, 4)
-        .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+        .background(.background.opacity(showsFrame || isFocused ? 0.6 : 0), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator.opacity(showsFrame || isFocused ? 1 : 0)))
+        // Timecodes read left to right in every language.
+        .environment(\.layoutDirection, .leftToRight)
         .onAppear { draft = label }
         .onChange(of: label) { _, new in if !isFocused { draft = new } }
     }
@@ -492,38 +499,6 @@ private struct TimeField: View {
         case .start: editor.setTiming(start: typed, end: cue.end, forCue: cue.id, actionName: "Set In")
         case .end: editor.setTiming(start: cue.start, end: typed, forCue: cue.id, actionName: "Set Out")
         }
-    }
-}
-
-/// "N cues need review" and the QC preset, with buttons to open the issues
-/// panel and step through the cues with issues.
-private struct ReviewFooter: View {
-    let editor: EditorState
-
-    var body: some View {
-        let count = editor.issues.count
-        let summary = count == 0 ? "No cues need review" : count == 1 ? "1 cue needs review" : "\(count) cues need review"
-        HStack {
-            CommandButton(
-                command: .toggleIssuesPanel, systemImage: editor.isIssuesPanelShown ? "chevron.down" : "chevron.up", editor: editor
-            )
-            Label(summary, systemImage: count == 0 ? "checkmark.circle" : "exclamationmark.circle")
-                .foregroundStyle(count == 0 ? Color.secondary : Color.orange)
-                .accessibilityValue(summary)
-                .accessibilityIdentifier(AccessibilityID.CueList.reviewSummary)
-            Text(editor.qcPreset.name)
-                .foregroundStyle(.secondary)
-                .help(editor.qcPreset.summary)
-                .accessibilityLabel("QC preset")
-                .accessibilityValue(editor.qcPreset.name)
-                .accessibilityIdentifier(AccessibilityID.Issues.preset)
-            Spacer()
-            CommandButton(command: .previousIssue, systemImage: "chevron.up.circle", editor: editor)
-            CommandButton(command: .nextIssue, systemImage: "chevron.down.circle", editor: editor)
-        }
-        .font(.callout)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 }
 
@@ -602,5 +577,25 @@ private struct IssueIcon: View {
     var body: some View {
         Image(systemName: severity == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
             .foregroundStyle(severity == .error ? Color.red : Color.orange)
+    }
+}
+
+/// The empty cue list: what to do first, pointing at the menu commands.
+private struct CueListEmptyState: View {
+    let editor: EditorState
+
+    var body: some View {
+        let hint = editor.hasMedia
+            ? "Transcribe the dialogue (\(EditorCommand.transcribe.menuHint("AI"))) or import a subtitle file (\(EditorCommand.importSubtitles.menuHint("File")))."
+            : "Open a video first: drop it on the player (\(EditorCommand.openMedia.menuHint("File")))."
+        ContentUnavailableView {
+            Label("No Subtitles", systemImage: "captions.bubble")
+        } description: {
+            Text(hint)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(hint)
+        .accessibilityIdentifier(AccessibilityID.CueList.emptyState)
     }
 }

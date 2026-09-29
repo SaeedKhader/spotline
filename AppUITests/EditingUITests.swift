@@ -51,7 +51,7 @@ final class EditingUITests: XCTestCase {
         waitForValue(of: textEditor, toEqual: "")
         XCTAssertEqual(app.cueCells(.number).count, 1)
         app.typeKey("z", modifierFlags: .command)
-        XCTAssertTrue(app.buttons[AccessibilityID.command(EditorCommand.importSubtitles.id)].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)[AccessibilityID.CueList.emptyState].waitForExistence(timeout: 10))
         XCTAssertEqual(app.cueCells(.number).count, 0)
 
         app.typeKey("z", modifierFlags: [.command, .shift])

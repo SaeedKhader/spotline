@@ -397,6 +397,8 @@ public final class EditorState {
             hasMedia
         case EditorCommand.stepBackward.id, EditorCommand.goToStart.id:
             hasMedia && !isAtStart
+        case EditorCommand.goToEnd.id:
+            hasMedia && status.duration != nil
         default:
             false
         }
@@ -528,6 +530,10 @@ public final class EditorState {
         case EditorCommand.goToStart.id:
             playback.setPaused(true)
             playback.seek(toFrame: 0, rate: frameRate)
+        case EditorCommand.goToEnd.id:
+            guard let duration = status.duration else { return false }
+            playback.setPaused(true)
+            playback.seek(toFrame: max(duration.nearestFrame(at: frameRate) - 1, 0), rate: frameRate)
         default:
             return false
         }
