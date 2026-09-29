@@ -30,9 +30,12 @@ extension MediaAnalyzer {
         let file = try MediaFile(url)
         let index = try file.audioStream(requested: options.audioStreamIndex)
         let detector = try SpeechDetector(audio: MonoAudio(stream: file.streams[Int(index)]!))
-        return try file.read(stream: index, options: options, progress: progress, decode: detector.decode) {
+        let regions = try file.read(stream: index, options: options, progress: progress, decode: detector.decode) {
             detector.regions
         }
+        // A failed classifier finds nothing; say so rather than report no speech.
+        if let failure = detector.failure { throw Error.cannotOpen("the sound classifier failed: \(failure)") }
+        return regions
     }
 }
 
@@ -75,6 +78,9 @@ final class SpeechDetector {
             (window.start + offset, window.end + offset, window.confidence)
         })
     }
+
+    /// Why the classifier stopped, if it did.
+    var failure: (any Swift.Error)? { observer.failure }
 
     func decode(_ packet: UnsafeMutablePointer<AVPacket>?) {
         audio.decode(packet) { samples, start in feed(samples, at: start) }
@@ -123,6 +129,7 @@ final class SpeechDetector {
     private final class Observer: NSObject, SNResultsObserving, @unchecked Sendable {
         private let lock = NSLock()
         private var collected: [(start: Double, end: Double, confidence: Float)] = []
+        private var error: (any Error)?
 
         var windows: [(start: Double, end: Double, confidence: Float)] {
             lock.withLock { collected }
@@ -133,6 +140,14 @@ final class SpeechDetector {
             let confidence = Float(result.classification(forIdentifier: "speech")?.confidence ?? 0)
             let window = (result.timeRange.start.seconds, result.timeRange.end.seconds, confidence)
             lock.withLock { collected.append(window) }
+        }
+
+        var failure: (any Error)? {
+            lock.withLock { error }
+        }
+
+        func request(_ request: SNRequest, didFailWithError error: any Error) {
+            lock.withLock { self.error = error }
         }
     }
 }
