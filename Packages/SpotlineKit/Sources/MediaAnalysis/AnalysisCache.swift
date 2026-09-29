@@ -50,7 +50,7 @@ public struct AnalysisCache: Sendable {
         save(shotChanges, kind: "shots", for: media)
     }
 
-    /// Dialogue audio prepared for speech models, shared by transcription and speaker detection.
+    /// Dialogue audio prepared for speech models, shared by transcription and the benchmark.
     /// Samples are kept as 16-bit PCM beside a small JSON index.
     public func preparedAudio(for media: URL, audioStream: Int?) -> PreparedAudio? {
         let kind = "audio16k-\(audioStream.map(String.init) ?? "main")"

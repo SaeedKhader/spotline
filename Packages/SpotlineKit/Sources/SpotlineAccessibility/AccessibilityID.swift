@@ -70,8 +70,13 @@ public enum AccessibilityID {
         public static func proposedCell(_ cueID: UUID, _ column: Column) -> String { "\(proposedRow(cueID)).\(column.rawValue)" }
         /// The accept or reject button of a proposed change, keyed by `ai.acceptChange` or `ai.rejectChange`.
         public static func reviewAction(_ cueID: UUID, _ commandID: String) -> String { "cueList.review.\(cueID.uuidString).\(command(commandID))" }
-        /// The addressee menu's item for one addressee (e.g. "female"), on a cue with a chip.
-        public static func addresseeChoice(_ cueID: UUID, _ addressee: String) -> String { "\(cell(cueID, .addressee)).\(addressee)" }
+        /// One variant (0-based) of a line that reads more than one way; its label says who it
+        /// assumes, its value is its text, and it is selected when in use.
+        public static func variant(_ cueID: UUID, _ index: Int) -> String { "\(cell(cueID, .choices)).\(index)" }
+        /// Over the cue list while it shows only the lines to choose for; its value explains the review.
+        public static let choiceReview = "cueList.choiceReview"
+        /// In the actions bar: how many lines still read more than one way; it opens the review.
+        public static let choicesSummary = "cueList.choices"
 
         public enum Column: String, CaseIterable, Sendable {
             case number
@@ -85,10 +90,10 @@ public enum AccessibilityID {
             case text
             /// In translation mode, the source cue's text (read-only).
             case source
-            /// Who the line addresses (♂, ♀, group), once a tool has tagged it.
-            case addressee
-            /// Who speaks the line ("A ♀"), once a tool has found it.
-            case speaker
+            /// The variants of a line AI translation could translate more than one way, while the choice is open.
+            case choices
+            /// A row hover action listing the variants of a line whose choice is made.
+            case variantsMenu
             /// An AI tool's proposed change to the cue, shown as a diff; its value is the proposed text.
             case proposal
         }

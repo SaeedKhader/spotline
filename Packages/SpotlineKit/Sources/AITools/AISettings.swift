@@ -26,15 +26,28 @@ public struct AISettings: Sendable, Equatable {
     public enum TranslationProvider: String, Sendable, CaseIterable, Identifiable {
         /// Apple's Translation framework with downloaded languages.
         case appleTranslation
-        /// Claude, with the scene, glossary and memory as context; also reads who is addressed and offers variants.
+        /// Claude Opus, with the scene, glossary and memory as context; flags lines that read
+        /// more than one way and writes their variants.
         case claude
+        /// The same with Claude Sonnet, at half the price.
+        case claudeSonnet
 
         public var id: String { rawValue }
-        public var isCloud: Bool { self == .claude }
+        public var isCloud: Bool { self != .appleTranslation }
         public var title: String {
             switch self {
             case .appleTranslation: "On this Mac (Apple Translation)"
-            case .claude: "Claude (cloud)"
+            case .claude: "Claude Opus (cloud)"
+            case .claudeSonnet: "Claude Sonnet (cloud, half the price)"
+            }
+        }
+
+        /// The Claude model, for the Claude providers.
+        public var claudeModel: String? {
+            switch self {
+            case .appleTranslation: nil
+            case .claude: ClaudeTranslator.defaultModel
+            case .claudeSonnet: ClaudeTranslator.sonnetModel
             }
         }
     }

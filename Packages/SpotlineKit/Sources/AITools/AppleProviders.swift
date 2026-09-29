@@ -116,8 +116,7 @@ public struct AppleSpeechTranscriber: Transcriber {
 
 /// On-device translation with Apple's Translation framework. Languages must be
 /// downloaded in System Settings first; nothing leaves the Mac. It translates
-/// line by line with no scene context, so addressee tags come from the scene
-/// reading (`SceneAddresseeInferrer`) and there are no variants.
+/// line by line with no scene context, so it flags no lines and writes no variants.
 public struct AppleTranslator: CueTranslator {
     public var name: String { "Apple Translation (on this Mac)" }
 
@@ -125,8 +124,8 @@ public struct AppleTranslator: CueTranslator {
 
     public func translate(
         _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
-        found: @escaping @Sendable ([CueTranslation]) -> Void
-    ) async throws -> [CueTranslation] {
+        found: @escaping @Sendable (TranslationBatch) -> Void
+    ) async throws -> TranslationBatch {
         let source = Locale.Language(identifier: Languages.base(request.sourceLanguage))
         let target = Locale.Language(identifier: Languages.base(request.targetLanguage))
         switch await LanguageAvailability().status(from: source, to: target) {
@@ -164,13 +163,13 @@ public struct AppleTranslator: CueTranslator {
                 let whole = glossary.apply(to: response.targetText, source: sources.joined(separator: " "))
                 for (index, text) in zip(group, SentenceSpans.split(whole, like: sources)) {
                     let line = request.lines[index]
-                    results.append(CueTranslation(cueID: line.cueID, text: text, addressee: request.targetIsGendered ? line.addressee : nil))
+                    results.append(CueTranslation(cueID: line.cueID, text: text))
                 }
             }
-            found(Array(results[before...]))
+            found(TranslationBatch(translations: Array(results[before...])))
             progress(Double(results.count) / Double(max(request.lines.count, 1)))
         }
-        return results
+        return TranslationBatch(translations: results)
     }
 
     /// What the model gets for a cue. It translates each line on its own (a

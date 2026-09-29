@@ -2,19 +2,19 @@ import Foundation
 import SubtitleCore
 
 /// What an AI tool proposes: new cues, changed cues and cues to remove, plus
-/// speakers for the cast list. Nothing is applied until the user accepts it,
+/// people for the cast. Nothing is applied until the user accepts it,
 /// per cue or all at once (docs/ARCHITECTURE.md, 7a: AI proposes, the editor disposes).
 public struct ProposedChangeSet: Sendable, Equatable {
     /// "Transcription", "Translation"… for the review bar and undo.
     public var title: String
     public var changes: [ProposedChange]
-    /// Speakers the changes refer to that the track does not have yet.
-    public var newSpeakers: [Speaker]
+    /// People a translator identified, merged into the track's cast.
+    public var cast: [CastMember]
 
-    public init(title: String, changes: [ProposedChange], newSpeakers: [Speaker] = []) {
+    public init(title: String, changes: [ProposedChange], cast: [CastMember] = []) {
         self.title = title
         self.changes = changes
-        self.newSpeakers = newSpeakers
+        self.cast = cast
     }
 
     public var isEmpty: Bool { changes.isEmpty }
@@ -30,7 +30,7 @@ public struct ProposedChange: Sendable, Equatable, Identifiable {
     public enum Kind: Sendable, Equatable {
         /// A new cue (transcription).
         case insert
-        /// A cue with changed text, timing, speaker or addressee.
+        /// A cue with changed text or timing.
         case update(before: Cue)
         /// A cue to remove (cleanup that leaves no text).
         case delete
@@ -40,7 +40,7 @@ public struct ProposedChange: Sendable, Equatable, Identifiable {
     public var kind: Kind
     /// The cue as it would be after the change (for `.delete`, the cue as it is).
     public var cue: Cue
-    /// Why, when the tool can say: "Profanity masked", "Guess: spoken to a woman".
+    /// Why, when the tool can say: "Profanity masked".
     public var note: String?
 
     public init(kind: Kind, cue: Cue, note: String? = nil) {
@@ -74,8 +74,8 @@ public struct ProposedChange: Sendable, Equatable, Identifiable {
 
 extension ProposedChangeSet {
     /// Applies the changes (all of them, or those for `cueIDs`) to a track. Updates
-    /// and deletes whose cue is gone are skipped; speakers the applied cues use are
-    /// added to the cast list, and speakers the user confirmed keep their gender.
+    /// and deletes whose cue is gone are skipped. The people found join the cast
+    /// (what a pick confirmed stays), and flags are re-ranked against it.
     public func apply(to track: inout SubtitleTrack, only cueIDs: Set<Cue.ID>? = nil) {
         let chosen = changes.filter { cueIDs?.contains($0.cueID) ?? true }
         for change in chosen {
@@ -84,18 +84,17 @@ extension ProposedChangeSet {
                 if !track.cues.contains(where: { $0.id == change.cueID }) { track.cues.append(change.cue) }
             case .update:
                 if let index = track.cues.firstIndex(where: { $0.id == change.cueID }) {
-                    var cue = change.cue
-                    // A tag the user confirmed wins over a new guess.
-                    if track.cues[index].addressee?.source == .confirmed { cue.addressee = track.cues[index].addressee }
-                    track.cues[index] = cue
+                    track.cues[index] = change.cue
                 }
             case .delete:
                 track.cues.removeAll { $0.id == change.cueID }
             }
         }
-        let used = Set(chosen.compactMap(\.cue.speakerID))
-        for speaker in newSpeakers where used.contains(speaker.id) && !track.speakers.contains(where: { $0.id == speaker.id }) {
-            track.speakers.append(speaker)
+        track.cast.merge(cast)
+        // A pick made while the tool ran re-ranks what it wrote since.
+        for change in chosen where change.cue.flag != nil {
+            guard let index = track.cues.firstIndex(where: { $0.id == change.cueID }) else { continue }
+            track.cues[index].rerankFlag(with: track.cast)
         }
         track.cues.sort { $0.start < $1.start }
     }

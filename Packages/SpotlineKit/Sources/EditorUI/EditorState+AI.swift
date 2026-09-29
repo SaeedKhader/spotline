@@ -49,10 +49,10 @@ public struct AIProviderFactory {
                 switch settings.translation {
                 case .appleTranslation:
                     return AppleTranslator()
-                case .claude:
+                case .claude, .claudeSonnet:
                     guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                     guard let key = keys.key(for: .anthropic) else { throw AIError.missingAPIKey(provider: "Anthropic") }
-                    return ClaudeTranslator(apiKey: key)
+                    return ClaudeTranslator(apiKey: key, model: settings.translation.claudeModel ?? ClaudeTranslator.defaultModel)
                 }
             }
         )
@@ -76,8 +76,10 @@ extension EditorState {
         case EditorCommand.translateWithAI.id:
             // Outside translation mode, the cues being edited become the source.
             return idle && (isTranslating ? !untranslatedCues.isEmpty : track.cues.contains { !$0.text.isEmpty })
-        case EditorCommand.detectSpeakers.id:
-            return idle && hasMedia && track.cues.contains { !$0.text.isEmpty }
+        case EditorCommand.reviewChoices.id:
+            return isReviewingChoices || track.cues.contains { $0.flag?.isResolved == false }
+        case EditorCommand.acceptRemainingChoices.id:
+            return track.cues.contains { $0.flag?.isResolved == false }
         case EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id:
             return idle && !track.cues.isEmpty
         case EditorCommand.cancelAITask.id:
@@ -95,9 +97,24 @@ extension EditorState {
         switch command.id {
         case EditorCommand.transcribe.id: transcribe()
         case EditorCommand.translateWithAI.id:
+            // Words the transcription was unsure of would be translated wrong too: offer to check them first.
+            let unsure = cuesWithUnsureSource
+            if let first = unsure.first {
+                switch confirmTranslatingUnsureCues(unsure.count) {
+                case .review:
+                    if !isIssuesPanelShown { perform(.toggleIssuesPanel) }
+                    select(first.id)
+                    return true
+                case .cancel:
+                    return false
+                case .translateAnyway:
+                    break
+                }
+            }
             if !isTranslating { useCuesAsSource() }
             translateUntranslatedCues()
-        case EditorCommand.detectSpeakers.id: detectSpeakers()
+        case EditorCommand.reviewChoices.id: toggleChoiceReview()
+        case EditorCommand.acceptRemainingChoices.id: acceptRemainingChoices()
         case EditorCommand.maskProfanity.id: runCleanup(.maskProfanity)
         case EditorCommand.removeHearingImpaired.id: runCleanup(.removeHearingImpaired)
         case EditorCommand.fixPunctuation.id: runCleanup(.fixSpacingAndPunctuation)
@@ -173,29 +190,41 @@ extension EditorState {
         return sourceCues[cue.id] != nil ? "translation" : "transcription"
     }
 
-    // MARK: Addressee variants
+    // MARK: Translation choices
 
-    /// Uses the line as it reads for `addressee` (when the translator wrote it)
-    /// and marks the addressee as confirmed. One click, one undoable edit.
-    public func chooseAddressee(_ addressee: Addressee, forCue id: Cue.ID) {
-        guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
-        edit("Choose Addressee") { track in
-            if let variant = track.cues[index].variants?.first(where: { $0.addressee == addressee }) {
-                track.cues[index].text = variant.text
-            }
-            track.cues[index].addressee = AddresseeTag(addressee, confidence: 1, source: .confirmed)
-        }
+    /// Cues with an open flag, least confident first: what the choice review shows.
+    public var cuesToChoose: [Cue] {
+        track.cues.filter { $0.flag?.isResolved == false }
+            .sorted { ($0.flag?.confidence ?? 1, $0.start) < ($1.flag?.confidence ?? 1, $1.start) }
     }
 
-    /// "A", "B"… for the cast list's speakers, in order.
-    public func speakerLabel(_ id: Speaker.ID) -> String? {
-        guard let index = track.speakers.firstIndex(where: { $0.id == id }) else { return nil }
-        return track.speakers[index].name ?? Self.speakerLetter(index)
+    /// Uses one of a flagged cue's variants: one click, one undoable edit. What
+    /// the variant assumes about people is confirmed, and the other open flags
+    /// about them are re-ranked in the same edit.
+    public func chooseVariant(_ index: Int, forCue id: Cue.ID) {
+        guard let flag = cue(withID: id)?.flag, flag.variants.indices.contains(index) else { return }
+        let next = isReviewingChoices ? nextChoice(after: id) : nil
+        edit("Choose Translation") { track in track.choose(variant: index, forCue: id) }
+        if let next, cue(withID: next)?.flag?.isResolved == false { select(next) }
     }
 
-    static func speakerLetter(_ index: Int) -> String {
-        let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-        return index < letters.count ? String(letters[index]) : "\(index + 1)"
+    /// Settles every open flag as it stands, as one undoable edit, and leaves the review.
+    func acceptRemainingChoices() {
+        edit(EditorCommand.acceptRemainingChoices.title) { track in track.resolveFlags() }
+        isReviewingChoices = false
+    }
+
+    /// Shows only the cues with open flags, least confident first, or every cue again.
+    func toggleChoiceReview() {
+        isReviewingChoices.toggle()
+        if isReviewingChoices, let first = cuesToChoose.first, selectedCue?.flag?.isResolved != false { select(first.id) }
+    }
+
+    /// The flagged cue after `id` in the review's order.
+    private func nextChoice(after id: Cue.ID) -> Cue.ID? {
+        let order = cuesToChoose.map(\.id)
+        guard let index = order.firstIndex(of: id) else { return order.first }
+        return order[(index + 1)...].first ?? order[..<index].first
     }
 
     // MARK: Running tools
@@ -216,22 +245,16 @@ extension EditorState {
             change.cue.isAIGenerated = true
             switch change.kind {
             case .insert:
-                if let current = cue(withID: change.cueID) {
-                    // Already written: only the speaker, found at the end, is new.
-                    guard current.speakerID == nil, let speaker = change.cue.speakerID else { continue }
-                    var after = current
-                    after.speakerID = speaker
-                    if let update = ProposedChange.update(from: current, to: after) { changes.append(update) }
+                if cue(withID: change.cueID) != nil {
+                    // Already written.
+                    continue
                 } else if !track.cues.contains(where: { $0.position == .bottom && $0.start < change.cue.end && change.cue.start < $0.end }) {
                     changes.append(change)
                 }
             case .update(let before):
                 guard let current = cue(withID: change.cueID) else { continue }
                 if appliedAIChanges.contains(change.cueID) {
-                    guard current.speakerID == nil, let speaker = change.cue.speakerID else { continue }
-                    var after = current
-                    after.speakerID = speaker
-                    if let update = ProposedChange.update(from: current, to: after) { changes.append(update) }
+                    continue
                 } else if before.text == change.cue.text || current.text == before.text {
                     if before.text == change.cue.text { change.cue.isAIGenerated = current.isAIGenerated }
                     change.cue.text = before.text == change.cue.text ? current.text : change.cue.text
@@ -243,7 +266,7 @@ extension EditorState {
         }
         guard !changes.isEmpty else { return }
         appliedAIChanges.formUnion(changes.map(\.cueID))
-        let applied = ProposedChangeSet(title: proposal.title, changes: changes, newSpeakers: proposal.newSpeakers)
+        let applied = ProposedChangeSet(title: proposal.title, changes: changes, cast: proposal.cast)
         edit(proposal.title) { track in applied.apply(to: &track) }
         if selectedCueID == nil, let first = changes.min(by: { $0.cue.start < $1.cue.start }) { select(first.cueID) }
     }
@@ -338,55 +361,36 @@ extension EditorState {
                 words = stored
             } else {
                 words = try await transcriber.transcribe(audio, language: language) { progress(0.15 + $0 * 0.75) } found: { words in
-                    // Cues show as soon as they are complete; speakers come at the end.
+                    // Cues show as soon as they are complete.
                     propose(Proposals.transcription(accumulator.add(words), existing: existing))
                 }
                 self?.storeTranscript(words, provider: provider, audioStream: stream, language: language)
             }
             guard !words.isEmpty else { throw AIError.nothingToDo("No speech was heard.") }
-            let (cues, speakers) = try await Self.runDetached {
-                let cues = accumulator.finish(with: words)
-                return (cues, VoiceSpeakerAnalyzer().analyze(cues, in: audio))
-            }
+            let cues = try await Self.runDetached { accumulator.finish(with: words) }
             progress(1)
-            let proposal = Proposals.transcription(cues, existing: existing, speakers: speakers)
-            return proposal
+            return Proposals.transcription(cues, existing: existing)
         }
     }
 
-    /// The text each cue says, in the language it was spoken (the source when translating).
-    private func spokenLines(of cues: [Cue], speakers: VoiceSpeakerAnalyzer.Result?) -> [SceneAddresseeInferrer.Line] {
-        cues.map { cue in
-            let assignment = speakers?.assignments[cue.id]
-            return SceneAddresseeInferrer.Line(
-                cueID: cue.id, text: sourceCues[cue.id]?.text ?? cue.text, start: cue.start, end: cue.end,
-                speakerID: assignment?.speakerID ?? cue.speakerID, speakerConfidence: assignment?.confidence ?? (cue.speakerID == nil ? 0 : 0.8)
-            )
+    /// Who says a cue, as the transcriber labelled the voices: the cue's own
+    /// labels (the source cue's when translating), else those of the transcript
+    /// words the project keeps that fall inside it (an imported subtitle file).
+    func voices(for cue: Cue) -> [String]? {
+        let spoken = sourceCues[cue.id] ?? cue
+        if let voices = spoken.voices { return voices }
+        guard let words = storedTranscripts.last(where: { $0.words.contains { $0.speaker != nil } })?.words else { return nil }
+        var voices: [String] = []
+        for word in words where word.start < spoken.end && spoken.start < word.end {
+            if let speaker = word.speaker, voices.last != speaker, !voices.contains(speaker) { voices.append(speaker) }
         }
+        return voices.isEmpty ? nil : voices
     }
 
-    private var spokenLanguage: String {
-        (isTranslating ? sourceTrack?.languageCode : track.languageCode) ?? "und"
-    }
-
-    private func detectSpeakers() {
-        guard let url = status.mediaURL else { return }
-        let stream = status.audioStreamIndex
-        let cues = track.cues.filter { !$0.text.isEmpty }
-        let snapshot = track
-        let language = spokenLanguage
-        let prepare = prepareAudio
-        startAITask("Speakers and Addressees") { [weak self] progress, _ in
-            let audio = try await prepare(url, stream) { progress($0 * 0.4) }
-            let result = try await Self.runDetached {
-                VoiceSpeakerAnalyzer().analyze(cues, in: audio).reusingSpeakers(of: cues, from: snapshot.speakers)
-            }
-            progress(0.9)
-            guard let self else { throw CancellationError() }
-            let lines = self.spokenLines(of: cues, speakers: result)
-            let tags = SceneAddresseeInferrer().infer(lines, speakers: result.speakers, language: language)
-            return Proposals.speakers(for: cues, track: snapshot, result: result, addressees: tags)
-        }
+    /// The cues about to be translated whose source has words the transcription was unsure of.
+    var cuesWithUnsureSource: [Cue] {
+        guard isTranslating else { return track.cues.filter { $0.unsureWords?.isEmpty == false } }
+        return untranslatedCues.filter { sourceCues[$0.id]?.unsureWords?.isEmpty == false }
     }
 
     /// Target cues with no text whose source has some.
@@ -405,77 +409,55 @@ extension EditorState {
         }
         let cues = untranslatedCues
         guard let source = sourceTrack, let first = cues.first else { return }
-        let targetLanguage = track.languageCode
-        let gendered = Languages.addressesByGender(targetLanguage)
-        // Speakers are found first when the target language needs them and nobody has run detection.
-        let needsSpeakers = gendered && hasMedia && track.speakers.isEmpty
-        let url = status.mediaURL, stream = status.audioStreamIndex
-        let prepare = prepareAudio
-        let snapshot = track
         let glossaryEntries = glossary.entries.filter { entry in cues.contains { glossaryHits[sourceCues[$0.id]?.id ?? UUID()]?.contains(entry) == true } }
         let context: [(source: String, target: String)] = track.cues.filter { $0.start < first.start && !$0.text.isEmpty }
             .suffix(6).compactMap { cue in sourceCues[cue.id].map { ($0.text, cue.text) } }
         let examples = Dictionary(cues.compactMap { cue in
             sourceCues[cue.id].flatMap { memory.matches(for: $0.text, limit: 1).first }.map { (cue.id, ($0.entry.source, $0.entry.target)) }
         }, uniquingKeysWith: { first, _ in first })
-        startAITask("Translation") { [weak self] progress, propose in
-            var speakers: VoiceSpeakerAnalyzer.Result?
-            if needsSpeakers, let url {
-                let audio = try await prepare(url, stream) { progress($0 * 0.15) }
-                speakers = try await Self.runDetached { VoiceSpeakerAnalyzer().analyze(cues, in: audio) }
-            }
-            guard let self else { throw CancellationError() }
-            let cast = speakers?.speakers ?? snapshot.speakers
-            let tags = gendered
-                ? SceneAddresseeInferrer().infer(self.spokenLines(of: cues, speakers: speakers), speakers: cast, language: source.languageCode)
-                : [:]
-            let lines = cues.map { cue -> TranslationRequest.Line in
-                let speakerID = speakers?.assignments[cue.id]?.speakerID ?? cue.speakerID
-                let hint = speakerID.flatMap { id in cast.firstIndex { $0.id == id } }.map { index in
-                    TranslationRequest.SpeakerHint(label: Self.speakerLetter(index), gender: cast[index].gender, confidence: cast[index].confidence)
-                }
-                return TranslationRequest.Line(
-                    cueID: cue.id, source: self.sourceCues[cue.id]?.text ?? "", start: cue.start, end: cue.end, speaker: hint,
-                    addressee: cue.addressee?.source == .confirmed ? cue.addressee : tags[cue.id] ?? cue.addressee,
-                    memoryExample: examples[cue.id]
-                )
-            }
-            let request = TranslationRequest(
-                lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: targetLanguage,
-                glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) },
-                maxCharactersPerLine: self.qcPreset.maxCharactersPerLine, maxLines: self.qcPreset.maxLines
+        let lines = cues.map { cue in
+            TranslationRequest.Line(
+                cueID: cue.id, source: sourceCues[cue.id]?.text ?? "", start: cue.start, end: cue.end, voices: voices(for: cue),
+                speakerName: sourceCues[cue.id]?.speaker ?? cue.speaker, memoryExample: examples[cue.id]
             )
-            let start = needsSpeakers ? 0.15 : 0
+        }
+        let request = TranslationRequest(
+            lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
+            glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) },
+            maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast
+        )
+        let fixUp = TranslationPipeline(preset: qcPreset)
+        startAITask("Translation") { [weak self] progress, propose in
             let found = TranslationCollector()
-            let fixUp = TranslationPipeline(preset: self.qcPreset)
-            let translations = try await translator.translate(request) { progress(start + $0 * (1 - start)) } found: { batch in
+            let translations = try await translator.translate(request, progress: progress) { batch in
                 propose(Proposals.translation(found.add(fixUp.fix(batch, request: request)), cues: cues))
             }
-            var proposal = Proposals.translation(fixUp.fix(translations, request: request), cues: cues)
-            if let speakers {
-                // The speakers found on the way go into the same review.
-                for index in proposal.changes.indices {
-                    proposal.changes[index].cue.speakerID = speakers.assignments[proposal.changes[index].cueID]?.speakerID
-                }
-                proposal.newSpeakers = speakers.speakers
+            // Lines the translator never sent back (a model declined them) stay empty: say so.
+            let done = Set(translations.translations.filter { !$0.text.isEmpty }.map(\.cueID))
+            if let first = cues.first(where: { !done.contains($0.id) }), let self {
+                let count = cues.count - cues.filter { done.contains($0.id) }.count
+                self.reportError(
+                    count == 1 ? "1 line was not translated." : "\(count) lines were not translated.",
+                    AIError.nothingToDo(
+                        "\(translator.name) sent nothing back for them, the first at \(self.label(for: first.start)). "
+                            + "They're marked Not translated: run Translate with AI again to retry them, or translate them yourself."
+                    )
+                )
             }
-            return proposal
+            return Proposals.translation(fixUp.fix(translations, request: request), cues: cues)
         }
     }
 
     /// Starts a translation of the cues being edited (a transcription, an
     /// imported file): they become the read-only source, and the target is
-    /// their timing with no text, keeping speakers and addressees. One undoable edit.
+    /// their timing with no text. One undoable edit.
     func useCuesAsSource() {
         var source = track
         if source.languageCode == "und" { source.languageCode = Self.detectLanguage(of: source.cues) ?? transcriptionLanguage ?? "und" }
         let target = defaultTargetLanguage(avoiding: source.languageCode)
         edit("Translate Cues") { track in
             track.cues = source.cues.map { cue in
-                var empty = Alignment.template(from: [cue])[0]
-                empty.speakerID = cue.speakerID
-                empty.addressee = cue.addressee
-                return empty
+                Alignment.template(from: [cue])[0]
             }
             track.languageCode = target
         }
@@ -508,31 +490,6 @@ extension EditorState {
     }
 }
 
-extension VoiceSpeakerAnalyzer.Result {
-    /// Keeps the IDs (and confirmed genders) of speakers the track already has:
-    /// a new speaker whose cues mostly belonged to an existing one becomes that one.
-    func reusingSpeakers(of cues: [Cue], from existing: [Speaker]) -> Self {
-        guard !existing.isEmpty else { return self }
-        var result = self
-        var taken: Set<Speaker.ID> = []
-        for (index, speaker) in speakers.enumerated() {
-            let previous = cues.filter { assignments[$0.id]?.speakerID == speaker.id }.compactMap(\.speakerID)
-            let counts = Dictionary(previous.map { ($0, 1) }, uniquingKeysWith: +)
-            guard let (oldID, _) = counts.filter({ !taken.contains($0.key) }).max(by: { $0.value < $1.value }),
-                  let old = existing.first(where: { $0.id == oldID })
-            else { continue }
-            taken.insert(oldID)
-            result.speakers[index] = old.source == .confirmed ? old : Speaker(
-                id: old.id, name: old.name, gender: speaker.gender, confidence: speaker.confidence, source: .inferred
-            )
-            for (cueID, assignment) in assignments where assignment.speakerID == speaker.id {
-                result.assignments[cueID]?.speakerID = oldID
-            }
-        }
-        return result
-    }
-}
-
 /// Numbers partial results in the order they were made.
 private final class SerialCounter: @unchecked Sendable {
     private let lock = NSLock()
@@ -549,11 +506,11 @@ private final class SerialCounter: @unchecked Sendable {
 /// Collects translation batches as they arrive, from any thread.
 private final class TranslationCollector: @unchecked Sendable {
     private let lock = NSLock()
-    private var all: [CueTranslation] = []
+    private var all = TranslationBatch()
 
-    func add(_ batch: [CueTranslation]) -> [CueTranslation] {
+    func add(_ batch: TranslationBatch) -> TranslationBatch {
         lock.withLock {
-            all += batch
+            all = all.adding(batch)
             return all
         }
     }

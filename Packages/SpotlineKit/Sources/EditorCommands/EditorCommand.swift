@@ -25,8 +25,8 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
         case review
         /// Translating from a source track: glossary and translation memory.
         case translation
-        /// AI tools: transcription, translation and speakers fill the track;
-        /// cleanup proposes changes, reviewed here too.
+        /// AI tools: transcription and translation fill the track, and the lines
+        /// a translation flagged are reviewed here; cleanup proposes changes, reviewed here too.
         case ai
     }
 
@@ -244,7 +244,7 @@ extension EditorCommand {
         id: "translation.importGlossary", title: "Import Glossary…", category: .translation
     )
 
-    /// Makes cues from the media's dialogue, with speakers, straight into the gaps of the track.
+    /// Makes cues from the media's dialogue straight into the gaps of the track.
     public static let transcribe = EditorCommand(
         id: "ai.transcribe", title: "Transcribe Audio", category: .ai,
         defaultShortcut: KeyShortcut(.character("r"), modifiers: [.command, .control])
@@ -255,10 +255,15 @@ extension EditorCommand {
         id: "ai.translate", title: "Translate with AI", category: .ai,
         defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .control])
     )
-    /// Finds who speaks each cue (voice) and who it addresses (scene), for gendered translations.
-    public static let detectSpeakers = EditorCommand(
-        id: "ai.detectSpeakers", title: "Detect Speakers and Addressees", category: .ai,
-        defaultShortcut: KeyShortcut(.character("s"), modifiers: [.command, .control])
+    /// Shows only the lines AI translation could translate more than one way, least
+    /// confident first, each with its variants to pick from; or every cue again.
+    public static let reviewChoices = EditorCommand(
+        id: "ai.reviewChoices", title: "Review Translation Choices", category: .ai,
+        defaultShortcut: KeyShortcut(.character("v"), modifiers: [.command, .control])
+    )
+    /// Keeps the recommended variant of every line not yet decided, as one edit.
+    public static let acceptRemainingChoices = EditorCommand(
+        id: "ai.acceptRemainingChoices", title: "Accept Remaining Choices", category: .ai
     )
     public static let maskProfanity = EditorCommand(id: "ai.maskProfanity", title: "Mask Profanity", category: .ai)
     public static let removeHearingImpaired = EditorCommand(id: "ai.removeHearingImpaired", title: "Remove Hearing-Impaired Text", category: .ai)
@@ -301,7 +306,7 @@ extension EditorCommand {
         toggleMilliseconds,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, showGlossary, importGlossary,
-        transcribe, translateWithAI, detectSpeakers, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        transcribe, translateWithAI, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

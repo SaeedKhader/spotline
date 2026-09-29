@@ -46,8 +46,8 @@ struct ProposedText: View {
     }
 }
 
-/// A proposed change that leaves the text alone (a speaker or addressee), or
-/// removes the cue: a line under the text with ✓ and ✗.
+/// A proposed change that leaves the text alone (timing), or removes the cue:
+/// a line under the text with ✓ and ✗.
 struct ProposalBox: View {
     let editor: EditorState
     let change: ProposedChange
@@ -75,7 +75,7 @@ struct ProposalBox: View {
     }
 }
 
-/// What else a change does, as one caption: timing, speaker, addressee, variants, and the tool's note.
+/// What else a change does, as one caption: timing, and the tool's note.
 struct ProposalDetails: View {
     let editor: EditorState
     let change: ProposedChange
@@ -102,14 +102,7 @@ struct ProposalDetails: View {
         return [
             before.start != change.cue.start || before.end != change.cue.end
                 ? "\(editor.label(for: change.cue.start)) – \(editor.label(for: change.cue.end))" : nil,
-            before.speakerID != change.cue.speakerID ? change.cue.speakerID.flatMap { editor.proposedSpeakerLabel($0) }.map { "Speaker \($0)" } : nil,
-            before.addressee != change.cue.addressee ? change.cue.addressee.map(addresseeText) : nil,
-            (change.cue.variants?.count ?? 0) > 1 && before.variants == nil ? "\(change.cue.variants!.count) variants" : nil,
         ].compactMap { $0 }
-    }
-
-    private func addresseeText(_ tag: AddresseeTag) -> String {
-        "Spoken to \(tag.addressee.symbol) \(tag.addressee.displayName), \(Int((tag.confidence * 100).rounded()))% sure"
     }
 }
 
@@ -172,7 +165,7 @@ struct ReviewButtons: View {
 }
 
 /// A cue a tool proposes to add (transcription), laid out like the cues around
-/// it: its place, start and end, speaker and text, marked as proposed until
+/// it: its place, start and end and text, marked as proposed until
 /// it is accepted or rejected.
 struct ProposedCueRow: View {
     let editor: EditorState
@@ -191,15 +184,6 @@ struct ProposedCueRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 time("S", cue.start)
                 time("E", cue.end)
-                if let id = cue.speakerID, let label = editor.proposedSpeakerLabel(id) {
-                    Text(label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 4)
-                        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
-                        .padding(.leading, 4)
-                        .accessibilityIdentifier(AccessibilityID.CueList.proposedCell(cue.id, .speaker))
-                }
             }
             HStack(alignment: .top, spacing: 6) {
                 Text(cue.text)
@@ -246,90 +230,171 @@ struct ProposedCueRow: View {
     }
 }
 
-extension EditorState {
-    /// A speaker's letter and voice ("C ♀"), also for speakers a pending review would add.
-    func proposedSpeakerLabel(_ id: Speaker.ID) -> String? {
-        if let label = speakerLabel(id), let speaker = track.speakers.first(where: { $0.id == id }) {
-            return speaker.gender == .unknown ? label : "\(label) \(speaker.gender.symbol)"
+/// A line AI translation could translate more than one way, under its text
+/// while the choice is open: why the translator chose what it did and how sure
+/// it was, then every variant, the one in use marked. One click uses another.
+struct ChoiceBox: View {
+    let editor: EditorState
+    let cue: Cue
+    let flag: TranslationFlag
+    let direction: TextDirection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(Color.aiTint)
+                Text("\(Int((flag.confidence * 100).rounded()))%")
+                    .monospacedDigit()
+                    .foregroundStyle(flag.confidence < 0.75 ? Color.orange : Color.secondary)
+                    .help("How sure the translator was of its pick")
+                if !flag.note.isEmpty {
+                    Text(flag.note)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(flag.note)
+                }
+            }
+            .font(.caption)
+            ForEach(Array(flag.variants.enumerated()), id: \.offset) { index, variant in
+                VariantOption(editor: editor, cueID: cue.id, index: index, variant: variant, isChosen: index == flag.chosen, direction: direction)
+            }
         }
-        guard let review = pendingReview, let index = review.newSpeakers.firstIndex(where: { $0.id == id }) else { return nil }
-        let speaker = review.newSpeakers[index]
-        let letter = Self.speakerLetter(track.speakers.count + index)
-        return speaker.gender == .unknown ? letter : "\(letter) \(speaker.gender.symbol)"
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.aiTint.opacity(0.06), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Translation choice")
+        .accessibilityValue(flag.note)
+        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .choices))
     }
 }
 
-/// Who a line is spoken to: ♂, ♀ or a group sign, orange when the tool was
-/// unsure. Click it to pick the right addressee: the line switches to the
-/// translator's wording for them (one click, undoable), and the tag is confirmed.
-struct AddresseeChip: View {
+/// One variant of a flagged line: who it assumes ("Beth ♀ to Morty ♂") and its text.
+private struct VariantOption: View {
+    let editor: EditorState
+    let cueID: Cue.ID
+    let index: Int
+    let variant: TranslationVariant
+    let isChosen: Bool
+    let direction: TextDirection
+
+    var body: some View {
+        let text = SubtitleText.visibleLines(of: variant.text).joined(separator: " / ")
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: isChosen ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(isChosen ? Color.aiTint : Color.secondary)
+            Text(variant.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 130, alignment: .leading)
+            Text(text)
+                .lineLimit(2)
+                .environment(\.layoutDirection, direction.layoutDirection)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.callout)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { editor.chooseVariant(index, forCue: cueID) }
+        .help(isChosen ? "In use" : "Use this translation")
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(isChosen ? [.isButton, .isSelected] : .isButton)
+        .accessibilityLabel(variant.summary)
+        .accessibilityValue(variant.text)
+        .accessibilityIdentifier(AccessibilityID.CueList.variant(cueID, index))
+        .accessibilityAction { editor.chooseVariant(index, forCue: cueID) }
+    }
+}
+
+/// A row hover action for a line whose choice is made: the other variants, to swap one in.
+struct VariantsMenu: View {
     let editor: EditorState
     let cue: Cue
-    let tag: AddresseeTag
+    let flag: TranslationFlag
 
     var body: some View {
         Menu {
-            let variants = cue.variants ?? []
-            let choices = variants.isEmpty ? Addressee.allCases.filter { $0 != .unknown } : variants.map(\.addressee)
-            ForEach(choices, id: \.self) { addressee in
-                Button {
-                    editor.chooseAddressee(addressee, forCue: cue.id)
-                } label: {
-                    let text = variants.first { $0.addressee == addressee }.map { " — \(SubtitleText.visibleLines(of: $0.text).joined(separator: " / "))" } ?? ""
-                    Text("\(addressee.symbol)  \(addressee.displayName)\(text)")
+            ForEach(Array(flag.variants.enumerated()), id: \.offset) { index, variant in
+                Toggle(isOn: Binding(get: { index == flag.chosen }, set: { _ in editor.chooseVariant(index, forCue: cue.id) })) {
+                    Text("\(variant.summary) — \(SubtitleText.visibleLines(of: variant.text).joined(separator: " / "))")
                 }
-                .accessibilityIdentifier(AccessibilityID.CueList.addresseeChoice(cue.id, addressee.rawValue))
             }
         } label: {
-            Text(tag.addressee.symbol)
-                .font(.caption)
-                .foregroundStyle(tag.needsReview ? Color.orange : Color.secondary)
+            Label("Other Translations", systemImage: "arrow.triangle.branch")
+                .labelStyle(.iconOnly)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Spoken to: \(tag.addressee.displayName), \(tag.source == .confirmed ? "confirmed" : "\(Int((tag.confidence * 100).rounded()))% sure"). Click to change.")
-        .accessibilityLabel("Addressee")
-        .accessibilityValue(tag.addressee.rawValue)
-        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .addressee))
+        .help("Other translations of this line")
+        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .variantsMenu))
     }
 }
 
-/// The speaker's letter and voice gender ("A ♀"), found by speaker detection.
-struct SpeakerChip: View {
+/// Over the cue list while it shows only the lines to choose for.
+struct ChoiceReviewHeader: View {
     let editor: EditorState
-    let speakerID: Speaker.ID
-    let cueID: Cue.ID
 
     var body: some View {
-        if let label = editor.speakerLabel(speakerID), let speaker = editor.track.speakers.first(where: { $0.id == speakerID }) {
-            let text = speaker.gender == .unknown ? label : "\(label) \(speaker.gender.symbol)"
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
-                .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
-                .help("Speaker \(label): \(speaker.gender.rawValue) voice, \(Int((speaker.confidence * 100).rounded()))% sure")
-                .accessibilityLabel("Speaker")
-                .accessibilityValue(text)
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cueID, .speaker))
+        let count = editor.cuesToChoose.count
+        let text = "\(count == 1 ? "1 line reads" : "\(count) lines read") more than one way, least sure first. "
+            + "Pick a translation, or keep the rest with \(EditorCommand.acceptRemainingChoices.menuHint("AI"))."
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(Color.aiTint)
+                Text(text)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .font(.callout)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.aiTint.opacity(0.08))
+            Divider()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(text)
+        .accessibilityIdentifier(AccessibilityID.CueList.choiceReview)
+    }
+}
+
+extension TranslationVariant {
+    /// Who the variant assumes, in a few words: "Beth ♀ to Morty ♂", "to two women".
+    var summary: String {
+        var speakerPart: String?
+        if let speaker { speakerPart = "\(speaker) \(speakerGender.symbol)".trimmingCharacters(in: .whitespaces) }
+        else if speakerGender == .male || speakerGender == .female { speakerPart = "\(speakerGender == .male ? "a man" : "a woman") speaking" }
+        var listenerPart: String?
+        if !listeners.isEmpty {
+            listenerPart = "to \(listeners.joined(separator: " & ")) \(listenerGender.symbol)".trimmingCharacters(in: .whitespaces)
+        } else if listenerGender != .unknown || listenerCount != .unknown {
+            listenerPart = "to \(Self.describe(listenerGender, listenerCount))"
+        }
+        return [speakerPart, listenerPart].compactMap { $0 }.joined(separator: " ").nonEmpty ?? "Another reading"
+    }
+
+    static func describe(_ gender: Gender, _ count: ListenerCount) -> String {
+        switch (count, gender) {
+        case (.one, .male), (.unknown, .male): "a man"
+        case (.one, .female), (.unknown, .female): "a woman"
+        case (.two, .male): "two men"
+        case (.two, .female): "two women"
+        case (.two, _): "two people"
+        case (.many, .male): "men"
+        case (.many, .female): "women"
+        case (.many, _), (.unknown, .mixed), (.one, .mixed): "a group"
+        default: "someone"
         }
     }
 }
 
-extension Addressee {
-    var displayName: String {
-        switch self {
-        case .male: "a man"
-        case .female: "a woman"
-        case .dualMale: "two men"
-        case .dualFemale: "two women"
-        case .groupMale: "men"
-        case .groupFemale: "women"
-        case .groupMixed: "a group"
-        case .unknown: "unknown"
-        }
-    }
+extension String {
+    fileprivate var nonEmpty: String? { isEmpty ? nil : self }
 }
 
 extension Gender {
@@ -337,7 +402,8 @@ extension Gender {
         switch self {
         case .male: "♂"
         case .female: "♀"
-        case .unknown: "?"
+        case .mixed: "♂♀"
+        case .unknown: ""
         }
     }
 }

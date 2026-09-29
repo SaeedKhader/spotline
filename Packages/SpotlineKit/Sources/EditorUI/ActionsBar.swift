@@ -31,6 +31,7 @@ struct ActionsBar: View {
                 CommandButton(command: .zoomIn, systemImage: "plus.magnifyingglass", editor: editor)
             }
             Spacer(minLength: 8)
+            ChoicesSummary(editor: editor)
             ReviewSummary(editor: editor)
             AnalysisStatusView(editor: editor)
             TimecodeView(editor: editor)
@@ -74,6 +75,37 @@ private struct TimecodeView: View {
             .accessibilityLabel("Timecode")
             .accessibilityValue(editor.timecode.description)
             .accessibilityIdentifier(AccessibilityID.Transport.timecode)
+    }
+}
+
+/// "5 lines to choose": lines AI translation could translate more than one way
+/// that nobody has decided yet. Click it to review them (AI › Review Translation
+/// Choices); while reviewing, Accept Remaining keeps the translator's picks.
+private struct ChoicesSummary: View {
+    let editor: EditorState
+
+    var body: some View {
+        let count = editor.cuesToChoose.count
+        if count > 0 || editor.isReviewingChoices {
+            HStack(spacing: 8) {
+                let text = count == 1 ? "1 line to choose" : "\(count) lines to choose"
+                Button {
+                    editor.perform(.reviewChoices)
+                } label: {
+                    Label(text, systemImage: "arrow.triangle.branch")
+                        .foregroundStyle(editor.isReviewingChoices ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.aiTint))
+                }
+                .buttonStyle(.borderless)
+                .help(editor.isReviewingChoices ? "Show every cue" : "\(EditorCommand.reviewChoices.title): lines that read more than one way")
+                .accessibilityValue(text)
+                .accessibilityIdentifier(AccessibilityID.CueList.choicesSummary)
+                if editor.isReviewingChoices {
+                    CommandButton(command: .acceptRemainingChoices, editor: editor)
+                }
+            }
+            .font(.caption)
+            .lineLimit(1)
+        }
     }
 }
 

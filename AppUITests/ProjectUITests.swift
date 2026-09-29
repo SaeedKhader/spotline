@@ -22,7 +22,7 @@ final class ProjectUITests: XCTestCase {
             ]
         }
         let subtitles: [String: Any] = [
-            "id": UUID().uuidString, "languageCode": "en", "styles": [], "properties": [:], "speakers": [],
+            "id": UUID().uuidString, "languageCode": "en", "styles": [], "properties": [:], "cast": [],
             "cues": [cue("Saved in the project", from: 1, to: 2), cue("Still here", from: 3, to: 4)],
         ]
         try JSONSerialization.data(withJSONObject: manifest).write(to: package.appending(path: "project.json"))

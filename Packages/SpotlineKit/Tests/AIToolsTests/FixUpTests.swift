@@ -146,20 +146,39 @@ struct TranslationFixUpTests {
 }
 
 struct ElevenLabsTests {
-    @Test func scribeWordsKeepPunctuationAndSkipSpacingAndEvents() throws {
+    @Test func scribeWordsKeepPunctuationEventsAndConfidence() throws {
         let json = """
             {"language_code": "en", "text": "Morty, come on.", "words": [
-              {"text": "Morty,", "type": "word", "start": 3.12, "end": 3.5, "speaker_id": "speaker_0"},
+              {"text": "Morty,", "type": "word", "start": 3.12, "end": 3.5, "speaker_id": "speaker_0", "logprob": -0.01},
               {"text": " ", "type": "spacing", "start": 3.5, "end": 3.52},
-              {"text": "(laughs)", "type": "audio_event", "start": 3.52, "end": 3.9},
-              {"text": "come", "type": "word", "start": 3.9, "end": 4.1, "speaker_id": "speaker_1"},
+              {"text": "(laughs)", "type": "audio_event", "start": 3.52, "end": 3.9, "logprob": -5},
+              {"text": "come", "type": "word", "start": 3.9, "end": 4.1, "speaker_id": "speaker_1", "logprob": -1.6},
               {"text": "on.", "type": "word", "start": 4.1, "end": 4.3, "speaker_id": "speaker_1"}
             ]}
             """
         let words = try ElevenLabsTranscriber.words(from: Data(json.utf8))
-        #expect(words.map(\.text) == ["Morty,", "come", "on."])
-        #expect(words.map(\.speaker) == ["speaker_0", "speaker_1", "speaker_1"])
+        #expect(words.map(\.text) == ["Morty,", "(laughs)", "come", "on."])
+        #expect(words.map(\.speaker) == ["speaker_0", nil, "speaker_1", "speaker_1"])
         #expect(words[0].start == MediaTime(value: 3120, timescale: 1000))
+        #expect(abs((words[0].confidence ?? 0) - 0.99) < 0.001)
+        #expect(words[1].confidence == nil, "Sounds are not checked")
+        #expect((words[2].confidence ?? 1) < CueSegmenter.unsureConfidence)
+        #expect(words[3].confidence == nil)
+    }
+
+    @Test func loggingIsTurnedOffUnlessRefused() {
+        let url = ElevenLabsTranscriber.withoutLogging(URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!)
+        #expect(url.absoluteString == "https://api.elevenlabs.io/v1/speech-to-text?enable_logging=false")
+        #expect(ElevenLabsTranscriber.isRetentionRefusal("Zero retention mode may only be used by enterprise customers."))
+        #expect(!ElevenLabsTranscriber.isRetentionRefusal("Invalid API key"))
+    }
+
+    @Test func unsureWordsAreKeptOnTheirCue() {
+        let words = [("I'm", 0.0, 0.2, 0.95), ("Ser", 0.25, 0.4, 0.3), ("Duncan.", 0.45, 0.9, 0.2)].map {
+            TranscribedWord(text: $0.0, start: MediaTime(seconds: $0.1, timescale: 1000), end: MediaTime(seconds: $0.2, timescale: 1000), confidence: $0.3)
+        }
+        let cues = CueSegmenter(preset: .standard, frameRate: .fps25).cues(from: words)
+        #expect(cues.map(\.unsureWords) == [["Ser", "Duncan"]])
     }
 
     @Test func chunksGoOnOneTimelineWithSilenceBetween() {

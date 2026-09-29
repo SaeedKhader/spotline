@@ -9,12 +9,15 @@ public struct TranscribedWord: Sendable, Equatable, Codable {
     public var end: MediaTime
     /// Who said it ("speaker_0"), when the transcriber tells speakers apart.
     public var speaker: String?
+    /// 0 to 1: how sure the transcriber was of the word, when it says.
+    public var confidence: Double?
 
-    public init(text: String, start: MediaTime, end: MediaTime, speaker: String? = nil) {
+    public init(text: String, start: MediaTime, end: MediaTime, speaker: String? = nil, confidence: Double? = nil) {
         self.text = text
         self.start = start
         self.end = end
         self.speaker = speaker
+        self.confidence = confidence
     }
 }
 
@@ -56,7 +59,29 @@ public struct CueSegmenter: Sendable {
             (group.first!.start.firstFrame(at: frameRate), group.last!.end.firstFrame(at: frameRate), text(of: group))
         }
         time(&frames)
-        return frames.map { Cue(start: MediaTime(frame: $0.start, rate: frameRate), end: MediaTime(frame: $0.end, rate: frameRate), text: $0.text) }
+        return zip(frames, groups).map { frame, group in
+            Cue(
+                start: MediaTime(frame: frame.start, rate: frameRate), end: MediaTime(frame: frame.end, rate: frameRate), text: frame.text,
+                voices: Self.voices(of: group), unsureWords: Self.unsureWords(of: group)
+            )
+        }
+    }
+
+    /// Below this, a word is one the transcriber was unsure of, marked for checking.
+    public static let unsureConfidence = 0.5
+
+    /// The words the transcriber was unsure of, without punctuation, nil when none.
+    static func unsureWords(of words: [TranscribedWord]) -> [String]? {
+        let unsure = words.filter { ($0.confidence ?? 1) < unsureConfidence }
+            .map { $0.text.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) }
+            .filter { !$0.isEmpty }
+        return unsure.isEmpty ? nil : unsure
+    }
+
+    /// Who says the words, one label per turn, nil when the transcriber did not tell voices apart.
+    static func voices(of words: [TranscribedWord]) -> [String]? {
+        let voices = turns(words).compactMap { $0.first(where: { $0.speaker != nil })?.speaker }
+        return voices.isEmpty ? nil : voices
     }
 
     /// A cue's text: two balanced lines at most, or, when two people speak
@@ -250,7 +275,7 @@ public final class TranscriptAccumulator: @unchecked Sendable {
             let frame = cue.start.firstFrame(at: pipeline.segmenter.frameRate)
             let id = ids[frame] ?? cue.id
             ids[frame] = id
-            return Cue(id: id, start: cue.start, end: cue.end, text: cue.text)
+            return Cue(id: id, start: cue.start, end: cue.end, text: cue.text, voices: cue.voices, unsureWords: cue.unsureWords)
         }
     }
 }

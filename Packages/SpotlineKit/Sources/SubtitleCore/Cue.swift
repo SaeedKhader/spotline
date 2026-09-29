@@ -13,21 +13,22 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     public var speaker: String?
     /// In a translation, the source-language cue this one translates.
     public var sourceCueID: UUID?
-    /// The speaker in the track's cast list (`SubtitleTrack.speakers`), once known.
-    public var speakerID: Speaker.ID?
-    /// Who the line is spoken to, for languages whose grammar depends on it (docs/ARCHITECTURE.md, 7b).
-    public var addressee: AddresseeTag?
-    /// The line for each addressee it could be spoken to, when a translator was
-    /// unsure: one click swaps the text (docs/ARCHITECTURE.md, 7b). Nil otherwise.
-    public var variants: [TextVariant]?
+    /// The transcriber's labels for who says the line ("speaker_0"), one per
+    /// speaker in order; two for a dialogue cue. Nil when not transcribed with speakers.
+    public var voices: [String]?
+    /// Set when AI translation found the line could be translated more than one
+    /// way: every variant, the one in use and why (docs/ARCHITECTURE.md, 7b).
+    public var flag: TranslationFlag?
+    /// Words the transcriber was unsure of, for checking; cleared when the text is edited.
+    public var unsureWords: [String]?
     /// True while the text is as an AI tool wrote it (transcription, translation);
     /// cleared when the user edits it. The cue list tints these.
     public var isAIGenerated: Bool?
 
     public init(
         id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom,
-        style: String? = nil, speaker: String? = nil, sourceCueID: UUID? = nil, speakerID: Speaker.ID? = nil,
-        addressee: AddresseeTag? = nil, variants: [TextVariant]? = nil
+        style: String? = nil, speaker: String? = nil, sourceCueID: UUID? = nil, voices: [String]? = nil,
+        flag: TranslationFlag? = nil, unsureWords: [String]? = nil
     ) {
         self.id = id
         self.start = start
@@ -37,9 +38,9 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
         self.style = style
         self.speaker = speaker
         self.sourceCueID = sourceCueID
-        self.speakerID = speakerID
-        self.addressee = addressee
-        self.variants = variants
+        self.voices = voices
+        self.flag = flag
+        self.unsureWords = unsureWords
     }
 
     public var duration: MediaTime { end - start }
@@ -71,19 +72,35 @@ public struct SubtitleTrack: Identifiable, Hashable, Sendable, Codable {
     public var styles: [SubtitleStyle]
     /// Header fields kept for round trips, e.g. the ASS `[Script Info]` keys (`PlayResX`, `Title`).
     public var properties: [String: String]
-    /// The cast: who speaks, with their gender when known. Cues refer to them by `speakerID`.
-    public var speakers: [Speaker]
+    /// The people in the episode, as AI translation came to know them (names from the
+    /// dialogue, genders, voices). Picks confirm them; nobody enters them by hand.
+    public var cast: [CastMember]
 
     public init(
         id: UUID = UUID(), languageCode: String = "und", cues: [Cue] = [], styles: [SubtitleStyle] = [],
-        properties: [String: String] = [:], speakers: [Speaker] = []
+        properties: [String: String] = [:], cast: [CastMember] = []
     ) {
         self.id = id
         self.languageCode = languageCode
         self.cues = cues
         self.styles = styles
         self.properties = properties
-        self.speakers = speakers
+        self.cast = cast
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, languageCode, cues, styles, properties, cast
+    }
+
+    /// Projects saved before the cast existed have none.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        languageCode = try container.decode(String.self, forKey: .languageCode)
+        cues = try container.decode([Cue].self, forKey: .cues)
+        styles = try container.decodeIfPresent([SubtitleStyle].self, forKey: .styles) ?? []
+        properties = try container.decodeIfPresent([String: String].self, forKey: .properties) ?? [:]
+        cast = try container.decodeIfPresent([CastMember].self, forKey: .cast) ?? []
     }
 
     /// The style named `name`, else the one named "Default", else the first.
