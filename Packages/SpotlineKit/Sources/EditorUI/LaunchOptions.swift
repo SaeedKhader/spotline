@@ -11,6 +11,8 @@ public struct LaunchOptions: Sendable {
     public var subtitlesURL: URL?
     /// Source subtitles to translate from at launch, from `-OpenSource <path>`.
     public var sourceSubtitlesURL: URL?
+    /// A project (`.spotline`) to open at launch, from `-OpenProject <path>`.
+    public var projectURL: URL?
     /// Reuse cached media analysis. Off in UI tests and with `-NoAnalysisCache`,
     /// so analysis always runs (and can be watched filling in the timeline).
     public var usesAnalysisCache: Bool
@@ -19,14 +21,25 @@ public struct LaunchOptions: Sendable {
 
     public init(
         isUITestMode: Bool = false, mediaURL: URL? = nil, subtitlesURL: URL? = nil, sourceSubtitlesURL: URL? = nil,
-        usesAnalysisCache: Bool? = nil, enablesAgentAccess: Bool = false
+        projectURL: URL? = nil, usesAnalysisCache: Bool? = nil, enablesAgentAccess: Bool = false
     ) {
         self.isUITestMode = isUITestMode
         self.mediaURL = mediaURL
         self.subtitlesURL = subtitlesURL
         self.sourceSubtitlesURL = sourceSubtitlesURL
+        self.projectURL = projectURL
         self.usesAnalysisCache = usesAnalysisCache ?? !isUITestMode
         self.enablesAgentAccess = enablesAgentAccess
+    }
+
+    /// The same switches without the files to open, for every window after the first.
+    public var withoutFiles: LaunchOptions {
+        var options = self
+        options.mediaURL = nil
+        options.subtitlesURL = nil
+        options.sourceSubtitlesURL = nil
+        options.projectURL = nil
+        return options
     }
 
     public static var current: LaunchOptions {
@@ -40,6 +53,7 @@ public struct LaunchOptions: Sendable {
             mediaURL: path(after: "-OpenMedia"),
             subtitlesURL: path(after: "-OpenSubtitles"),
             sourceSubtitlesURL: path(after: "-OpenSource"),
+            projectURL: path(after: "-OpenProject"),
             usesAnalysisCache: arguments.contains("-UITestMode") || arguments.contains("-NoAnalysisCache") ? false : true,
             enablesAgentAccess: arguments.contains("-EnableAgentAccess")
         )

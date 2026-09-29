@@ -36,7 +36,7 @@ public final class EditorState {
         didSet { if frameRate != oldValue { updateIssues() } }
     }
     /// The subtitles being edited; in translation mode, the target (translation).
-    public private(set) var track: SubtitleTrack {
+    public internal(set) var track: SubtitleTrack {
         didSet {
             if track.languageCode != oldValue.languageCode { translationPairDidChange() }
             guard track.cues != oldValue.cues else { return }
@@ -52,6 +52,7 @@ public final class EditorState {
     /// beside each target cue. Nil outside translation mode.
     public internal(set) var sourceTrack: SubtitleTrack? {
         didSet {
+            if sourceTrack != oldValue, !isLoadingProject { projectDidChange?(.other) }
             updateSourceCues()
             updateGlossaryHits()
             updateIssues()
@@ -110,8 +111,14 @@ public final class EditorState {
     @ObservationIgnored var isRecordingErrorsForAgents = false
     /// Providers and cloud consent (Settings › AI).
     public var aiSettings: AISettings {
-        didSet { if aiSettings != oldValue { aiSettings.save(to: settings) } }
+        didSet {
+            guard aiSettings != oldValue else { return }
+            aiSettings.save(to: settings)
+            onAISettingsChange?(aiSettings)
+        }
     }
+    /// Called when the settings change here, so every project window uses them.
+    @ObservationIgnored public var onAISettingsChange: (@MainActor (AISettings) -> Void)?
     /// Makes the transcriber and translator the settings ask for. Tests and UI tests use scripted ones.
     @ObservationIgnored public var aiProviders: AIProviderFactory
     /// Reads and chunks the dialogue audio for speech models (cached). Tests replace it.
@@ -130,7 +137,9 @@ public final class EditorState {
         didSet {
             guard qcPreset != oldValue else { return }
             updateIssues()
+            guard !isLoadingProject else { return }
             settings?.set(qcPreset.id, forKey: Self.qcPresetKey)
+            projectDidChange?(.other)
         }
     }
     /// Whether the issues panel under the cue list is open.
@@ -142,9 +151,11 @@ public final class EditorState {
     public private(set) var showsMilliseconds = false
     public internal(set) var selectedCueID: Cue.ID?
     /// The file the subtitles were last imported from or exported to.
-    public private(set) var subtitleFile: SubtitleFileReference?
+    public internal(set) var subtitleFile: SubtitleFileReference? {
+        didSet { if subtitleFile != oldValue, !isLoadingProject { projectDidChange?(.other) } }
+    }
     /// True when the subtitles changed since they were last imported or exported.
-    public private(set) var hasUnsavedChanges = false
+    public internal(set) var hasUnsavedChanges = false
     /// True while the user types in the cue text editor. Menus turn off
     /// shortcuts that would steal typing keys (see `isShortcutEnabled(for:)`).
     public var isEditingText = false {
@@ -152,6 +163,37 @@ public final class EditorState {
     }
     /// Increments when the text editor should take keyboard focus (after adding a cue).
     public private(set) var textFocusRequest = 0
+
+    // MARK: Project state (EditorState+Project.swift)
+
+    /// The project file (`.spotline`) this editor's window shows, nil while untitled.
+    public var projectURL: URL?
+    /// Tells the project document that something it saves has changed.
+    @ObservationIgnored public var projectDidChange: (@MainActor (ProjectChange) -> Void)?
+    /// New, open, save, duplicate and revert, which the project document runs.
+    @ObservationIgnored public weak var projectActions: (any ProjectActions)?
+    /// Opens media in a new project window instead of this one. Returns true when it did.
+    @ObservationIgnored public var openMediaElsewhere: (@MainActor (URL) -> Bool)?
+    /// The commands this editor may run; nil for all. The stand-in editor used
+    /// while no project window is open allows only new and open.
+    @ObservationIgnored public var allowedCommandIDs: Set<String>?
+    /// Called as an AI tool starts, so an untitled project can be saved first and keep its results.
+    @ObservationIgnored public var aiToolWillStart: (@MainActor () -> Void)?
+    /// Where the project's video is; kept while the video is missing, so saving does not lose it.
+    @ObservationIgnored var mediaReference: MediaReference?
+    /// The video's file name when the project's video could not be found.
+    public internal(set) var missingMediaName: String?
+    /// Asks where a project's missing video went. Tests replace it.
+    @ObservationIgnored public var locateMissingMedia: @MainActor (_ fileName: String) -> URL? = EditorPanels.locateMissingMedia(fileName:)
+    /// Analyses of the video kept in the project, so reopening it reads nothing again.
+    @ObservationIgnored var storedAnalysis = StoredAnalysis()
+    /// Transcribers' raw words kept in the project, so transcribing again uploads nothing.
+    @ObservationIgnored var storedTranscripts: [StoredTranscript] = []
+    /// True while a project's contents are put in place, which is no change to save.
+    @ObservationIgnored var isLoadingProject = false
+    /// The media a project opened, whose arrival is no change to save; and where its playhead was.
+    @ObservationIgnored var projectMediaURL: URL?
+    @ObservationIgnored var projectPlayhead: MediaTime?
 
     /// The open media's waveform, filled in while it is being read.
     public private(set) var audioAnalysis: AudioAnalysis?
@@ -337,7 +379,11 @@ public final class EditorState {
     // MARK: - Commands
 
     public func canPerform(_ command: EditorCommand) -> Bool {
-        switch command.id {
+        if let allowedCommandIDs, !allowedCommandIDs.contains(command.id) { return false }
+        return switch command.id {
+        case EditorCommand.newProject.id, EditorCommand.openProject.id, EditorCommand.saveProject.id,
+             EditorCommand.duplicateProject.id, EditorCommand.revertProject.id, EditorCommand.browseProjectVersions.id:
+            projectActions?.canPerform(command, projectURL: projectURL) ?? false
         case EditorCommand.openMedia.id, EditorCommand.importSubtitles.id, EditorCommand.exportSubtitles.id,
              EditorCommand.addCue.id:
             true
@@ -428,6 +474,9 @@ public final class EditorState {
     public func perform(_ command: EditorCommand) -> Bool {
         guard canPerform(command) else { return false }
         switch command.id {
+        case EditorCommand.newProject.id, EditorCommand.openProject.id, EditorCommand.saveProject.id,
+             EditorCommand.duplicateProject.id, EditorCommand.revertProject.id, EditorCommand.browseProjectVersions.id:
+            return projectActions?.perform(command) ?? false
         case EditorCommand.openMedia.id:
             if let url = chooseMedia() { open(url) }
         case EditorCommand.importSubtitles.id:
@@ -547,6 +596,7 @@ public final class EditorState {
     /// the old media. Unsaved subtitles can be exported first, or the open cancelled.
     /// Subtitles imported before any media opens are kept for it.
     public func open(_ url: URL) {
+        if let openMediaElsewhere, openMediaElsewhere(url) { return }
         if hasMedia {
             if hasUnsavedChanges, !track.cues.isEmpty, !launchOptions.isUITestMode {
                 switch confirmReplacingSubtitles() {
@@ -567,7 +617,7 @@ public final class EditorState {
 
     /// Forgets everything that belongs to the open media. View preferences
     /// (zoom, QC preset, snapping, time display) and the glossary and memory stay.
-    private func resetForNewMedia() {
+    func resetForNewMedia() {
         isEditingText = false
         endTextEditSession()
         shuttleRate = 0
@@ -578,6 +628,12 @@ public final class EditorState {
         undoManager.removeAllActions()
         refreshUndoState()
         hasUnsavedChanges = false
+        // What the project kept about the old media.
+        storedAnalysis = StoredAnalysis()
+        storedTranscripts = []
+        mediaReference = nil
+        missingMediaName = nil
+        projectPlayhead = nil
         // Cleared now, not when the new media loads, so nothing of the old media shows meanwhile.
         cancelAnalysis()
         embeddedSubtitlesTask?.cancel()
@@ -1025,6 +1081,7 @@ public final class EditorState {
         track = edited
         hasUnsavedChanges = true
         refreshUndoState()
+        projectDidChange?(.edit)
     }
 
     private struct Snapshot {
@@ -1046,17 +1103,19 @@ public final class EditorState {
 
     /// Undo and redo: puts back `snapshot` and registers the reverse.
     private func restore(_ snapshot: Snapshot, actionName: String) {
+        let change: ProjectChange = undoManager.isUndoing ? .undo : .redo
         registerUndo(restoring: Snapshot(track: track, selectedCueID: selectedCueID), actionName: actionName)
         track = snapshot.track
         selectedCueID = snapshot.selectedCueID
         hasUnsavedChanges = true
+        projectDidChange?(change)
     }
 
     private func endTextEditSession() {
         textEditCueID = nil
     }
 
-    private func refreshUndoState() {
+    func refreshUndoState() {
         canUndo = undoManager.canUndo
         canRedo = undoManager.canRedo
     }
@@ -1082,6 +1141,7 @@ public final class EditorState {
         // Analyze again when the player switches to another audio track than the waveform shows.
         let audioTrackChanged = status.audioStreamIndex.map { $0 != analyzedAudioStream } ?? false
         if mediaChanged {
+            mediaDidOpen()
             findEmbeddedSubtitles()
             startWaveformAnalysis()
             startShotChangeAnalysis()
@@ -1104,7 +1164,10 @@ public final class EditorState {
             let tracks = ((try? await list(url)) ?? []).filter(\.isText)
             guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
             self.embeddedSubtitles = tracks
-            if !tracks.isEmpty, self.markEmbeddedSubtitlesOffered(for: url) { self.isEmbeddedSubtitlesSheetShown = true }
+            // A project that has cues already has its subtitles.
+            if !tracks.isEmpty, self.track.cues.isEmpty || self.projectURL == nil, self.markEmbeddedSubtitlesOffered(for: url) {
+                self.isEmbeddedSubtitlesSheetShown = true
+            }
         }
     }
 
@@ -1182,7 +1245,7 @@ public final class EditorState {
         [waveformJob, speechJob, shotChangesJob].compactMap { $0?.analyzedUntil }.min()
     }
 
-    private func cancelAnalysis() {
+    func cancelAnalysis() {
         for task in [waveformTask, speechTask, shotChangesTask] { task?.cancel() }
         audioAnalysis = nil
         speech = nil
@@ -1194,16 +1257,21 @@ public final class EditorState {
     }
 
     /// Starts the waveform and speech jobs for the playing audio track.
-    private func startWaveformAnalysis() {
+    func startWaveformAnalysis() {
         startSpeechAnalysis()
         waveformTask?.cancel()
         audioAnalysis = nil
         waveformJob = nil
         analyzedAudioStream = status.audioStreamIndex
         guard let url = status.mediaURL else { return }
+        let stream = status.audioStreamIndex
+        if let stored = storedAnalysis.waveforms[StoredAnalysis.key(forStream: stream)] {
+            audioAnalysis = stored
+            analyzedAudioStream = stored.audioStreamIndex
+            return
+        }
         waveformJob = AnalysisJob()
         let analyze = analyzeWaveform
-        let stream = status.audioStreamIndex
         let report: @Sendable (MediaAnalyzer.Progress<AudioAnalysis>) -> Void = { [weak self] progress in
             guard let editor = self else { return }
             Task { @MainActor in editor.waveformDidProgress(progress, for: url) }
@@ -1214,6 +1282,7 @@ public final class EditorState {
             if let result {
                 self.audioAnalysis = result
                 self.analyzedAudioStream = result.audioStreamIndex
+                self.storedAnalysis.waveforms[StoredAnalysis.key(forStream: stream)] = result
             }
             self.waveformJob = nil
         }
@@ -1224,9 +1293,13 @@ public final class EditorState {
         speech = nil
         speechJob = nil
         guard let url = status.mediaURL else { return }
+        let stream = status.audioStreamIndex
+        if let stored = storedAnalysis.speech[StoredAnalysis.key(forStream: stream)] {
+            speech = stored
+            return
+        }
         speechJob = AnalysisJob()
         let analyze = analyzeSpeech
-        let stream = status.audioStreamIndex
         let report: @Sendable (MediaAnalyzer.Progress<[SpeechRegion]>) -> Void = { [weak self] progress in
             guard let editor = self else { return }
             Task { @MainActor in editor.speechDidProgress(progress, for: url) }
@@ -1234,7 +1307,10 @@ public final class EditorState {
         speechTask = Task { [weak self] in
             let result = try? await analyze(url, stream, report)
             guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
-            if let result { self.speech = result }
+            if let result {
+                self.speech = result
+                self.storedAnalysis.speech[StoredAnalysis.key(forStream: stream)] = result
+            }
             self.speechJob = nil
         }
     }
@@ -1245,11 +1321,15 @@ public final class EditorState {
         if let partial = progress.partial { speech = partial }
     }
 
-    private func startShotChangeAnalysis() {
+    func startShotChangeAnalysis() {
         shotChangesTask?.cancel()
         shotChanges = nil
         shotChangesJob = nil
         guard let url = status.mediaURL else { return }
+        if let stored = storedAnalysis.shotChanges {
+            shotChanges = stored
+            return
+        }
         shotChangesJob = AnalysisJob()
         let analyze = analyzeShotChanges
         let report: @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void = { [weak self] progress in
@@ -1259,7 +1339,10 @@ public final class EditorState {
         shotChangesTask = Task { [weak self] in
             let result = try? await analyze(url, report)
             guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
-            if let result { self.shotChanges = result }
+            if let result {
+                self.shotChanges = result
+                self.storedAnalysis.shotChanges = result
+            }
             self.shotChangesJob = nil
         }
     }

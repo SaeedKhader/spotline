@@ -264,6 +264,8 @@ extension EditorState {
         }
         let issueList = issues.values.flatMap { $0 }
         return [
+            // The .spotline project the window saves to, null while untitled.
+            "project_file": JSONValue(projectURL?.path),
             "media": media,
             "subtitles": [
                 "file": JSONValue(subtitleFile?.url.path),

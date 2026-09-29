@@ -92,6 +92,12 @@ public final class MPVPlayer: PlaybackEngine {
         handle.command(["loadfile", url.path, "replace"])
     }
 
+    public func unload() {
+        pendingLoad = nil
+        loadingURL = nil
+        handle.command(["stop"])
+    }
+
     public func setPaused(_ paused: Bool) {
         guard status.hasMedia else { return }
         if !paused {

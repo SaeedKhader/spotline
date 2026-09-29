@@ -99,6 +99,8 @@ public protocol PlaybackEngine: AnyObject {
 
     /// Opens `url` paused on its first frame.
     func load(_ url: URL)
+    /// Closes the media and stops playing (the project's window closed).
+    func unload()
     func setPaused(_ paused: Bool)
     /// Plays at `rate` times normal speed; negative rates play backward.
     func play(rate: Double)

@@ -6,13 +6,13 @@ struct SpotlineApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        // The editor window is owned by AppKit (see AppDelegate); SwiftUI supplies
+        // Project windows are AppKit documents (see AppDelegate); SwiftUI supplies
         // the menus and the Settings window.
         Settings {
-            SettingsView(editor: appDelegate.editor, agentAccess: appDelegate.agentAccess)
+            SettingsView(editor: appDelegate.workspace.idleEditor, agentAccess: appDelegate.agentAccess)
         }
         .commands {
-            EditorMenuCommands(editor: appDelegate.editor)
+            EditorMenuCommands(workspace: appDelegate.workspace)
         }
     }
 }

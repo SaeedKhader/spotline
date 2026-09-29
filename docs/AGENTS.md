@@ -45,7 +45,7 @@ Add this to the client's MCP configuration (for Claude Desktop, `~/Library/Appli
 
 | Tool | What it does |
 |---|---|
-| `get_project` | Media, subtitle file, language, translation source, playhead, selection, QC summary, AI status, undo/redo |
+| `get_project` | Project file, media, subtitle file, language, translation source, playhead, selection, QC summary, AI status, undo/redo |
 | `get_cues` | Cues with number, id, timecodes, text, position, speaker, issues, source text and proposed changes (`from`, `count` to page) |
 | `get_qc_issues` | Every QC issue under the current preset, and the available presets |
 | `get_ai_status` | The running AI tool, cleanup changes waiting for review, the last AI error |
@@ -64,7 +64,8 @@ Cues are named by the number `get_cues` shows (1 is the first) or by id. Numbers
 - Each edit is one undo step, listed in Edit › Undo like your own. Text an agent writes is tinted, like other AI text, until you edit it.
 - Transcription and translation fill empty cues and gaps directly, one undo step per batch, and never overwrite what you typed meanwhile.
 - Cleanup tools (profanity, hearing-impaired text, punctuation) only propose changes. You accept or reject them in the cue list; agents can read the proposals but can't decide on them.
-- Agents can't open file dialogs. They pass paths to `open_media`, `import_subtitles`, `open_source_subtitles` and `export_subtitles`. `open_media` refuses to drop unexported subtitle changes unless the agent passes `discard_unsaved_changes`.
+- Agents work in the project window in front. With no window open, a tool call opens a new one; `open_media` opens a new project window when the front one already has a video. Projects save themselves, so agent edits are kept like the person's.
+- Agents can't open file dialogs. They pass paths to `open_media`, `import_subtitles`, `open_source_subtitles` and `export_subtitles`.
 - Errors that would show an alert when you do something (a file that can't be read, say) go back to the agent instead.
 
 ## How it works

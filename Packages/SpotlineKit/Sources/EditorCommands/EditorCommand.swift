@@ -39,6 +39,32 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
 }
 
 extension EditorCommand {
+    /// A new project window (docs/ARCHITECTURE.md, section 5: `.spotline` projects).
+    public static let newProject = EditorCommand(
+        id: "file.newProject", title: "New Project", category: .file,
+        defaultShortcut: KeyShortcut(.character("n"), modifiers: .command)
+    )
+    public static let openProject = EditorCommand(
+        id: "file.openProject", title: "Open Project…", category: .file,
+        defaultShortcut: KeyShortcut(.character("o"), modifiers: [.command, .control])
+    )
+    /// Saves the project, asking where the first time. Projects also save themselves as you work.
+    public static let saveProject = EditorCommand(
+        id: "file.saveProject", title: "Save Project…", category: .file,
+        defaultShortcut: KeyShortcut(.character("s"), modifiers: .command)
+    )
+    public static let duplicateProject = EditorCommand(
+        id: "file.duplicateProject", title: "Duplicate Project", category: .file,
+        defaultShortcut: KeyShortcut(.character("s"), modifiers: [.command, .shift])
+    )
+    /// Goes back to the project as it was last saved on purpose (⌘S), or when it was opened.
+    public static let revertProject = EditorCommand(
+        id: "file.revertProject", title: "Revert to Last Saved Version", category: .file
+    )
+    /// Shows earlier versions of the project, as Time Machine does, to restore one.
+    public static let browseProjectVersions = EditorCommand(
+        id: "file.browseProjectVersions", title: "Browse All Versions…", category: .file
+    )
     public static let openMedia = EditorCommand(
         id: "file.openMedia", title: "Open Media…", category: .file,
         defaultShortcut: KeyShortcut(.character("o"), modifiers: .command)
@@ -264,6 +290,7 @@ extension EditorCommand {
 
     /// Every command the app knows, in menu order.
     public static let all: [EditorCommand] = [
+        newProject, openProject, saveProject, duplicateProject, revertProject, browseProjectVersions,
         openMedia, importSubtitles, importEmbeddedSubtitles, exportSubtitles,
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,

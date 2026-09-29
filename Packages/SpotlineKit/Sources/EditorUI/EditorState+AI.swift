@@ -256,6 +256,7 @@ extension EditorState {
             _ progress: @escaping @Sendable (Double) -> Void, _ propose: @escaping @Sendable (ProposedChangeSet) -> Void
         ) async throws -> ProposedChangeSet
     ) {
+        aiToolWillStart?()
         aiTask = AITaskStatus(title: title, fraction: 0)
         appliedAIChanges = []
         partialSerial = 0
@@ -327,11 +328,20 @@ extension EditorState {
         let existing = track.cues
         let prepare = prepareAudio
         let accumulator = TranscriptAccumulator(pipeline: pipeline)
-        startAITask("Transcription") { progress, propose in
+        let provider = aiSettings.transcription
+        // Words this project already got from the provider are used again, not paid for and uploaded again.
+        let stored = storedTranscript(provider: provider, audioStream: stream, language: language)
+        startAITask("Transcription") { [weak self] progress, propose in
             let audio = try await prepare(url, stream) { progress($0 * 0.15) }
-            let words = try await transcriber.transcribe(audio, language: language) { progress(0.15 + $0 * 0.75) } found: { words in
-                // Cues show as soon as they are complete; speakers come at the end.
-                propose(Proposals.transcription(accumulator.add(words), existing: existing))
+            let words: [TranscribedWord]
+            if let stored {
+                words = stored
+            } else {
+                words = try await transcriber.transcribe(audio, language: language) { progress(0.15 + $0 * 0.75) } found: { words in
+                    // Cues show as soon as they are complete; speakers come at the end.
+                    propose(Proposals.transcription(accumulator.add(words), existing: existing))
+                }
+                self?.storeTranscript(words, provider: provider, audioStream: stream, language: language)
             }
             guard !words.isEmpty else { throw AIError.nothingToDo("No speech was heard.") }
             let (cues, speakers) = try await Self.runDetached {
