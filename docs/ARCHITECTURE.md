@@ -198,6 +198,7 @@ Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
 - **Review menu:** Show Issues (⌥⌘I), Previous/Next Cue with Issues (⌥⌘↑/↓, moved from Cue), Fix Overlaps and Short Gaps (was Fix Overlaps; same command ID), and the QC Preset picker.
 - **Issues panel:** under the cue list (a split, closed by default), one row per issue in cue order with severity, cue number, start and message; clicking selects the cue. The footer gained the panel toggle and the preset's name (its tooltip explains the limits). Cue-row icons and the mini-map show errors in red and warnings in orange.
 - The video shows a top cue and a bottom cue at the same time (a sign over dialogue); the top one's accessibility ID is `video.subtitle.top`.
+  - On the timeline, a top cue and a bottom cue that are on screen together split the cue block's height, the top one above, so neither hides the other; other cues keep the full height.
 
 ### Embedded subtitle tracks
 - **mpv never renders subtitles** (`sid=no`, `sub-auto=no`): the only text over the picture is Spotline's cue overlay, so a file's own tracks can't be mistaken for the cues being edited.

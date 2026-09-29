@@ -43,4 +43,16 @@ final class ReviewUITests: XCTestCase {
         app.typeKey(.upArrow, modifierFlags: [.command, .option])
         waitForValue(of: app.timecode, toEqual: "00:00:02:00")
     }
+
+    /// The styled fixture's first cue (bottom, 0.5–1.5 s) and the EXIT sign (top, 1–2.5 s) overlap.
+    @MainActor
+    func testTopAndBottomCuesOnScreenTogetherStackOnTheTimeline() throws {
+        let app = launchApp(openSubtitles: true, subtitles: "styled-23.976.ass")
+        let blocks = app.timelineCueBlocks
+        XCTAssertTrue(blocks.firstMatch.waitForExistence(timeout: 10))
+        let bottom = blocks.element(boundBy: 0).frame
+        let top = blocks.element(boundBy: 1).frame
+        XCTAssertFalse(bottom.intersects(top), "The sign's block hides the dialogue's: \(top) over \(bottom)")
+        XCTAssertLessThan(top.maxY, bottom.minY + 1, "The top cue's block is above the bottom cue's")
+    }
 }
