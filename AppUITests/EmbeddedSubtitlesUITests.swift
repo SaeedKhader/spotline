@@ -15,7 +15,8 @@ final class EmbeddedSubtitlesUITests: XCTestCase {
         let subRip = app.buttons[AccessibilityID.EmbeddedSubtitles.track(2)]
         XCTAssertTrue(subRip.waitForExistence(timeout: 10), "No offer to import. Hierarchy:\n\(app.debugDescription)")
         XCTAssertTrue(subRip.isSelected, "The default text track is chosen")
-        XCTAssertFalse(app.buttons[AccessibilityID.EmbeddedSubtitles.track(4)].isEnabled, "PGS cannot be imported as text")
+        XCTAssertFalse(app.buttons[AccessibilityID.EmbeddedSubtitles.track(4)].exists, "PGS cannot be imported as text")
+        XCTAssertTrue(app.descendants(matching: .any)[AccessibilityID.EmbeddedSubtitles.imageTracks].exists)
 
         app.buttons[AccessibilityID.EmbeddedSubtitles.track(5)].click()
         app.buttons[AccessibilityID.EmbeddedSubtitles.importButton].click()

@@ -75,8 +75,10 @@ public enum AccessibilityID {
     /// The sheet offering the subtitle tracks muxed into the media for import.
     public enum EmbeddedSubtitles {
         public static let sheet = "embeddedSubtitles"
-        /// One track's row, by FFmpeg stream index; selected when chosen, disabled for image-based tracks.
+        /// One text track's row, by FFmpeg stream index; selected when chosen.
         public static func track(_ streamIndex: Int) -> String { "embeddedSubtitles.track.\(streamIndex)" }
+        /// The line summing up the image-based tracks, which cannot be imported.
+        public static let imageTracks = "embeddedSubtitles.imageTracks"
         public static let saveCopy = "embeddedSubtitles.saveCopy"
         public static let importButton = "embeddedSubtitles.import"
         public static let cancelButton = "embeddedSubtitles.cancel"
