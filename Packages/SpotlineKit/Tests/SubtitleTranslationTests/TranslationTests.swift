@@ -1,7 +1,7 @@
 import Foundation
 import SubtitleCore
 import Testing
-@testable import Translation
+@testable import SubtitleTranslation
 
 struct MatchTextTests {
     @Test func normalizesCaseAccentsMarkupAndSpacing() {

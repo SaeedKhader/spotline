@@ -25,6 +25,8 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
         case review
         /// Translating from a source track: glossary and translation memory.
         case translation
+        /// AI tools, which propose changes for review, and the review itself.
+        case ai
     }
 
     public init(id: String, title: String, category: Category, defaultShortcut: KeyShortcut? = nil) {
@@ -209,6 +211,44 @@ extension EditorCommand {
         id: "translation.importGlossary", title: "Import Glossary…", category: .translation
     )
 
+    /// Makes cues from the media's dialogue, with speakers (proposed for review).
+    public static let transcribe = EditorCommand(id: "ai.transcribe", title: "Transcribe Audio", category: .ai)
+    /// Translates the empty target cues with context, glossary and memory (proposed for review).
+    /// Outside translation mode the current cues become the source first.
+    public static let translateWithAI = EditorCommand(
+        id: "ai.translate", title: "Translate with AI", category: .ai,
+        defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .control])
+    )
+    /// Finds who speaks each cue (voice) and who it addresses (scene), for gendered translations.
+    public static let detectSpeakers = EditorCommand(id: "ai.detectSpeakers", title: "Detect Speakers and Addressees", category: .ai)
+    public static let maskProfanity = EditorCommand(id: "ai.maskProfanity", title: "Mask Profanity", category: .ai)
+    public static let removeHearingImpaired = EditorCommand(id: "ai.removeHearingImpaired", title: "Remove Hearing-Impaired Text", category: .ai)
+    public static let fixPunctuation = EditorCommand(id: "ai.fixPunctuation", title: "Fix Spacing and Punctuation", category: .ai)
+    /// Stops the running AI task; nothing is proposed.
+    public static let cancelAITask = EditorCommand(
+        id: "ai.cancel", title: "Cancel AI Task", category: .ai,
+        defaultShortcut: KeyShortcut(.character("."), modifiers: .command)
+    )
+    /// Applies the proposed change to the selected cue and selects the next cue with a change.
+    public static let acceptChange = EditorCommand(
+        id: "ai.acceptChange", title: "Accept Change", category: .ai,
+        defaultShortcut: KeyShortcut(.returnKey, modifiers: .command)
+    )
+    /// Drops the proposed change to the selected cue and selects the next cue with a change.
+    public static let rejectChange = EditorCommand(
+        id: "ai.rejectChange", title: "Reject Change", category: .ai,
+        defaultShortcut: KeyShortcut(.delete, modifiers: [.command, .option])
+    )
+    /// Applies every proposed change as one undoable edit.
+    public static let acceptAllChanges = EditorCommand(
+        id: "ai.acceptAll", title: "Accept All Changes", category: .ai,
+        defaultShortcut: KeyShortcut(.returnKey, modifiers: [.command, .option])
+    )
+    public static let rejectAllChanges = EditorCommand(
+        id: "ai.rejectAll", title: "Reject All Changes", category: .ai,
+        defaultShortcut: KeyShortcut(.delete, modifiers: [.command, .option, .shift])
+    )
+
     /// Every command the app knows, in menu order.
     public static let all: [EditorCommand] = [
         openMedia, importSubtitles, importEmbeddedSubtitles, exportSubtitles,
@@ -221,6 +261,8 @@ extension EditorCommand {
         toggleMilliseconds,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, showGlossary, importGlossary,
+        transcribe, translateWithAI, detectSpeakers, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 
     public static func named(_ id: String) -> EditorCommand? {

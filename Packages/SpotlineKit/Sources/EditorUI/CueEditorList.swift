@@ -1,9 +1,10 @@
+import AITools
 import EditorCommands
 import QualityControl
 import SpotlineAccessibility
 import SubtitleCore
 import SwiftUI
-import Translation
+import SubtitleTranslation
 
 /// Every cue as an editable row: number, start and end, reading speed and the
 /// text itself. Only rows on screen are built, so long files stay fast.
@@ -22,7 +23,8 @@ struct CueEditorList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if editor.track.cues.isEmpty {
+            AIReviewBar(editor: editor)
+            if editor.track.cues.isEmpty && editor.proposedInserts.isEmpty {
                 ContentUnavailableView {
                     Label("No Subtitles", systemImage: "captions.bubble")
                 } description: {
@@ -65,14 +67,21 @@ struct CueEditorList: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(editor.track.cues.enumerated()), id: \.element.id) { index, cue in
-                        CueRow(editor: editor, cue: cue, number: index + 1, directions: directions, focusedText: $focusedText)
-                            .id(cue.id)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                editor.select(cue.id)
-                                isListFocused = true
+                    ForEach(listItems) { item in
+                        Group {
+                            switch item {
+                            case .cue(let cue, let number):
+                                CueRow(editor: editor, cue: cue, number: number, directions: directions, focusedText: $focusedText)
+                            case .proposed(let change):
+                                ProposedCueRow(editor: editor, change: change, direction: directions.target)
                             }
+                        }
+                        .id(item.id)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            editor.select(item.id)
+                            isListFocused = true
+                        }
                         Divider()
                     }
                 }
@@ -91,6 +100,38 @@ struct CueEditorList: View {
                 guard let id else { return }
                 withAnimation(editor.launchOptions.isUITestMode ? nil : .default) { proxy.scrollTo(id) }
             }
+        }
+    }
+
+    /// The cues, with the new cues an AI tool proposes in their places.
+    private var listItems: [CueListItem] {
+        let cues = editor.track.cues.enumerated().map { CueListItem.cue($0.element, number: $0.offset + 1) }
+        let inserts = editor.proposedInserts
+        guard !inserts.isEmpty else { return cues }
+        var items: [CueListItem] = []
+        var next = inserts.startIndex
+        for item in cues {
+            guard case .cue(let cue, _) = item else { continue }
+            while next < inserts.endIndex, inserts[next].cue.start < cue.start {
+                items.append(.proposed(inserts[next]))
+                next += 1
+            }
+            items.append(item)
+        }
+        items += inserts[next...].map { .proposed($0) }
+        return items
+    }
+}
+
+/// A row of the cue list: a cue, or a cue an AI tool proposes to add.
+private enum CueListItem: Identifiable {
+    case cue(Cue, number: Int)
+    case proposed(ProposedChange)
+
+    var id: Cue.ID {
+        switch self {
+        case .cue(let cue, _): cue.id
+        case .proposed(let change): change.cueID
         }
     }
 }
@@ -136,14 +177,17 @@ private struct CueRow: View {
                     HStack(alignment: .top, spacing: 8) {
                         SourceText(editor: editor, cueID: cue.id, source: editor.sourceCues[cue.id], direction: directions.source)
                             .frame(maxWidth: .infinity)
-                        textEditor
+                        targetText
                             .frame(maxWidth: .infinity)
                     }
                     if isSelected {
                         MemorySuggestions(editor: editor, cueID: cue.id, direction: directions.target)
                     }
                 } else {
-                    textEditor
+                    targetText
+                }
+                if let change = editor.proposedChange(forCue: cue.id), !change.changesText {
+                    ProposalBox(editor: editor, change: change)
                 }
                 if isHovered || isSelected {
                     actions
@@ -156,6 +200,15 @@ private struct CueRow: View {
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.CueList.row(cue.id))
+    }
+
+    /// The cue's text, or the text an AI tool proposes for it, shown in its place until accepted or rejected.
+    @ViewBuilder private var targetText: some View {
+        if let change = editor.proposedChange(forCue: cue.id), change.changesText {
+            ProposedText(editor: editor, change: change, direction: directions.target)
+        } else {
+            textEditor
+        }
     }
 
     /// The cue's text (the target, in translation mode), typed in its language's direction.
@@ -171,7 +224,12 @@ private struct CueRow: View {
                 .padding(.vertical, 4)
                 .frame(minHeight: 58)
                 .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.separator))
+                // Text an AI tool wrote is tinted until someone edits it.
+                .background(cue.isAIGenerated == true ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(cue.isAIGenerated == true ? AnyShapeStyle(Color.accentColor.opacity(0.45)) : AnyShapeStyle(.separator))
+                )
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
                     focusedText.wrappedValue = nil
@@ -179,11 +237,24 @@ private struct CueRow: View {
                 }
                 .environment(\.layoutDirection, directions.target.layoutDirection)
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
+                // After the identifier, so the text cell stays the text view itself (its value is the text).
+                .overlay(alignment: .topTrailing) {
+                    if cue.isAIGenerated == true {
+                        Image(systemName: "sparkles")
+                            .font(.caption2)
+                            .foregroundStyle(.tint)
+                            .padding(5)
+                            .help("Written by \(editor.aiToolName(for: cue)); edit it to make it yours")
+                            .accessibilityHidden(true)
+                    }
+                }
     }
 
     private var rowBackground: some View {
         Group {
-            if isSelected {
+            if case .delete = editor.proposedChange(forCue: cue.id)?.kind {
+                Color.red.opacity(isSelected ? 0.2 : 0.1)
+            } else if isSelected {
                 Color.accentColor.opacity(0.16)
             } else if isCurrent {
                 Color.primary.opacity(0.06)
@@ -204,15 +275,12 @@ private struct CueRow: View {
                 .help("Reading speed in characters per second")
                 .accessibilityValue("\(speed)")
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .readingSpeed))
+            if let speakerID = cue.speakerID {
+                SpeakerChip(editor: editor, speakerID: speakerID, cueID: cue.id)
+            }
             if let tag = cue.addressee {
-                // Filled in by AI tagging (M6); shown so a guess can be spotted, never entered by hand.
-                Text(tag.addressee.symbol)
-                    .font(.caption)
-                    .foregroundStyle(tag.needsReview ? Color.orange : Color.secondary)
-                    .help("Spoken to: \(tag.addressee.rawValue), \(Int((tag.confidence * 100).rounded()))% sure")
-                    .accessibilityLabel("Addressee")
-                    .accessibilityValue(tag.addressee.rawValue)
-                    .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .addressee))
+                // Filled in by the AI tools; a guess can be fixed in one click, never entered by hand.
+                AddresseeChip(editor: editor, cue: cue, tag: tag)
             }
             if !issues.isEmpty {
                 let messages = issues.map(\.message).joined(separator: "\n")

@@ -50,6 +50,57 @@ public struct AnalysisCache: Sendable {
         save(shotChanges, kind: "shots", for: media)
     }
 
+    /// Dialogue audio prepared for speech models, shared by transcription and speaker detection.
+    /// Samples are kept as 16-bit PCM beside a small JSON index.
+    public func preparedAudio(for media: URL, audioStream: Int?) -> PreparedAudio? {
+        let kind = "audio16k-\(audioStream.map(String.init) ?? "main")"
+        guard let index = load(PreparedAudioIndex.self, kind: kind, for: media),
+              let pcmFile = entry(kind: kind, for: media)?.deletingPathExtension().appendingPathExtension("pcm"),
+              let pcm = try? Data(contentsOf: pcmFile)
+        else { return nil }
+        var offset = 0
+        var chunks: [AudioChunk] = []
+        for chunk in index.chunks {
+            let bytes = chunk.sampleCount * 2
+            guard offset + bytes <= pcm.count else { return nil }
+            let samples = pcm[pcm.startIndex + offset ..< pcm.startIndex + offset + bytes].withUnsafeBytes { raw in
+                raw.bindMemory(to: Int16.self).map { Float($0) / Float(Int16.max) }
+            }
+            chunks.append(AudioChunk(id: chunks.count, start: chunk.start, samples: samples))
+            offset += bytes
+        }
+        return PreparedAudio(source: index.source, audioStreamIndex: index.audioStreamIndex, duration: index.duration, chunks: chunks)
+    }
+
+    public func store(_ audio: PreparedAudio, for media: URL, audioStream: Int?) {
+        let kind = "audio16k-\(audioStream.map(String.init) ?? "main")"
+        guard let pcmFile = entry(kind: kind, for: media)?.deletingPathExtension().appendingPathExtension("pcm") else { return }
+        var pcm = Data()
+        for chunk in audio.chunks {
+            let values = chunk.samples.map { Int16((min(max($0, -1), 1) * Float(Int16.max)).rounded()) }
+            values.withUnsafeBytes { pcm.append(contentsOf: $0) }
+        }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard (try? pcm.write(to: pcmFile, options: .atomic)) != nil else { return }
+        let index = PreparedAudioIndex(
+            source: audio.source, audioStreamIndex: audio.audioStreamIndex, duration: audio.duration,
+            chunks: audio.chunks.map { .init(start: $0.start, sampleCount: $0.samples.count) }
+        )
+        save(index, kind: kind, for: media)
+    }
+
+    private struct PreparedAudioIndex: Codable {
+        struct Chunk: Codable {
+            var start: MediaTime
+            var sampleCount: Int
+        }
+
+        var source: Waveform.Source
+        var audioStreamIndex: Int
+        var duration: MediaTime
+        var chunks: [Chunk]
+    }
+
     private func load<Value: Decodable>(_ type: Value.Type, kind: String, for media: URL) -> Value? {
         guard let file = entry(kind: kind, for: media), let data = try? Data(contentsOf: file) else { return nil }
         return try? JSONDecoder().decode(Value.self, from: data)

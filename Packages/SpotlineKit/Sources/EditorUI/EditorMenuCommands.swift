@@ -37,6 +37,15 @@ public struct EditorMenuCommands: Commands {
             TargetLanguagePicker(editor: editor)
                 .disabled(!editor.isTranslating)
         }
+        CommandMenu("AI") {
+            buttons(for: .ai, only: [.transcribe, .translateWithAI, .detectSpeakers])
+            Divider()
+            buttons(for: .ai, only: [.maskProfanity, .removeHearingImpaired, .fixPunctuation])
+            Divider()
+            buttons(for: .ai, only: [.acceptChange, .rejectChange, .acceptAllChanges, .rejectAllChanges])
+            Divider()
+            buttons(for: .ai, only: [.cancelAITask])
+        }
         CommandMenu("Timeline") {
             buttons(for: .timeline)
         }
@@ -48,8 +57,9 @@ public struct EditorMenuCommands: Commands {
         }
     }
 
-    private func buttons(for category: EditorCommand.Category) -> some View {
-        ForEach(EditorCommand.all.filter { $0.category == category }) { command in
+    /// The category's commands, or only those in `only` (to split a menu into sections).
+    private func buttons(for category: EditorCommand.Category, only: [EditorCommand]? = nil) -> some View {
+        ForEach(EditorCommand.all.filter { $0.category == category && (only?.contains($0) ?? true) }) { command in
             Group {
                 if let isOn = editor.isOn(command) {
                     Toggle(command.title, isOn: Binding(get: { isOn }, set: { _ in editor.perform(command) }))

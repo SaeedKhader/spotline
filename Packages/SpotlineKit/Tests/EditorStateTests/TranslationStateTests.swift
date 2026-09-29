@@ -5,7 +5,7 @@ import QualityControl
 import SubtitleCore
 import SubtitleFormats
 import Testing
-import Translation
+import SubtitleTranslation
 @testable import EditorUI
 
 @MainActor

@@ -50,13 +50,13 @@ spotline/
 │  ├─ SubtitleFormats         SRT, WebVTT, ASS/SSA, TTML/IMSC1 (M4), EBU STL, SCC
 │  ├─ QualityControl          CPS, CPL, line count, durations, gaps, overlaps, shot changes
 │  ├─ MediaAnalysis           waveform peaks, shot-change detection (libav*)
-│  ├─ Translation             source/target alignment, glossary, translation memory
+│  ├─ SubtitleTranslation     source/target alignment, glossary, translation memory (not "Translation": that name hides Apple's framework)
 │  ├─ AITools                 transcription, translation, text-transform providers + job runner
 │  └─ AgentBridge             local MCP server exposing EditorCommands to AI agents
 └─ Fixtures/                  short test clips (M1: 23.976 fps MP4 and MKV), later 25 / 29.97 DF and subtitle files
 ```
 
-Dependency direction: `App → EditorUI → (MPVPlayer, QualityControl, Translation, AITools, MediaAnalysis) → SubtitleFormats → SubtitleCore`. Nothing depends on EditorUI or App. One package with many targets keeps module boundaries while staying simple to open and build; targets can split into separate packages later if needed.
+Dependency direction: `App → EditorUI → (MPVPlayer, QualityControl, SubtitleTranslation, AITools, MediaAnalysis) → SubtitleFormats → SubtitleCore`. Nothing depends on EditorUI or App. One package with many targets keeps module boundaries while staying simple to open and build; targets can split into separate packages later if needed.
 
 ## 4. libmpv hosting (AppKit inside SwiftUI)
 
@@ -217,6 +217,32 @@ Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
 - **Gender and addressee fields (7b).** `SubtitleTrack.speakers` (`Speaker`: name, gender, confidence, source inferred/confirmed), `Cue.speakerID` and `Cue.addressee` (`AddresseeTag`: male, female, dual, group male/female/mixed, unknown, with confidence and source). No manual tagging UI: M6's AI fills them. A tagged cue shows a ♂/♀/group chip, orange when it is a guess below 75% (`needsReview`), and QC lists those guesses.
 - **EBU STL** (`SubtitleFormats.EBUSTL`): reads and writes the GSI and TTI blocks. `STL25.01` is 25 fps; `STL30.01` is read and written as 29.97 non-drop. Character tables: Latin (ISO 6937, with accents as prefix diacritics), Cyrillic, Arabic, Greek and Hebrew (ISO 8859-5 to -8), chosen on export from the text's script. Italics and underline map to `<i>`/`<u>`; teletext colour, double-height and box codes are dropped on read; rows in the top half make top cues; extension blocks join and long text is split across them; comments and user data are skipped; times are taken from the programme start (TCP), which is kept (`EBU.TCP`) with the title, translator, publisher and country. Written as teletext (DSC 1, 23 rows, 40 characters), centred, bottom lines ending on row 22. Characters the table lacks become "?". A text `.stl` (Spruce STL) is not read.
 
+### As built in M5 (translation)
+- **Translation mode.** Translation › Open Source Subtitles… (⌥⌘O) reads a file as the read-only source; the editor's track is the target. An empty target becomes the source's timing with no text (one undoable edit); cues already there are paired with the source cue they overlap most (same position first). Each target cue links to its source (`Cue.sourceCueID`); splits keep the link. Close Source Subtitles leaves the mode. The window subtitle reads "Translating from <file>", and export suggests `<name>.<target language>.<ext>` beside the source.
+- **Layout.** Each cue row shows the source text (read-only, selectable) beside the target editor, each in its own direction: `TextDirection` comes from the language (Arabic, Hebrew, Persian, Urdu are right to left), else from the text's letters. The list widens in translation mode. No new panels in the main window: the source column, glossary chips and memory suggestions live in the rows.
+- **Languages.** Source and target languages come from the file, else `NLLanguageRecognizer`; a new translation's target is the last one chosen (Arabic by default). Translation › Target Language changes it (undoable; exports carry it).
+- **Glossary** (`Translation.Glossary`): source term, agreed translation, note, per language pair. Terms match whole words ignoring case, accents, Arabic/Hebrew vowel marks, hamza forms, tatweel and ى/ي, ة/ه (`MatchText`). A row shows the terms its source uses, green when the target uses the translation and orange when not. Translation › Show Glossary (⌥⌘G) opens a floating panel to edit terms; Import Glossary… reads CSV or tab-separated files (source, target, note; header optional).
+- **Translation memory** (`SubtitleTranslation.TranslationMemory`): pairs are stored when you leave a translated cue, on export, and with Add All Translations to Memory. The selected row lists up to three suggestions (exact 100%, fuzzy from 70% by word-level edit distance); click one, or Use Best Memory Match (⌃⌘M). Fill Untranslated Cues from Memory fills every empty cue with an exact match in one undoable edit. Copy Source to Target (⌥⌘C) copies names and signs.
+- **Storage.** Until project files exist, glossary and memory live in `~/Library/Application Support/<bundle id>/Translation/<source>-<target>/` (`glossary.json`, `memory.json`). The glossary moves into the project package later; the memory stays shared. UI tests use neither.
+- **QC on the target.** M4's presets, issues panel and Review menu check the target. Translation adds: an empty target whose source has text is "Not translated" (an error), a glossary term whose translation is missing is a warning, and an unsure addressee guess is a warning.
+- **Gender and addressee fields (7b).** `SubtitleTrack.speakers` (`Speaker`: name, gender, confidence, source inferred/confirmed), `Cue.speakerID` and `Cue.addressee` (`AddresseeTag`: male, female, dual, group male/female/mixed, unknown, with confidence and source). No manual tagging UI: M6's AI fills them. A tagged cue shows a ♂/♀/group chip, orange when it is a guess below 75% (`needsReview`), and QC lists those guesses.
+- **EBU STL** (`SubtitleFormats.EBUSTL`): reads and writes the GSI and TTI blocks. `STL25.01` is 25 fps; `STL30.01` is read and written as 29.97 non-drop. Character tables: Latin (ISO 6937, with accents as prefix diacritics), Cyrillic, Arabic, Greek and Hebrew (ISO 8859-5 to -8), chosen on export from the text's script. Italics and underline map to `<i>`/`<u>`; teletext colour, double-height and box codes are dropped on read; rows in the top half make top cues; extension blocks join and long text is split across them; comments and user data are skipped; times are taken from the programme start (TCP), which is kept (`EBU.TCP`) with the title, translator, publisher and country. Written as teletext (DSC 1, 23 rows, 40 characters), centred, bottom lines ending on row 22. Characters the table lacks become "?". A text `.stl` (Spruce STL) is not read.
+
+### As built in M6 (AI tools)
+- **Providers (chosen 2026-09-29).** On-device by default, cloud opt-in (Settings › AI: "Allow cloud providers", off by default; API keys in the login Keychain).
+  - Transcription: Apple **SpeechAnalyzer** (`SpeechTranscriber`, macOS 26) on this Mac; macOS downloads a language's model once after the app asks. Cloud: **OpenAI Whisper** (`whisper-1`, word timestamps), chunks sent as Ogg Opus at 24 kbit/s, four at a time, each retried on its own. WhisperKit was not used: it needs bundled Core ML models (hundreds of MB) and Apple's model is managed by the OS.
+  - Translation: Apple **Translation** framework on this Mac (languages downloaded in System Settings). Cloud: **Claude** (`claude-opus-5-5`, Messages API with a JSON-schema structured output, server-side fallbacks), sent in batches of 40 lines with the 6 lines before, the glossary terms the lines use, translation memory examples, speakers and QC limits.
+  - Speakers, addressees and cleanup always run on this Mac.
+- **Audio preparation** (`MediaAnalysis.prepareAudio`): the audio track mpv plays, center channel of 5.1/7.1 else a mono mix, resampled to 16 kHz with libswresample; VAD by loudness (30 ms frames 12 dB over the noise floor or above -35 dBFS, breaths under 0.4 s bridged); chunks of up to 30 s ending at pauses, silence left out, each with its media start time. Cached in `~/Library/Caches/<bundle id>/MediaAnalysis` as 16-bit PCM plus a JSON index. `OpusEncoder` makes Ogg Opus for cloud uploads.
+- **Transcript → cues** (`CueSegmenter`): our code, from word timestamps: a new cue at a pause of 0.8 s, when text passes the preset's lines × characters or its maximum duration, or at a sentence end once the cue has half a line; two balanced lines preferring a break after punctuation; ends 0.5 s after the last word, at least the minimum duration, the minimum gap before the next; starts and ends snap to shot changes within the preset's distance. Transcription only proposes cues where none exist.
+- **Speakers** (`VoiceSpeakerAnalyzer`): per cue, pitch (FFT autocorrelation) and 12 MFCCs over voiced frames; cues grouped by average-linkage clustering into speakers A, B…; gender from each speaker's median pitch (under ~145 Hz male, over ~185 Hz female) with a confidence. Runs with transcription, with Detect Speakers and Addressees, and before translating into a gendered language when no speakers are known. A light model: reliable for clearly different voices, unsure otherwise, and it says so.
+- **Addressees** (`SceneAddresseeInferrer`): only lines that address someone ("you", imperatives, vocatives) are tagged. The listener is the other speaker just before (else just after) in the scene (scenes end at 5 s pauses); "you guys", "ladies", "sir", "you two" decide number and gender outright ("your mom" does not). Confidence falls with more people in the scene and unsure voices. Claude re-reads the scene while translating, returns its own tag and confidence, and writes ♂/♀/group variants when under 75%.
+- **Cleanup** (`CleanupTool`): Mask Profanity (word stems in English, French, Spanish, German, Arabic), Remove Hearing-Impaired Text (brackets, parentheses, music notes, speaker labels; cues left empty are proposed for removal), Fix Spacing and Punctuation (double spaces, spaces before punctuation, "…", Arabic comma and question mark).
+- **Translate with AI** (⌃⌘T) fills the empty target cues in translation mode. Outside it, the cues being edited (say, a transcription) become the source and the target starts as their timing with no text, in the last target language (Arabic by default).
+- **Filling versus rewriting (Saeed, 2026-09-29).** Transcription, translation and speaker/addressee detection only fill empty cues, gaps and tags, so their results go straight into the cue list as they arrive: each batch is one undoable edit, AI-written text is tinted with a ✨ until someone edits it, and a result never overwrites what the user did meanwhile (a new cue that would overlap one, a cue the user typed in). Transcription writes each cue once the word after it is heard; speakers found at the end are added to those cues. A bar over the cue list shows the running tool with Stop. Cleanup rewrites existing text, so it stays a review: proposed text shows in place of the text editor as a word diff with ✓/✗, the bar shows "Mask Profanity: 12 changes to review" with Accept All and Reject All, and AI › Accept Change (⌘↩) / Reject Change (⌥⌘⌫) move through the changes; each acceptance is one undoable edit.
+- **One-click fix.** A cue's ♂/♀/group chip is a menu: pick the addressee and the line switches to the translator's wording for them (`Cue.variants`), confirmed (tools never overwrite a confirmed tag). Speaker chips ("A ♀") show who speaks.
+- **UI tests** run with scripted providers (`ScriptedTranscriber`, `ScriptedTranslator`): no models, no network.
+
 ## 7. Pro workflow features (backlog, roughly in order)
 
 - J/K/L shuttle, frame step, set in/out at playhead, "snap to shot change", nudge by frame, split/merge cues, ripple.
@@ -239,7 +265,7 @@ Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
 
 ### AI features
 
-All AI features share one rule: **AI proposes, the editor disposes.** Every AI job returns a `ProposedChangeSet` (new cues, text edits, timing edits) that the user reviews as a diff in the cue list and accepts per cue or all at once. Accepting applies it as one undoable edit. Nothing AI-generated lands silently.
+Every AI job returns a `ProposedChangeSet` (new cues, text edits, timing edits). Jobs that only fill (transcription, translation, speakers) are applied as they arrive, one undoable edit per batch, with AI text marked until edited; jobs that rewrite existing text (cleanup) are reviewed as a diff and accepted per cue or all at once. See "As built in M6".
 
 `AITools` package, provider-agnostic:
 
@@ -255,7 +281,7 @@ protocol CueTextTransform { func transform(_ cues: [Cue], instruction: Transform
 | Translation | Apple Translation framework (on-device) | LLM providers (Claude etc.) with glossary and neighbouring-cue context |
 | Profanity removal / softening | Word lists per language (mask, remove, replace) | LLM rewrite that keeps meaning and reading speed |
 | Shorten to fit CPS/CPL | n/a | LLM rewrite constrained by QC limits |
-| Speaker detection, SDH tags | later | later |
+| Speaker detection, addressee | Voice clustering + pitch, scene reading (M6) | Claude reads the scene while translating (M6) |
 
 Design notes:
 - **Transcript → cues segmentation** is our own code, not the model's: word timestamps are grouped into cues using the QC rules (max CPL, max duration, min gap, snap to shot changes), so output is deliverable-ready.
@@ -271,7 +297,7 @@ Some target languages (Arabic first; also Hebrew, French, Spanish, etc.) change 
 - **Speakers:** transcription runs voice diarization (Speaker A, B…), and a voice classifier guesses each speaker's gender. Names are optional. Speakers live in a project cast list (`Speaker { id, name?, gender, confidence }`), reusable across episodes.
 - **Per cue:** `speakerID` plus `addressee: Addressee` (`.male`, `.female`, `.dualMale`, `.dualFemale`, `.groupMale`, `.groupFemale`, `.groupMixed`, `.unknown`) with a confidence and a source (inferred / user-confirmed).
 - **Addressee inference:** the Translator reads the whole scene, not one cue: turn-taking (the previous speaker is usually the addressee), names, later "he/she" references, gender marked in the source language, and optionally a video frame sent to a vision model.
-- **Output:** for gendered lines with low confidence, the Translator returns every variant and marks its pick as a guess (`CueTranslation.variants`, `assumption`). The cue list shows a ♂/♀/group chip; one click swaps variants. Still reviewed as a diff (7a).
+- **Output:** for gendered lines with low confidence, the Translator returns every variant and marks its pick as a guess (`CueTranslation.variants`, `assumption`). The cue list shows a ♂/♀/group chip; one click swaps variants.
 - **Propagation:** confirming a speaker's gender updates all their lines. Confirming an addressee suggests the same for neighbouring cues in the scene (shot changes + pauses) and re-translates only those.
 - **Review filter:** "gender guesses" in the QC/issues panel, so the user reviews only flagged lines.
 - Milestone: model fields in M5 (Translation), inference and variants in M6 (AI tools).
@@ -304,3 +330,4 @@ Some target languages (Arabic first; also Hebrew, French, Spanish, etc.) change 
 - New repository, open source, licensed GPL-3.0 with a stock GPL libmpv (Saeed, 2026-09-28).
 - "UI tools ready" = AI and UI automation ready, plus AI subtitle tools (Saeed, 2026-09-28).
 - Gender/addressee context for Arabic and similar languages: AI infers speaker and addressee, flags low-confidence lines with variants, user only fixes those (Saeed, 2026-09-28). See 7b.
+- AI results that only fill (transcription, translation, speakers) go straight into the cue list without review; cleanup that rewrites text stays a reviewed diff (Saeed, 2026-09-29).

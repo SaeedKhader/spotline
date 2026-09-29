@@ -93,8 +93,18 @@ enum EditorPanels {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = title
-        alert.informativeText = String(describing: error)
+        alert.informativeText = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
         alert.runModal()
+    }
+
+    /// Asks before macOS downloads a speech model (once per language).
+    static func confirmSpeechModelDownload(language: String) async -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Download the \(language) speech model?"
+        alert.informativeText = "Transcription runs on this Mac with Apple's speech model for \(language). macOS downloads it once and keeps it up to date. Your audio stays on this Mac."
+        alert.addButton(withTitle: "Download")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// The "Format" pop-up in the export panel.

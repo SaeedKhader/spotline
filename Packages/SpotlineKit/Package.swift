@@ -8,7 +8,8 @@ let package = Package(
         .library(name: "SubtitleCore", targets: ["SubtitleCore"]),
         .library(name: "SubtitleFormats", targets: ["SubtitleFormats"]),
         .library(name: "QualityControl", targets: ["QualityControl"]),
-        .library(name: "Translation", targets: ["Translation"]),
+        .library(name: "SubtitleTranslation", targets: ["SubtitleTranslation"]),
+        .library(name: "AITools", targets: ["AITools"]),
         .library(name: "SpotlineAccessibility", targets: ["SpotlineAccessibility"]),
         .library(name: "EditorCommands", targets: ["EditorCommands"]),
         .library(name: "PlaybackCore", targets: ["PlaybackCore"]),
@@ -24,7 +25,8 @@ let package = Package(
         // QC rules and client presets (line length, reading speed, durations, gaps, shot changes).
         .target(name: "QualityControl", dependencies: ["SubtitleCore"]),
         // Translation workflow: source/target alignment, glossary, translation memory, text direction.
-        .target(name: "Translation", dependencies: ["SubtitleCore"]),
+        // Not named "Translation": that would hide Apple's Translation framework, which AITools uses.
+        .target(name: "SubtitleTranslation", dependencies: ["SubtitleCore"]),
         // Stable accessibility identifiers shared by the app and UI tests.
         .target(name: "SpotlineAccessibility"),
         // Every user action as a named command (menus, shortcuts, tests, agents).
@@ -44,11 +46,14 @@ let package = Package(
         .systemLibrary(name: "CFFmpeg", pkgConfig: "libavformat", providers: [.brew(["ffmpeg"])]),
         // Waveform peaks and shot changes, read from media once and cached, and embedded subtitle tracks.
         .target(name: "MediaAnalysis", dependencies: ["CFFmpeg", "SubtitleCore", "SubtitleFormats"]),
+        // AI tools: transcription, translation, cleanup and speaker/addressee detection, on-device
+        // (Apple Speech, Translation, sound analysis) or cloud (OpenAI transcription, Claude): fills cues directly, proposes rewrites for review.
+        .target(name: "AITools", dependencies: ["SubtitleCore", "SubtitleTranslation", "MediaAnalysis", "QualityControl"]),
         .target(
             name: "EditorUI",
             dependencies: [
                 "SubtitleCore", "SubtitleFormats", "SpotlineAccessibility", "EditorCommands", "PlaybackCore", "MPVPlayer",
-                "MediaAnalysis", "QualityControl", "Translation",
+                "MediaAnalysis", "QualityControl", "SubtitleTranslation", "AITools",
             ]
         ),
         .testTarget(name: "SubtitleCoreTests", dependencies: ["SubtitleCore"]),
@@ -58,11 +63,12 @@ let package = Package(
             resources: [.copy("Golden"), .copy("Input")]
         ),
         .testTarget(name: "QualityControlTests", dependencies: ["QualityControl"]),
-        .testTarget(name: "TranslationTests", dependencies: ["Translation"]),
+        .testTarget(name: "SubtitleTranslationTests", dependencies: ["SubtitleTranslation"]),
+        .testTarget(name: "AIToolsTests", dependencies: ["AITools", "MediaAnalysis"]),
         .testTarget(name: "EditorCommandsTests", dependencies: ["EditorCommands"]),
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore"]),
         .testTarget(name: "MPVPlayerTests", dependencies: ["MPVPlayer"]),
         .testTarget(name: "MediaAnalysisTests", dependencies: ["MediaAnalysis"]),
-        .testTarget(name: "EditorStateTests", dependencies: ["EditorUI", "SubtitleFormats", "QualityControl", "Translation"]),
+        .testTarget(name: "EditorStateTests", dependencies: ["EditorUI", "SubtitleFormats", "QualityControl", "SubtitleTranslation", "AITools"]),
     ]
 )
