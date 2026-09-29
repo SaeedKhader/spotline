@@ -145,6 +145,10 @@ public enum AIError: Error, LocalizedError, Equatable {
     case modelDownloadDeclined
     case provider(String)
     case nothingToDo(String)
+    /// The model's safety filter declined the request.
+    case declined
+    /// The answer ran out of room before every line was in.
+    case cutOff
 
     public var errorDescription: String? {
         switch self {
@@ -162,6 +166,10 @@ public enum AIError: Error, LocalizedError, Equatable {
             message
         case .nothingToDo(let message):
             message
+        case .declined:
+            "Claude declined to translate these lines."
+        case .cutOff:
+            "Claude's answer was cut off. Try fewer lines at once."
         }
     }
 }

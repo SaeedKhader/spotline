@@ -127,3 +127,69 @@ struct CloudProviderTests {
         #expect(!Languages.addressesByGender("en"))
     }
 }
+
+/// Answers Claude requests like the API would: every line translated, except
+/// that lines with "SKIP" are left out and a request with "REFUSE" in it is declined.
+final class FakeClaude: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requests = 0
+    static let lock = NSLock()
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.lock.withLock { Self.requests += 1 }
+        var body = Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                body.append(buffer, count: count)
+            }
+            stream.close()
+        }
+        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        let prompt = ((json?["messages"] as? [[String: Any]])?.first?["content"] as? String) ?? ""
+        let lines = prompt.split(separator: "\n").map(String.init).filter { $0.hasPrefix("L") && $0.contains(" | ") }
+        var answer: [String: Any]
+        if lines.contains(where: { $0.contains("REFUSE") }) {
+            answer = ["content": [], "stop_reason": "refusal"]
+        } else {
+            let items = lines.filter { !$0.contains("SKIP") }.map { line -> [String: Any] in
+                let parts = line.components(separatedBy: " | ")
+                return ["id": parts[0], "text": "[ar] " + parts[3]]
+            }
+            let output = try! JSONSerialization.data(withJSONObject: ["translations": items])
+            answer = ["content": [["type": "text", "text": String(decoding: output, as: UTF8.self)]], "stop_reason": "end_turn"]
+        }
+        let data = try! JSONSerialization.data(withJSONObject: answer)
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+@Suite(.serialized)
+struct ClaudeRetryTests {
+    @Test func linesLeftOutOrDeclinedAreRetriedAlone() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FakeClaude.self]
+        let translator = ClaudeTranslator(apiKey: "test", session: URLSession(configuration: configuration))
+        let sources = ["One.", "SKIP two.", "Three.", "REFUSE four.", "Five.", "Six."]
+        let request = TranslationRequest(
+            lines: sources.enumerated().map { index, text in
+                .init(cueID: UUID(), source: text, start: MediaTime(value: Int64(index), timescale: 1), end: MediaTime(value: Int64(index) + 1, timescale: 1))
+            },
+            sourceLanguage: "en", targetLanguage: "en"
+        )
+        FakeClaude.lock.withLock { FakeClaude.requests = 0 }
+        let (batch, skipped) = try await translator.translateLines(request)
+        #expect(batch.translations.map(\.text) == ["[ar] One.", "[ar] Three.", "[ar] Five.", "[ar] Six."])
+        #expect(skipped.map(\.source) == ["SKIP two.", "REFUSE four."])
+        #expect(FakeClaude.lock.withLock { FakeClaude.requests } < 12, "Retries stop at single lines")
+    }
+}

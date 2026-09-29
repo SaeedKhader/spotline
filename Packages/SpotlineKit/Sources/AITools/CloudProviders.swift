@@ -326,7 +326,7 @@ public struct ClaudeTranslator: CueTranslator {
             batch.precedingContext = Array(context.suffix(contextLines))
             // People named in earlier batches go along, so later lines use the same names.
             batch.cast = results.cast
-            let translated = try await translateBatch(batch)
+            let translated = try await translateLines(batch).batch
             results = results.adding(translated)
             found(translated)
             for line in lines {
@@ -335,6 +335,39 @@ public struct ClaudeTranslator: CueTranslator {
             progress(Double(results.translations.count) / Double(max(request.lines.count, 1)))
         }
         return results
+    }
+
+    /// Translates the lines, then asks again, in halves, for any Claude left out or
+    /// declined (a refusal is often about one line in the batch), down to single lines.
+    /// Lines that never come back are `skipped`; the editor marks them "Not translated".
+    func translateLines(_ request: TranslationRequest) async throws -> (batch: TranslationBatch, skipped: [TranslationRequest.Line]) {
+        var result: TranslationBatch
+        do {
+            result = try await translateBatch(request)
+        } catch AIError.declined, AIError.cutOff {
+            guard request.lines.count > 1 else { return (TranslationBatch(), request.lines) }
+            result = TranslationBatch()
+        }
+        let done = Set(result.translations.filter { !$0.text.isEmpty }.map(\.cueID))
+        result.translations.removeAll { !done.contains($0.cueID) }
+        let missing = request.lines.filter { !done.contains($0.cueID) }
+        guard !missing.isEmpty else { return (result, []) }
+        guard request.lines.count > 1 else { return (result, missing) }
+        var skipped: [TranslationRequest.Line] = []
+        let half = (missing.count + 1) / 2
+        for part in [missing[..<half], missing[half...]] where !part.isEmpty {
+            try Task.checkCancellation()
+            var retry = request
+            retry.lines = Array(part)
+            retry.cast = result.cast.isEmpty ? request.cast : { var cast = request.cast; cast.merge(result.cast); return cast }()
+            let (more, left) = try await translateLines(retry)
+            result = result.adding(more)
+            skipped += left
+        }
+        // In the order they were asked for.
+        let order = Dictionary(uniqueKeysWithValues: request.lines.enumerated().map { ($0.element.cueID, $0.offset) })
+        result.translations.sort { (order[$0.cueID] ?? 0) < (order[$1.cueID] ?? 0) }
+        return (result, skipped)
     }
 
     func translateBatch(_ request: TranslationRequest) async throws -> TranslationBatch {
@@ -520,12 +553,14 @@ public struct ClaudeTranslator: CueTranslator {
 
     static func translations(from data: Data, request: TranslationRequest) throws -> TranslationBatch {
         let response = try JSONDecoder().decode(Response.self, from: data)
-        if response.stop_reason == "refusal" { throw AIError.provider("Claude declined to translate these lines.") }
-        if response.stop_reason == "max_tokens" { throw AIError.provider("Claude's answer was cut off. Try fewer lines at once.") }
-        guard let json = response.content.first(where: { $0.type == "text" })?.text else {
-            throw AIError.provider("Claude sent no translation.")
+        if response.stop_reason == "refusal" { throw AIError.declined }
+        if response.stop_reason == "max_tokens" { throw AIError.cutOff }
+        let texts = response.content.filter { $0.type == "text" }.compactMap(\.text)
+        guard !texts.isEmpty else { throw AIError.provider("Claude sent no translation.") }
+        // The answer is the last text block that reads as one.
+        guard let output = texts.reversed().lazy.compactMap({ try? JSONDecoder().decode(Output.self, from: Data($0.utf8)) }).first else {
+            throw AIError.provider("Claude's answer could not be read.")
         }
-        let output = try JSONDecoder().decode(Output.self, from: Data(json.utf8))
         let ids = Dictionary(uniqueKeysWithValues: request.lines.enumerated().map { (lineID($0.offset), $0.element.cueID) })
         let translations: [CueTranslation] = output.translations.compactMap { item in
             guard let cueID = ids[item.id] else { return nil }

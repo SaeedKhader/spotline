@@ -407,10 +407,22 @@ extension EditorState {
             maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast
         )
         let fixUp = TranslationPipeline(preset: qcPreset)
-        startAITask("Translation") { progress, propose in
+        startAITask("Translation") { [weak self] progress, propose in
             let found = TranslationCollector()
             let translations = try await translator.translate(request, progress: progress) { batch in
                 propose(Proposals.translation(found.add(fixUp.fix(batch, request: request)), cues: cues))
+            }
+            // Lines the translator never sent back (a model declined them) stay empty: say so.
+            let done = Set(translations.translations.filter { !$0.text.isEmpty }.map(\.cueID))
+            if let first = cues.first(where: { !done.contains($0.id) }), let self {
+                let count = cues.count - cues.filter { done.contains($0.id) }.count
+                self.reportError(
+                    count == 1 ? "1 line was not translated." : "\(count) lines were not translated.",
+                    AIError.nothingToDo(
+                        "\(translator.name) sent nothing back for them, the first at \(self.label(for: first.start)). "
+                            + "They're marked Not translated: run Translate with AI again to retry them, or translate them yourself."
+                    )
+                )
             }
             return Proposals.translation(fixUp.fix(translations, request: request), cues: cues)
         }

@@ -200,6 +200,18 @@ struct AIStateTests {
         #expect(editor.track.cues[0].isAIGenerated == nil)
     }
 
+    @Test func linesTheTranslatorLeavesOutAreReported() async throws {
+        let editor = makeEditor(cues: [cue("Hello.", at: 1), cue("Leave me alone.", at: 3)])
+        editor.aiProviders = AIProviderFactory(transcriber: { _ in ScriptedTranscriber.fixture }, translator: { _ in SkippingTranslator() })
+        var reported: [String] = []
+        editor.reportError = { title, _ in reported.append(title) }
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.track.cues.map(\.text) == ["[ar] Hello.", ""])
+        #expect(reported == ["1 line was not translated."])
+        #expect(editor.issues[editor.track.cues[1].id]?.contains { $0.kind == .notTranslated } == true)
+    }
+
     @Test func transcribedCuesCanBeTranslatedDirectly() async throws {
         var line = cue("Where are you going?", at: 1)
         line.voices = ["speaker_0"]
@@ -299,5 +311,21 @@ private struct PausingTranscriber: Transcriber {
         for await _ in gate { break }
         found(Array(words.dropFirst(6)))
         return words
+    }
+}
+
+/// Translates every line but the ones with "alone" in them, as a model that declines them would.
+private struct SkippingTranslator: CueTranslator {
+    var name: String { "Skipping" }
+
+    func translate(
+        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable (TranslationBatch) -> Void
+    ) async throws -> TranslationBatch {
+        let batch = TranslationBatch(translations: request.lines.filter { !$0.source.contains("alone") }.map {
+            CueTranslation(cueID: $0.cueID, text: "[ar] " + $0.source)
+        })
+        found(batch)
+        return batch
     }
 }
