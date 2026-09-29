@@ -162,6 +162,20 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
 /// open; `EditorWorkspace.openLaunchProject` has opened the real ones already,
 /// so they are skipped rather than shown as "can't open" errors.
 public final class ProjectDocumentController: NSDocumentController {
+    /// Posted after AppKit adds a project to the recent documents or clears them,
+    /// so File › Open Recent (`EditorWorkspace.recentProjects`) shows it right away.
+    public static let recentDocumentsDidChangeNotification = Notification.Name("SpotlineRecentDocumentsDidChange")
+
+    override public func noteNewRecentDocumentURL(_ url: URL) {
+        super.noteNewRecentDocumentURL(url)
+        NotificationCenter.default.post(name: Self.recentDocumentsDidChangeNotification, object: self)
+    }
+
+    override public func clearRecentDocuments(_ sender: Any?) {
+        super.clearRecentDocuments(sender)
+        NotificationCenter.default.post(name: Self.recentDocumentsDidChangeNotification, object: self)
+    }
+
     override public func openDocument(
         withContentsOf url: URL, display displayDocument: Bool,
         completionHandler: @escaping (NSDocument?, Bool, (any Error)?) -> Void

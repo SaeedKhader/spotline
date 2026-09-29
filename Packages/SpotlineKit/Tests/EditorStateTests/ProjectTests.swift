@@ -270,6 +270,24 @@ struct ProjectTests {
         #expect(path("/Users/me/Projects", "/Volumes/Drive/Pilot.mkv") == nil, "Not across disks")
     }
 
+    /// A project saved or opened while Spotline is in front shows up in File ›
+    /// Open Recent at once, not only after switching to another app and back.
+    @Test func openRecentFollowsTheRecentDocuments() {
+        final class Recents { var urls: [URL] = [] }
+        let recents = Recents()
+        let workspace = EditorWorkspace(launchOptions: LaunchOptions(isUITestMode: true)) { recents.urls }
+        #expect(workspace.recentProjects.isEmpty)
+
+        let pilot = directory.appending(path: "Pilot.spotline")
+        recents.urls = [pilot]
+        NotificationCenter.default.post(name: ProjectDocumentController.recentDocumentsDidChangeNotification, object: nil)
+        #expect(workspace.recentProjects == [pilot])
+
+        recents.urls = []
+        NotificationCenter.default.post(name: ProjectDocumentController.recentDocumentsDidChangeNotification, object: nil)
+        #expect(workspace.recentProjects.isEmpty)
+    }
+
     @Test func theStandInEditorOnlyOpensProjects() {
         let editor = makeEditor()
         editor.allowedCommandIDs = EditorWorkspace.commandsWithoutProject
