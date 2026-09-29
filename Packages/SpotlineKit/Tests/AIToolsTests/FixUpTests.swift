@@ -84,11 +84,12 @@ struct DialogueCueTests {
         let three = segmenter.cues(from: words([("Hi.", 0.0, 0.2, "a"), ("Hey.", 0.25, 0.45, "b"), ("Yo.", 0.5, 0.7, "c")]))
         #expect(three.map(\.text) == ["- Hi.\n- Hey.", "Yo."])
         // Words the second speaker says that would not fit one dialogue line.
-        let long = segmenter.cues(from: words(
-            [("Wait,", 0.0, 0.2, "a")] + "no no no no no no no no no no no no no no".split(separator: " ").enumerated().map {
-                (String($0.element), 0.25 + Double($0.offset) * 0.1, 0.3 + Double($0.offset) * 0.1, "b")
-            }
-        ))
+        var said: [(String, Double, Double, String)] = [("Wait,", 0.0, 0.2, "a")]
+        for index in 0..<14 {
+            let start = 0.25 + Double(index) * 0.1
+            said.append(("no", start, start + 0.05, "b"))
+        }
+        let long = segmenter.cues(from: words(said))
         #expect(long.count == 2)
         #expect(!long[0].text.contains("\n") || long[0].text.split(separator: "\n").allSatisfy { $0.count <= 42 })
     }
