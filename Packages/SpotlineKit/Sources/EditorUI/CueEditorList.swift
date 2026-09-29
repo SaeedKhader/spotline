@@ -23,7 +23,8 @@ struct CueEditorList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if editor.track.cues.isEmpty {
+            AIReviewBar(editor: editor)
+            if editor.track.cues.isEmpty && editor.proposedInserts.isEmpty {
                 ContentUnavailableView {
                     Label("No Subtitles", systemImage: "captions.bubble")
                 } description: {
@@ -176,17 +177,17 @@ private struct CueRow: View {
                     HStack(alignment: .top, spacing: 8) {
                         SourceText(editor: editor, cueID: cue.id, source: editor.sourceCues[cue.id], direction: directions.source)
                             .frame(maxWidth: .infinity)
-                        textEditor
+                        targetText
                             .frame(maxWidth: .infinity)
                     }
                     if isSelected {
                         MemorySuggestions(editor: editor, cueID: cue.id, direction: directions.target)
                     }
                 } else {
-                    textEditor
+                    targetText
                 }
-                if let change = editor.proposedChange(forCue: cue.id) {
-                    ProposalBox(editor: editor, change: change, direction: directions.target)
+                if let change = editor.proposedChange(forCue: cue.id), !change.changesText {
+                    ProposalBox(editor: editor, change: change)
                 }
                 if isHovered || isSelected {
                     actions
@@ -199,6 +200,15 @@ private struct CueRow: View {
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.CueList.row(cue.id))
+    }
+
+    /// The cue's text, or the text an AI tool proposes for it, shown in its place until accepted or rejected.
+    @ViewBuilder private var targetText: some View {
+        if let change = editor.proposedChange(forCue: cue.id), change.changesText {
+            ProposedText(editor: editor, change: change, direction: directions.target)
+        } else {
+            textEditor
+        }
     }
 
     /// The cue's text (the target, in translation mode), typed in its language's direction.

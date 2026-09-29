@@ -19,9 +19,9 @@ final class AIToolsUITests: XCTestCase {
         _ = button(.stepForward, in: app)
         chooseAIMenuItem(.transcribe, in: app)
 
-        let review = app.descendants(matching: .any)[AccessibilityID.Transport.review]
+        let review = app.descendants(matching: .any)[AccessibilityID.CueList.aiReview]
         XCTAssertTrue(review.waitForExistence(timeout: 20), "No review after transcribing")
-        waitForValue(of: review, toEqual: "Transcription: 2 changes")
+        waitForValue(of: review, toEqual: "Transcription: 2 changes to review")
         let proposed = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH 'cueList.proposed.' AND identifier ENDSWITH '.text'")
         )
@@ -35,7 +35,7 @@ final class AIToolsUITests: XCTestCase {
         ).firstMatch
         accept.click()
         waitForValue(of: app.cueCells(.text).firstMatch, toEqual: "Hello there. How are you?")
-        waitForValue(of: review, toEqual: "Transcription: 1 change")
+        waitForValue(of: review, toEqual: "Transcription: 1 change to review")
         button(.acceptAllChanges, in: app).click()
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: review)
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 10), .completed, "The review stays after Accept All")
@@ -49,9 +49,9 @@ final class AIToolsUITests: XCTestCase {
         XCTAssertTrue(app.cueCells(.source).firstMatch.waitForExistence(timeout: 10), "No source cells")
         chooseAIMenuItem(.translateWithAI, in: app)
 
-        let review = app.descendants(matching: .any)[AccessibilityID.Transport.review]
+        let review = app.descendants(matching: .any)[AccessibilityID.CueList.aiReview]
         XCTAssertTrue(review.waitForExistence(timeout: 20), "No review after translating")
-        waitForValue(of: review, toEqual: "Translation: 3 changes")
+        waitForValue(of: review, toEqual: "Translation: 3 changes to review")
         let proposal = app.cueCells(.proposal).firstMatch
         XCTAssertEqual(proposal.value as? String, "[ar] Where are you going? ♀")
         button(.acceptAllChanges, in: app).click()

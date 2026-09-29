@@ -51,6 +51,15 @@ public struct ProposedChange: Sendable, Equatable, Identifiable {
 
     public var cueID: Cue.ID { cue.id }
 
+    /// True for a new cue, or an update that changes the text.
+    public var changesText: Bool {
+        switch kind {
+        case .insert: true
+        case .update(let before): before.text != cue.text
+        case .delete: false
+        }
+    }
+
     public var before: Cue? {
         if case .update(let before) = kind { return before }
         if case .delete = kind { return cue }

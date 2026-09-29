@@ -24,10 +24,6 @@ public enum AccessibilityID {
         public static let frameRate = "transport.frameRate"
         /// Media analysis state: "Analyzing 40%", or the number of shot changes found.
         public static let analysis = "transport.analysis"
-        /// The running AI tool; its value is e.g. "Transcribing 40%".
-        public static let aiTask = "transport.aiTask"
-        /// Proposed AI changes waiting for review; its value is e.g. "Transcription: 12 changes".
-        public static let review = "transport.review"
     }
 
     public enum Timeline {
@@ -58,6 +54,12 @@ public enum AccessibilityID {
         public static func glossaryTerm(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).glossary.\(index)" }
         /// The n-th translation memory suggestion under the selected cue (0-based); its value is the suggested text.
         public static func memoryMatch(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).memory.\(index)" }
+        /// The bar over the cue list while an AI tool runs or its changes wait for review.
+        public static let aiBar = "cueList.ai"
+        /// The running AI tool; its value is e.g. "Transcribing 40%".
+        public static let aiTask = "cueList.ai.task"
+        /// Proposed AI changes waiting for review; its value is e.g. "Transcription: 12 changes".
+        public static let aiReview = "cueList.ai.review"
         /// A cue an AI tool proposes to add, shown between the real rows until accepted or rejected.
         public static func proposedRow(_ cueID: UUID) -> String { "cueList.proposed.\(cueID.uuidString)" }
         /// A proposed cue's field, e.g. `cueList.proposed.<id>.text`.

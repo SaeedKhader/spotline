@@ -31,7 +31,6 @@ struct ActionsBar: View {
                 CommandButton(command: .zoomIn, systemImage: "plus.magnifyingglass", editor: editor)
             }
             Spacer(minLength: 8)
-            AIStatusView(editor: editor)
             AnalysisStatusView(editor: editor)
             TimecodeView(editor: editor)
             Text(editor.frameRate.description)
