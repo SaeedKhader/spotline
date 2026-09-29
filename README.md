@@ -7,7 +7,7 @@ A native macOS subtitle editor for professional movie and TV workflows: timing (
 - Built for automation from day one: stable accessibility IDs, one command layer shared by menus, shortcuts, UI tests and AI agents
 - AI tools (planned): transcription with timestamps, translation, profanity removal and line shortening, always reviewed as a diff before applying
 
-Status: early development (milestone M3, timeline). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
+Status: early development (milestone M3.5, UI design pass). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
 ## Requirements
 

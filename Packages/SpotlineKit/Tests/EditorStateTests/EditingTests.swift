@@ -267,10 +267,125 @@ struct EditingTests {
         step(editor, to: 30)
         #expect(editor.isShortcutEnabled(for: .setIn))
         editor.isEditingText = true
-        for command in [EditorCommand.setIn, .togglePlay, .stepForward, .nextCue, .deleteCue] {
+        for command in [EditorCommand.setIn, .togglePlay, .stepForward, .shuttleForward, .deleteCue] {
             #expect(!editor.isShortcutEnabled(for: command), "\(command.id)")
             #expect(editor.canPerform(command), "Buttons still work: \(command.id)")
         }
         #expect(editor.isShortcutEnabled(for: .addCue))
+    }
+
+    // MARK: UI design pass
+
+    @Test func movingBetweenCuesWhileTypingKeepsTheCursorInTheText() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        editor.select(editor.track.cues[0].id)
+        editor.isEditingText = true
+        #expect(editor.isShortcutEnabled(for: .nextCue))
+        let requests = editor.textFocusRequest
+        editor.perform(.nextCue)
+        #expect(editor.selectedCue?.text == "Two")
+        #expect(editor.textFocusRequest == requests + 1)
+    }
+
+    @Test func splitAtThePlayheadDividesTheText() throws {
+        let editor = try makeEditor(subtitles: "1\n00:00:01,000 --> 00:00:03,000\nFirst line\nsecond line\n")
+        editor.select(editor.track.cues[0].id)
+        step(editor, to: 48)  // 2.002 s, inside the cue
+        #expect(editor.perform(.splitCue))
+        #expect(editor.track.cues.map(\.text) == ["First line", "second line"])
+        #expect(editor.track.cues[0].end == frame(48))
+        #expect(editor.track.cues[1].start == frame(48))
+        #expect(editor.track.cues[1].end == MediaTime(value: 3, timescale: 1))
+        editor.perform(.undo)
+        #expect(editor.track.cues.count == 1)
+    }
+
+    @Test func splitOutsideTheCueUsesItsMiddle() throws {
+        let editor = try makeEditor(subtitles: "1\n00:00:01,000 --> 00:00:03,000\nWhere are we going now\n")
+        editor.select(editor.track.cues[0].id)
+        editor.perform(.splitCue)
+        #expect(editor.track.cues.map(\.text) == ["Where are we", "going now"])
+        #expect(editor.track.cues[0].end == MediaTime(value: 2, timescale: 1).snapped(to: rate))
+    }
+
+    @Test func splitTextFallsBackToOnePiece() {
+        #expect(EditorState.splitText("Word") == ("Word", ""))
+        #expect(EditorState.splitText("a\nb\nc") == ("a\nb", "c"))
+    }
+
+    @Test func mergeJoinsWithTheNextCue() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        editor.select(editor.track.cues[1].id)
+        #expect(editor.perform(.mergeWithNext))
+        #expect(editor.track.cues.map(\.text) == ["One", "Two\nThree"])
+        #expect(editor.track.cues[1].end == MediaTime(value: 6, timescale: 1))
+        #expect(!editor.canPerform(.mergeWithNext), "Last cue")
+    }
+
+    @Test func positionTogglesAndExports() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        editor.select(editor.track.cues[0].id)
+        #expect(editor.isOn(.togglePositionTop) == false)
+        editor.perform(.togglePositionTop)
+        #expect(editor.selectedCue?.position == .top)
+        #expect(editor.isOn(.togglePositionTop) == true)
+        let url = directory.appending(path: "top.srt")
+        editor.exportSubtitles(to: SubtitleFileReference(url: url, format: .srt))
+        #expect(try String(contentsOf: url, encoding: .utf8).contains("{\\an8}One"))
+        editor.perform(.undo)
+        #expect(editor.selectedCue?.position == .bottom)
+    }
+
+    @Test func addCueAfterLeavesAGap() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        editor.addCue(after: editor.track.cues[0].id)
+        let added = try #require(editor.selectedCue)
+        #expect(editor.selectedCueIndex == 1)
+        // "One" ends at 2 s (frame 47.95, so frame 48 is the first without it); two frames later.
+        #expect(added.start == frame(50))
+        #expect(added.end == MediaTime(value: 3, timescale: 1), "Stops where the next cue starts")
+        #expect(editor.textFocusRequest == 1)
+    }
+
+    @Test func reviewIssuesFollowEdits() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        #expect(editor.issues.isEmpty)
+        #expect(!editor.canPerform(.nextIssue))
+        let id = editor.track.cues[2].id
+        editor.setText("", forCue: id)
+        #expect(editor.issues[id] == [.empty])
+        #expect(editor.perform(.nextIssue))
+        #expect(editor.selectedCueID == id)
+        #expect(!editor.perform(.nextIssue), "No more after it")
+        editor.perform(.undo)
+        #expect(editor.issues.isEmpty)
+    }
+
+    @Test func timeLabelsInFramesOrMilliseconds() throws {
+        let editor = try makeEditor(subtitles: Self.threeCues)
+        let start = editor.track.cues[0].start  // 1 s
+        #expect(editor.label(for: start) == "00:00:01:00")
+        editor.perform(.toggleMilliseconds)
+        #expect(editor.label(for: start) == "00:00:01,000")
+        #expect(editor.time(from: "00:00:01,500") == MediaTime(value: 3, timescale: 2))
+        #expect(editor.time(from: "00:00:01:12") == frame(36))
+        #expect(editor.time(from: "nonsense") == nil)
+    }
+
+    @Test func shuttleSpeedsUpAndPauses() throws {
+        let editor = try makeEditor()
+        editor.perform(.shuttleForward)
+        #expect(editor.status.rate == 1)
+        editor.perform(.shuttleForward)
+        editor.perform(.shuttleForward)
+        #expect(editor.status.rate == 4)
+        editor.perform(.shuttleBackward)
+        #expect(editor.status.rate == -1)
+        editor.perform(.shuttleBackward)
+        #expect(editor.status.rate == -2)
+        editor.perform(.pause)
+        #expect(!editor.isPlaying)
+        editor.perform(.togglePlay)
+        #expect(editor.status.rate == 1)
     }
 }

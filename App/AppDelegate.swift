@@ -48,7 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let window = NSWindow(contentViewController: NSHostingController(rootView: MainWindowView(editor: editor)))
             window.identifier = NSUserInterfaceItemIdentifier("main")
             window.title = "Spotline"
-            window.setContentSize(NSSize(width: 1000, height: 700))
+            window.setContentSize(NSSize(width: 1280, height: 820))
+            // A dark workspace, as in pro video tools, so the picture stands out.
+            window.appearance = NSAppearance(named: .darkAqua)
             window.isReleasedWhenClosed = false
             window.center()
             window.setFrameAutosaveName("MainWindow")

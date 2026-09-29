@@ -134,49 +134,12 @@ func parseTimingLine(_ line: Substring, lineNumber: Int) throws(SubtitleParseErr
     return (start, end)
 }
 
-/// Parses `[H…:]MM:SS[.,]fff` exactly. The fraction may have any number of digits.
 func parseTimestamp(_ field: String) -> MediaTime? {
-    let parts = field.split(separator: ":", omittingEmptySubsequences: false)
-    guard parts.count == 2 || parts.count == 3 else { return nil }
-    let secondsField = parts[parts.count - 1]
-    let secondsParts = secondsField.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "," || $0 == "." })
-    guard secondsParts.count <= 2,
-          let hours = parts.count == 3 ? digits(parts[0]) : 0,
-          let minutes = digits(parts[parts.count - 2]), minutes < 60,
-          let seconds = digits(secondsParts[0]), seconds < 60
-    else { return nil }
-    var fraction: Int64 = 0
-    var timescale: Int64 = 1
-    if secondsParts.count == 2 {
-        let fractionField = secondsParts[1]
-        guard !fractionField.isEmpty, fractionField.count <= 9, let value = digits(fractionField) else { return nil }
-        fraction = value
-        for _ in 0..<fractionField.count { timescale *= 10 }
-    }
-    let wholeSeconds = (hours * 60 + minutes) * 60 + seconds
-    return MediaTime(value: wholeSeconds * timescale + fraction, timescale: timescale)
+    Timestamp.parse(field)
 }
 
-private func digits(_ field: Substring) -> Int64? {
-    guard !field.isEmpty, field.allSatisfy(\.isASCII), field.allSatisfy(\.isNumber) else { return nil }
-    return Int64(field)
-}
-
-/// `HH:MM:SS<separator>mmm`, rounded to the nearest millisecond. Negative times write as zero.
 func formatTimestamp(_ time: MediaTime, fractionSeparator: Character) -> String {
-    let value = max(time.value, 0)
-    let milliseconds = (2 * value * 1000 + time.timescale) / (2 * time.timescale)
-    let fraction = milliseconds % 1000
-    let totalSeconds = milliseconds / 1000
-    let seconds = totalSeconds % 60
-    let minutes = totalSeconds / 60 % 60
-    let hours = totalSeconds / 3600
-    return "\(pad(hours, 2)):\(pad(minutes, 2)):\(pad(seconds, 2))\(fractionSeparator)\(pad(fraction, 3))"
-}
-
-private func pad(_ value: Int64, _ width: Int) -> String {
-    let digits = String(value)
-    return String(repeating: "0", count: max(width - digits.count, 0)) + digits
+    Timestamp.format(time, fractionSeparator: fractionSeparator)
 }
 
 /// The cue's text as lines safe to write inside one block: blank lines would end the block, so they are dropped.

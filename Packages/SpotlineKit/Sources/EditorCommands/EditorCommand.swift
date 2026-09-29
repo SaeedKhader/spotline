@@ -19,6 +19,8 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
         case navigation
         /// Timeline zoom and snapping.
         case timeline
+        /// How things are displayed.
+        case view
     }
 
     public init(id: String, title: String, category: Category, defaultShortcut: KeyShortcut? = nil) {
@@ -74,6 +76,43 @@ extension EditorCommand {
         id: "navigation.nextCue", title: "Select Next Cue", category: .navigation,
         defaultShortcut: KeyShortcut(.downArrow, modifiers: .command)
     )
+    public static let splitCue = EditorCommand(
+        id: "cue.split", title: "Split Cue", category: .cue,
+        defaultShortcut: KeyShortcut(.character("s"), modifiers: [.command, .option])
+    )
+    public static let mergeWithNext = EditorCommand(
+        id: "cue.mergeWithNext", title: "Merge with Next Cue", category: .cue,
+        defaultShortcut: KeyShortcut(.character("j"), modifiers: [.command, .option])
+    )
+    /// A toggle: on when the selected cue is shown at the top.
+    public static let togglePositionTop = EditorCommand(
+        id: "cue.togglePositionTop", title: "Show Cue at Top", category: .cue,
+        defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .option])
+    )
+    public static let previousIssue = EditorCommand(
+        id: "navigation.previousIssue", title: "Previous Cue Needing Review", category: .navigation,
+        defaultShortcut: KeyShortcut(.upArrow, modifiers: [.command, .option])
+    )
+    public static let nextIssue = EditorCommand(
+        id: "navigation.nextIssue", title: "Next Cue Needing Review", category: .navigation,
+        defaultShortcut: KeyShortcut(.downArrow, modifiers: [.command, .option])
+    )
+    public static let shuttleBackward = EditorCommand(
+        id: "playback.shuttleBackward", title: "Play Backward (Faster Each Press)", category: .playback,
+        defaultShortcut: KeyShortcut(.character("j"))
+    )
+    public static let pause = EditorCommand(
+        id: "playback.pause", title: "Pause", category: .playback,
+        defaultShortcut: KeyShortcut(.character("k"))
+    )
+    public static let shuttleForward = EditorCommand(
+        id: "playback.shuttleForward", title: "Play Forward (Faster Each Press)", category: .playback,
+        defaultShortcut: KeyShortcut(.character("l"))
+    )
+    /// A toggle: see `EditorState.isOn(_:)`.
+    public static let toggleMilliseconds = EditorCommand(
+        id: "view.toggleMilliseconds", title: "Show Timecodes in Milliseconds", category: .view
+    )
     public static let previousShotChange = EditorCommand(
         id: "navigation.previousShotChange", title: "Go to Previous Shot Change", category: .navigation,
         defaultShortcut: KeyShortcut(.leftArrow, modifiers: .option)
@@ -123,10 +162,11 @@ extension EditorCommand {
     public static let all: [EditorCommand] = [
         openMedia, importSubtitles, exportSubtitles,
         undo, redo,
-        addCue, deleteCue, setIn, setOut,
-        previousCue, nextCue, previousShotChange, nextShotChange,
+        addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
+        previousCue, nextCue, previousIssue, nextIssue, previousShotChange, nextShotChange,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
-        togglePlay, stepBackward, stepForward, goToStart, nextAudioTrack,
+        togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, nextAudioTrack,
+        toggleMilliseconds,
     ]
 
     public static func named(_ id: String) -> EditorCommand? {
@@ -172,7 +212,10 @@ public struct KeyShortcut: Hashable, Sendable {
     /// an "i" instead of setting the in-point.
     public var conflictsWithTextEditing: Bool {
         switch key {
-        case .leftArrow, .rightArrow, .upArrow, .downArrow, .delete: true
+        // Command-Up/Down move between cues, which is useful while typing;
+        // in a two-line editor the text system barely needs them.
+        case .upArrow, .downArrow: !modifiers.contains(.command)
+        case .leftArrow, .rightArrow, .delete: true
         case .character, .space, .returnKey, .escape: modifiers.isDisjoint(with: [.command, .control])
         }
     }

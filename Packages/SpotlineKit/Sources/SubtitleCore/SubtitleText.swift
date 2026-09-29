@@ -6,6 +6,8 @@
 public enum SubtitleGuidelines {
     public static let maxLines = 2
     public static let maxCharactersPerLine = 42
+    /// Reading speed, characters per second (Netflix allows 17 to 20 for adult programs).
+    public static let maxCharactersPerSecond = 20.0
 }
 
 public enum SubtitleText {

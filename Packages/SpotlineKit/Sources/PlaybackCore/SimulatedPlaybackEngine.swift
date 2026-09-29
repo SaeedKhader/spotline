@@ -38,6 +38,14 @@ public final class SimulatedPlaybackEngine: PlaybackEngine {
         update(next)
     }
 
+    public func play(rate: Double) {
+        guard status.hasMedia, rate != 0 else { return }
+        var next = status
+        next.rate = rate
+        next.isPaused = false
+        update(next)
+    }
+
     public func seek(toFrame frame: Int64, rate: FrameRate) {
         guard status.hasMedia else { return }
         let time = MediaTime(midpointOfFrame: frame, rate: rate)

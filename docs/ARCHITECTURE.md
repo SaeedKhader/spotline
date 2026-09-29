@@ -156,6 +156,33 @@ Round-trip tests for every format live in `SubtitleFormats` with golden files.
 - Tests generate speech at run time with macOS `say` rather than committing synthesized recordings.
 - Status (Saeed, 2026-09-29): good enough for now, not perfect; revisit later (e.g. per-scene tuning or source separation).
 
+### As built in M3.5 (UI design pass)
+Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
+
+```
+┌────────────────────────────────┬─────────────────────────────┐
+│ Cue list = editor: # · S/E ·   │ Video + subtitle overlay     │
+│ c/s · review · text · actions  │ (white, black outline,       │
+│ footer: "N cues need review" ↑↓│  title-safe, top or bottom)  │
+├────────────────────────────────┴─────────────────────────────┤
+│ Actions bar: transport · in/out · add/split/merge/delete ·     │
+│ snapping · zoom ······ analysis status · timecode · fps        │
+├──────────────────────────────────────────────────────────────┤
+│ Mini-map: whole media, speech, cues, shot changes, viewport    │
+├──────────────────────────────────────────────────────────────┤
+│ Timeline                                                       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- Each cue row edits its cue in place: start/end fields accept SMPTE timecode or HH:MM:SS,mmm; text is a two-line editor; hover or selection shows Default/Top position and add/split/merge/delete. Rows are lazily built.
+- Row buttons and the actions bar repeat menu commands on purpose (Saeed's exception to "no duplicates"); they run the same `EditorCommand`s.
+- Times show as frames by default (the professional convention); View › Show Timecodes in Milliseconds switches.
+- `Cue.position` (bottom/top) round-trips as `{\an8}` in SRT and `line:0` in WebVTT.
+- `Review` flags empty cues, overlaps, more than 20 c/s, lines over 42 characters and more than 2 lines; the footer counts them and ⌥⌘↑/⌥⌘↓ step through them. Full QC presets remain M4.
+- New commands: Split Cue (⌥⌘S), Merge with Next (⌥⌘J), Show Cue at Top (⌥⌘T), J/K/L shuttle (backward, pause, forward, faster on repeat; mpv plays backward), and ⌘↑/⌘↓ now also work while typing, keeping the cursor in the text.
+- Per-frame state (`position`, `currentCueID`) is observed separately from everything else, so only the timecode, timeline, overlay and mini-map playhead redraw during playback.
+- The window uses the dark appearance.
+
 ## 7. Pro workflow features (backlog, roughly in order)
 
 - J/K/L shuttle, frame step, set in/out at playhead, "snap to shot change", nudge by frame, split/merge cues, ripple.
@@ -231,6 +258,7 @@ Some target languages (Arabic first; also Hebrew, French, Spanish, etc.) change 
 | M2 | Basic editing | Import/export SRT + WebVTT, cue list, text editor, set in/out at playhead, undo |
 | M3 | Timeline | Waveform, cue blocks draggable, shot changes, snapping |
 | M3b | Speech-aware waveform | Waveform filtered to the voice band; on-device speech detection draws speech brightly and dims music and effects |
+| M3.5 | UI design pass | One layout, look and keyboard flow for video, cue list, editor and timeline, before M4–M7 add panels |
 | M4 | Pro formats + QC | ASS, TTML/IMSC, QC engine with presets, live issues panel |
 | M5 | Translation | Source/target mode, glossary, translation memory, EBU STL |
 | M6 | AI tools | Audio preparation pipeline, transcription with timestamps → segmented cues, AI translation, profanity/cleanup transforms, review-as-diff |

@@ -2,7 +2,7 @@ import EditorCommands
 import SpotlineAccessibility
 import XCTest
 
-/// M2: importing subtitles, the cue list, the text editor, in/out at playhead and undo.
+/// Importing subtitles, the cue list (each row edits its cue), in/out at the playhead and undo.
 final class EditingUITests: XCTestCase {
     @MainActor
     func testImportedCuesFillTheList() throws {
@@ -10,8 +10,8 @@ final class EditingUITests: XCTestCase {
         let texts = app.cueCells(.text)
         XCTAssertTrue(texts.firstMatch.waitForExistence(timeout: 10), "No cue rows")
         XCTAssertEqual(texts.count, 3)
-        XCTAssertEqual(texts.element(boundBy: 1).value as? String, "Second cue / with two lines")
-        XCTAssertEqual(texts.element(boundBy: 2).value as? String, "Third cue")
+        XCTAssertEqual(texts.element(boundBy: 1).value as? String, "Second cue\nwith two lines")
+        XCTAssertEqual(texts.element(boundBy: 2).value as? String, "<i>Third cue</i>")
         // 0.5 s at 23.976 fps first shows on frame 12.
         XCTAssertEqual(app.cueCells(.inPoint).element(boundBy: 0).value as? String, "00:00:00:12")
     }
@@ -20,12 +20,12 @@ final class EditingUITests: XCTestCase {
     func testSelectingACueSeeksAndShowsItOverTheVideo() throws {
         let app = launchApp(openSubtitles: true)
         _ = button(EditorCommand.stepForward, in: app)
-        app.cueCells(.text).element(boundBy: 1).click()
+        app.cueCells(.number).element(boundBy: 1).click()
 
         waitForValue(of: app.timecode, toEqual: "00:00:02:00")
         waitForValue(of: app.staticTexts[AccessibilityID.Video.subtitle], toEqual: "Second cue\nwith two lines")
-        waitForValue(of: app.staticTexts[AccessibilityID.Inspector.inPoint], toEqual: "00:00:02:00")
-        waitForValue(of: app.staticTexts[AccessibilityID.Inspector.outPoint], toEqual: "00:00:03:00")
+        waitForValue(of: app.cueCells(.inPoint).element(boundBy: 1), toEqual: "00:00:02:00")
+        waitForValue(of: app.cueCells(.outPoint).element(boundBy: 1), toEqual: "00:00:03:00")
     }
 
     @MainActor
@@ -35,18 +35,16 @@ final class EditingUITests: XCTestCase {
         for _ in 0..<5 { stepForward.click() }
         waitForValue(of: app.timecode, toEqual: "00:00:00:05")
 
-        // Add Cue at Playhead, Shift-Command-N, puts the cursor in the text editor.
+        // Add Cue at Playhead, Shift-Command-N, puts the cursor in the new row's text.
         app.typeKey("n", modifierFlags: [.command, .shift])
-        let textEditor = app.textViews[AccessibilityID.Inspector.text]
+        let textEditor = app.cueCells(.text).firstMatch
         XCTAssertTrue(textEditor.waitForExistence(timeout: 10))
         waitForValue(of: app.cueCells(.inPoint).firstMatch, toEqual: "00:00:00:05")
 
-        // Letters and Space that are also shortcuts (Set In, Set Out, Play) must type.
-        app.typeText("Is it on?")
-        waitForValue(of: textEditor, toEqual: "Is it on?")
-        waitForValue(of: app.cueCells(.text).firstMatch, toEqual: "Is it on?")
+        // Letters and Space that are also shortcuts (Set In, Set Out, Play, J/K/L) must type.
+        app.typeText("Is it on? jkl")
+        waitForValue(of: textEditor, toEqual: "Is it on? jkl")
         waitForValue(of: app.timecode, toEqual: "00:00:00:05")
-        waitForValue(of: app.staticTexts[AccessibilityID.Inspector.lineLengths], toEqual: "9/42")
 
         // The typing undoes as one step, then the new cue.
         app.typeKey("z", modifierFlags: .command)
@@ -64,7 +62,7 @@ final class EditingUITests: XCTestCase {
     func testSetInAndOutAtPlayheadWithShortcuts() throws {
         let app = launchApp(openSubtitles: true)
         _ = button(EditorCommand.stepForward, in: app)
-        app.cueCells(.text).element(boundBy: 0).click()
+        app.cueCells(.number).element(boundBy: 0).click()
         waitForValue(of: app.timecode, toEqual: "00:00:00:12")
 
         for _ in 0..<3 { app.typeKey(.rightArrow, modifierFlags: []) }

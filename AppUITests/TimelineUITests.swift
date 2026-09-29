@@ -66,7 +66,9 @@ final class TimelineUITests: XCTestCase {
             predicate: NSPredicate(format: "value IN %@", ["00:00:02:12", "00:00:02:13"]), object: inPoint
         )
         XCTAssertEqual(XCTWaiter().wait(for: [moved], timeout: 10), .completed, "In is \(inPoint.value ?? "nil")")
-        XCTAssertEqual(app.cueCells(.duration).element(boundBy: 1).value as? String, "0.800")
+        // It kept its 0.8 s (20 frames) duration.
+        let outPoint = app.cueCells(.outPoint).element(boundBy: 1).value as? String
+        XCTAssertTrue(["00:00:03:07", "00:00:03:08"].contains(outPoint ?? ""), "Out is \(outPoint ?? "nil")")
     }
 
     /// two-tracks.mkv: an English stereo track (default) and an Arabic 5.1 track.

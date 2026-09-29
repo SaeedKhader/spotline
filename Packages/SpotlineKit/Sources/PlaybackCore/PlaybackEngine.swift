@@ -59,6 +59,8 @@ public struct PlaybackStatus: Equatable, Sendable {
     public var audioTracks: [AudioTrack]
     /// The audio track being played, nil when audio is off.
     public var selectedAudioTrackID: Int?
+    /// Playback speed while playing: 1 is normal, 2 double, negative plays backward.
+    public var rate: Double = 1
 
     public init(
         mediaURL: URL? = nil,
@@ -98,6 +100,8 @@ public protocol PlaybackEngine: AnyObject {
     /// Opens `url` paused on its first frame.
     func load(_ url: URL)
     func setPaused(_ paused: Bool)
+    /// Plays at `rate` times normal speed; negative rates play backward.
+    func play(rate: Double)
     /// Shows `frame` exactly, counted at `rate` from the start of the media.
     func seek(toFrame frame: Int64, rate: FrameRate)
     /// Pauses and shows the next or previous frame.

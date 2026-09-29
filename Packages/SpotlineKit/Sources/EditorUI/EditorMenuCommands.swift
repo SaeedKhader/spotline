@@ -18,6 +18,9 @@ public struct EditorMenuCommands: Commands {
         CommandGroup(replacing: .undoRedo) {
             buttons(for: .editing)
         }
+        CommandGroup(after: .toolbar) {
+            buttons(for: .view)
+        }
         CommandMenu("Cue") {
             buttons(for: .cue)
             Divider()

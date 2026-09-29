@@ -30,7 +30,20 @@ public final class EditorState {
     /// so menus depending on it redraw only when it flips.
     public private(set) var isAtStart = true
     public var frameRate: FrameRate
-    public private(set) var track: SubtitleTrack
+    public private(set) var track: SubtitleTrack {
+        didSet {
+            guard track.cues != oldValue.cues else { return }
+            issues = Review.issues(in: track.cues)
+            updateCurrentCue()
+        }
+    }
+    /// The cue on screen at the playhead. Kept apart from `position` so the
+    /// cue list redraws only when it changes, not every frame.
+    public private(set) var currentCueID: Cue.ID?
+    /// Cues that need another look, with why. Kept in step with `track`.
+    public private(set) var issues: [Cue.ID: [ReviewIssue]] = [:]
+    /// Show times as HH:MM:SS,mmm instead of SMPTE frames.
+    public private(set) var showsMilliseconds = false
     public private(set) var selectedCueID: Cue.ID?
     /// The file the subtitles were last imported from or exported to.
     public private(set) var subtitleFile: SubtitleFileReference?
@@ -71,6 +84,11 @@ public final class EditorState {
         @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void) async throws -> [MediaTime] =
         EditorState.shotChangeAnalyzer(cache: .standard)
 
+    /// The timeline's visible span in seconds, as it last reported it (view geometry).
+    public private(set) var timelineViewport: ClosedRange<Double> = 0...0
+    /// Asks the timeline to show a time; the mini-map sets it.
+    public private(set) var timelineScrollRequest: TimelineScrollRequest?
+
     /// Timeline zoom in points per second of media.
     public private(set) var timelineScale: Double = 100
     public static let timelineScaleRange: ClosedRange<Double> = 0.5...2_000
@@ -78,6 +96,8 @@ public final class EditorState {
     public private(set) var isSnappingEnabled = true
     /// Whether the waveform draws speech brightly and dims music and effects.
     public private(set) var isSpeechHighlighted = true
+    /// J/K/L shuttle speed: 0 when not shuttling, negative backward.
+    @ObservationIgnored private var shuttleRate: Double = 0
 
     @ObservationIgnored public let undoManager: UndoManager
     public private(set) var canUndo = false
@@ -108,6 +128,7 @@ public final class EditorState {
         self.position = playback.status.position
         self.frameRate = frameRate
         self.track = track
+        self.issues = Review.issues(in: track.cues)
         self.undoManager = UndoManager()
         // One undo step per edit, also where no run loop groups events (unit tests).
         undoManager.groupsByEvent = false
@@ -170,8 +191,14 @@ public final class EditorState {
             canUndo
         case EditorCommand.redo.id:
             canRedo
-        case EditorCommand.deleteCue.id:
+        case EditorCommand.deleteCue.id, EditorCommand.splitCue.id, EditorCommand.togglePositionTop.id:
             selectedCue != nil
+        case EditorCommand.mergeWithNext.id:
+            selectedCueIndex.map { $0 < track.cues.count - 1 } ?? false
+        case EditorCommand.previousIssue.id, EditorCommand.nextIssue.id:
+            !issues.isEmpty
+        case EditorCommand.toggleMilliseconds.id:
+            true
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
         // anything, so their menu items do not redraw on every frame.
@@ -191,7 +218,8 @@ public final class EditorState {
             selectedCueIndex.map { $0 < track.cues.count - 1 } ?? !track.cues.isEmpty
         case EditorCommand.nextAudioTrack.id:
             hasMedia && audioTracks.count > 1
-        case EditorCommand.togglePlay.id, EditorCommand.stepForward.id:
+        case EditorCommand.togglePlay.id, EditorCommand.stepForward.id, EditorCommand.shuttleBackward.id,
+             EditorCommand.pause.id, EditorCommand.shuttleForward.id:
             hasMedia
         case EditorCommand.stepBackward.id, EditorCommand.goToStart.id:
             hasMedia && !isAtStart
@@ -212,6 +240,8 @@ public final class EditorState {
         switch command.id {
         case EditorCommand.toggleSnapping.id: isSnappingEnabled
         case EditorCommand.toggleSpeechHighlight.id: isSpeechHighlighted
+        case EditorCommand.toggleMilliseconds.id: showsMilliseconds
+        case EditorCommand.togglePositionTop.id: selectedCue.map { $0.position == .top }
         default: nil
         }
     }
@@ -239,6 +269,25 @@ public final class EditorState {
             addCueAtPlayhead()
         case EditorCommand.deleteCue.id:
             deleteSelectedCue()
+        case EditorCommand.splitCue.id:
+            return splitSelectedCue()
+        case EditorCommand.mergeWithNext.id:
+            mergeSelectedWithNext()
+        case EditorCommand.togglePositionTop.id:
+            if let cue = selectedCue { setPosition(cue.position == .top ? .bottom : .top, forCue: cue.id) }
+        case EditorCommand.previousIssue.id:
+            return selectIssue(forward: false)
+        case EditorCommand.nextIssue.id:
+            return selectIssue(forward: true)
+        case EditorCommand.toggleMilliseconds.id:
+            showsMilliseconds.toggle()
+        case EditorCommand.shuttleForward.id:
+            shuttle(forward: true)
+        case EditorCommand.shuttleBackward.id:
+            shuttle(forward: false)
+        case EditorCommand.pause.id:
+            shuttleRate = 0
+            playback.setPaused(true)
         case EditorCommand.setIn.id:
             return setInAtPlayhead()
         case EditorCommand.setOut.id:
@@ -266,7 +315,8 @@ public final class EditorState {
             let current = tracks.firstIndex { $0.id == selectedAudioTrackID } ?? -1
             selectAudioTrack(id: tracks[(current + 1) % tracks.count].id)
         case EditorCommand.togglePlay.id:
-            playback.setPaused(isPlaying)
+            shuttleRate = 0
+            if isPlaying { playback.setPaused(true) } else { playback.play(rate: 1) }
         case EditorCommand.stepForward.id:
             playback.step(by: 1)
         case EditorCommand.stepBackward.id:
@@ -324,11 +374,50 @@ public final class EditorState {
         }
     }
 
+    /// Selects the previous or next cue. While typing, the cursor moves to its text.
     private func selectNeighbour(offset: Int) {
         guard !track.cues.isEmpty else { return }
         let index = selectedCueIndex.map { $0 + offset } ?? (offset > 0 ? 0 : track.cues.count - 1)
         guard track.cues.indices.contains(index) else { return }
+        let keepTyping = isEditingText
         select(track.cues[index].id)
+        if keepTyping { textFocusRequest += 1 }
+    }
+
+    /// Selects the next (or previous) cue that needs review. Returns false when there is none that way.
+    private func selectIssue(forward: Bool) -> Bool {
+        let cues = track.cues
+        let current = selectedCueIndex ?? (forward ? -1 : cues.count)
+        let candidates = forward ? Array((current + 1)..<cues.count) : Array((0..<max(current, 0)).reversed())
+        guard let index = candidates.first(where: { issues[cues[$0].id] != nil }) else { return false }
+        select(cues[index].id)
+        return true
+    }
+
+    /// L plays forward and speeds up with each press (1×, 2×, 4×, 8×); J does the same backward.
+    private func shuttle(forward: Bool) {
+        let sameDirection = isPlaying && (forward ? shuttleRate > 0 : shuttleRate < 0)
+        let speed = sameDirection ? min(abs(shuttleRate) * 2, 8) : 1
+        shuttleRate = forward ? speed : -speed
+        playback.play(rate: shuttleRate)
+    }
+
+    // MARK: - Time labels
+
+    /// A cue edge as the editor shows it: the first frame showing (or no longer
+    /// showing) the cue as SMPTE timecode, or HH:MM:SS,mmm with milliseconds on.
+    public func label(for time: MediaTime) -> String {
+        showsMilliseconds
+            ? Timestamp.format(time)
+            : Timecode(frameNumber: max(time.firstFrame(at: frameRate), 0), rate: frameRate).description
+    }
+
+    /// Reads a typed time: SMPTE timecode (HH:MM:SS:FF) or HH:MM:SS,mmm.
+    /// Timecodes give the frame's start; milliseconds are kept exactly.
+    public func time(from label: String) -> MediaTime? {
+        let trimmed = label.trimmingCharacters(in: .whitespaces)
+        if let time = Timestamp.parse(trimmed) { return time }
+        return Timecode(trimmed, rate: frameRate)?.time
     }
 
     // MARK: - Audio tracks
@@ -354,6 +443,23 @@ public final class EditorState {
     public func seek(toFrame frame: Int64) {
         guard hasMedia else { return }
         playback.seek(toFrame: max(frame, 0), rate: frameRate)
+    }
+
+    /// Called by the timeline when it scrolls, zooms or resizes.
+    public func timelineDidShow(_ viewport: ClosedRange<Double>) {
+        if viewport != timelineViewport { timelineViewport = viewport }
+    }
+
+    /// Scrolls the timeline so `seconds` is in the middle (from the mini-map).
+    public func scrollTimeline(toCenter seconds: Double) {
+        timelineScrollRequest = TimelineScrollRequest(
+            centerSeconds: seconds, serial: (timelineScrollRequest?.serial ?? 0) + 1
+        )
+    }
+
+    private func updateCurrentCue() {
+        let id = cueAtPlayhead?.id
+        if id != currentCueID { currentCueID = id }
     }
 
     public func setTimelineScale(_ scale: Double) {
@@ -424,6 +530,83 @@ public final class EditorState {
 
     /// New cues last two seconds, or until the next cue starts.
     static let newCueSeconds: Int64 = 2
+
+    /// Splits the selected cue at the playhead when it is inside the cue, else in the middle.
+    /// Two or more lines split between lines; one line splits at the word nearest its middle.
+    private func splitSelectedCue() -> Bool {
+        guard let index = selectedCueIndex else { return false }
+        let cue = track.cues[index]
+        let oneFrame = MediaTime(frame: 1, rate: frameRate)
+        var at = currentTime
+        if !(hasMedia && cue.start + oneFrame <= at && at + oneFrame <= cue.end) {
+            let middle = cue.start + MediaTime(value: (cue.duration.value), timescale: cue.duration.timescale * 2)
+            at = middle.snapped(to: frameRate)
+        }
+        guard cue.start < at, at < cue.end else { return false }
+        let (firstText, secondText) = Self.splitText(cue.text)
+        var first = cue
+        first.end = at
+        first.text = firstText
+        let second = Cue(start: at, end: cue.end, text: secondText, position: cue.position)
+        edit("Split Cue") { track in
+            track.cues[index] = first
+            track.cues.insert(second, at: index + 1)
+        }
+        return true
+    }
+
+    static func splitText(_ text: String) -> (String, String) {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.count > 1 {
+            let half = (lines.count + 1) / 2
+            return (lines[..<half].joined(separator: "\n"), lines[half...].joined(separator: "\n"))
+        }
+        let middle = text.count / 2
+        let spaces = text.indices.filter { text[$0] == " " }
+        guard let split = spaces.min(by: {
+            abs(text.distance(from: text.startIndex, to: $0) - middle) < abs(text.distance(from: text.startIndex, to: $1) - middle)
+        }) else { return (text, "") }
+        return (String(text[..<split]), String(text[text.index(after: split)...]))
+    }
+
+    private func mergeSelectedWithNext() {
+        guard let index = selectedCueIndex, index + 1 < track.cues.count else { return }
+        let next = track.cues[index + 1]
+        edit("Merge Cues") { track in
+            var merged = track.cues[index]
+            merged.end = max(merged.end, next.end)
+            merged.text = [merged.text, next.text].filter { !$0.isEmpty }.joined(separator: "\n")
+            track.cues[index] = merged
+            track.cues.remove(at: index + 1)
+        }
+    }
+
+    /// Adds an empty cue after `id`: two frames after it ends (a common
+    /// minimum gap), two seconds long or up to the next cue.
+    public func addCue(after id: Cue.ID) {
+        guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
+        let gap = MediaTime(frame: 2, rate: frameRate)
+        let start = MediaTime(frame: (track.cues[index].end + gap).firstFrame(at: frameRate), rate: frameRate)
+        let newCueFrames = MediaTime(value: Self.newCueSeconds, timescale: 1).nearestFrame(at: frameRate)
+        var end = start + MediaTime(frame: newCueFrames, rate: frameRate)
+        if index + 1 < track.cues.count, track.cues[index + 1].start > start {
+            end = min(end, track.cues[index + 1].start)
+        }
+        let cue = Cue(start: start, end: end, text: "")
+        edit("Add Cue") { track in
+            track.cues.insert(cue, at: index + 1)
+        }
+        selectedCueID = cue.id
+        textFocusRequest += 1
+    }
+
+    /// Shows a cue at the top or bottom of the picture.
+    public func setPosition(_ position: CuePosition, forCue id: Cue.ID) {
+        guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
+        edit(position == .top ? "Show Cue at Top" : "Show Cue at Bottom") { track in
+            track.cues[index].position = position
+        }
+    }
 
     private func deleteSelectedCue() {
         guard let index = selectedCueIndex else { return }
@@ -520,7 +703,10 @@ public final class EditorState {
         var withoutPosition = status
         withoutPosition.position = self.status.position
         if withoutPosition != self.status { self.status = status }
-        if status.position != position { position = status.position }
+        if status.position != position {
+            position = status.position
+            updateCurrentCue()
+        }
         let atStart = !status.hasMedia || status.position.nearestFrame(at: frameRate) <= 0
         if atStart != isAtStart { isAtStart = atStart }
         if status.audioTracks != audioTracks { audioTracks = status.audioTracks }
@@ -702,6 +888,12 @@ public final class EditorState {
             task.cancel()
         }
     }
+}
+
+/// A request for the timeline to scroll; `serial` makes repeated requests distinct.
+public struct TimelineScrollRequest: Equatable, Sendable {
+    public var centerSeconds: Double
+    public var serial: Int
 }
 
 /// How far a running analysis job has got.

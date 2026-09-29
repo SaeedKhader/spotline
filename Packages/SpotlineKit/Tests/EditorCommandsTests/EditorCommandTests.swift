@@ -20,7 +20,9 @@ struct EditorCommandTests {
     @Test func typingKeysConflictWithTextEditing() {
         #expect(EditorCommand.setIn.defaultShortcut!.conflictsWithTextEditing)
         #expect(EditorCommand.togglePlay.defaultShortcut!.conflictsWithTextEditing)
-        #expect(EditorCommand.nextCue.defaultShortcut!.conflictsWithTextEditing)
+        #expect(!EditorCommand.nextCue.defaultShortcut!.conflictsWithTextEditing, "Moves between cues while typing")
+        #expect(EditorCommand.shuttleForward.defaultShortcut!.conflictsWithTextEditing)
+        #expect(EditorCommand.goToStart.defaultShortcut!.conflictsWithTextEditing)
         #expect(EditorCommand.deleteCue.defaultShortcut!.conflictsWithTextEditing)
         #expect(!EditorCommand.undo.defaultShortcut!.conflictsWithTextEditing)
         #expect(!EditorCommand.addCue.defaultShortcut!.conflictsWithTextEditing)
