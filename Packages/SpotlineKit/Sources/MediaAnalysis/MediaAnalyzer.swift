@@ -86,6 +86,16 @@ public enum MediaAnalyzer {
         }
     }
 
+    /// The video's frame rate, nil for a file without video.
+    public static func frameRate(of url: URL) throws -> FrameRate? {
+        let file = try MediaFile(url)
+        let index = av_find_best_stream(file.format, AVMEDIA_TYPE_VIDEO, -1, -1, nil, 0)
+        guard index >= 0, let stream = file.streams[Int(index)] else { return nil }
+        let rate = stream.pointee.avg_frame_rate
+        guard rate.num > 0, rate.den > 0 else { return nil }
+        return FrameRate(approximately: Double(rate.num) / Double(rate.den))
+    }
+
     /// Both jobs, one after the other. A file without audio or video gives
     /// an empty result for that part.
     public static func analyze(_ url: URL, options: Options = Options()) throws -> MediaAnalysis {

@@ -16,6 +16,8 @@ let package = Package(
         .library(name: "MPVPlayer", targets: ["MPVPlayer"]),
         .library(name: "MediaAnalysis", targets: ["MediaAnalysis"]),
         .library(name: "EditorUI", targets: ["EditorUI"]),
+        .library(name: "AIQuality", targets: ["AIQuality"]),
+        .executable(name: "spotline-bench", targets: ["SpotlineBench"]),
     ],
     targets: [
         // Pure model: time, frame rates, timecode, cues. No AppKit, no mpv.
@@ -49,6 +51,13 @@ let package = Package(
         // AI tools: transcription, translation, cleanup and speaker/addressee detection, on-device
         // (Apple Speech, Translation, sound analysis) or cloud (OpenAI transcription, Claude): fills cues directly, proposes rewrites for review.
         .target(name: "AITools", dependencies: ["SubtitleCore", "SubtitleTranslation", "MediaAnalysis", "QualityControl"]),
+        // Scores AI output against reference subtitles: word error rate, timing, segmentation, chrF, addressee forms.
+        .target(name: "AIQuality", dependencies: ["SubtitleCore", "SubtitleTranslation", "QualityControl"]),
+        // `swift run spotline-bench <samples>`: runs transcription and translation on clips with real subtitles and scores them.
+        .executableTarget(
+            name: "SpotlineBench",
+            dependencies: ["AIQuality", "AITools", "MediaAnalysis", "QualityControl", "SubtitleCore", "SubtitleFormats", "SubtitleTranslation"]
+        ),
         .target(
             name: "EditorUI",
             dependencies: [
@@ -65,6 +74,7 @@ let package = Package(
         .testTarget(name: "QualityControlTests", dependencies: ["QualityControl"]),
         .testTarget(name: "SubtitleTranslationTests", dependencies: ["SubtitleTranslation"]),
         .testTarget(name: "AIToolsTests", dependencies: ["AITools", "MediaAnalysis"]),
+        .testTarget(name: "AIQualityTests", dependencies: ["AIQuality", "QualityControl"]),
         .testTarget(name: "EditorCommandsTests", dependencies: ["EditorCommands"]),
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore"]),
         .testTarget(name: "MPVPlayerTests", dependencies: ["MPVPlayer"]),

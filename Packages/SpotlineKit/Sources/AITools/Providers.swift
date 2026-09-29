@@ -6,12 +6,19 @@ import SubtitleCore
 public protocol Transcriber: Sendable {
     /// "Apple Speech (on this Mac)".
     var name: String { get }
+    /// Seconds by which the model's word start times come before the voice,
+    /// corrected by `TranscriptionPipeline`. Measured with `spotline-bench`.
+    var wordStartLead: Double { get }
     /// `language` is a BCP 47 code, nil to let the provider detect it. `progress` gets 0 to 1.
     /// `found` gets words as they are heard, in time order, so cues can be shown before the end.
     func transcribe(
         _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord]
+}
+
+extension Transcriber {
+    public var wordStartLead: Double { 0 }
 }
 
 /// Translates cues with their context: neighbouring lines, glossary, memory and who speaks to whom.

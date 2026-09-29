@@ -146,14 +146,14 @@ public struct CueSegmenter: Sendable {
 /// (only then is it complete); each keeps its ID as more words arrive, so a
 /// cue accepted early is not proposed again. Safe to call from any thread.
 public final class TranscriptAccumulator: @unchecked Sendable {
-    private let segmenter: CueSegmenter
+    private let pipeline: TranscriptionPipeline
     private let lock = NSLock()
     private var words: [TranscribedWord] = []
     /// IDs by start frame, kept between calls.
     private var ids: [Int64: Cue.ID] = [:]
 
-    public init(segmenter: CueSegmenter) {
-        self.segmenter = segmenter
+    public init(pipeline: TranscriptionPipeline) {
+        self.pipeline = pipeline
     }
 
     /// Adds words (in time order) and returns the cues complete so far.
@@ -161,7 +161,7 @@ public final class TranscriptAccumulator: @unchecked Sendable {
         lock.withLock {
             words += new
             words.sort { $0.start < $1.start }
-            return identified(Array(segmenter.cues(from: words).dropLast()))
+            return identified(Array(pipeline.cues(from: words).dropLast()))
         }
     }
 
@@ -169,13 +169,13 @@ public final class TranscriptAccumulator: @unchecked Sendable {
     public func finish(with all: [TranscribedWord]? = nil) -> [Cue] {
         lock.withLock {
             if let all { words = all.sorted { $0.start < $1.start } }
-            return identified(segmenter.cues(from: words))
+            return identified(pipeline.cues(from: words))
         }
     }
 
     private func identified(_ cues: [Cue]) -> [Cue] {
         cues.map { cue in
-            let frame = cue.start.firstFrame(at: segmenter.frameRate)
+            let frame = cue.start.firstFrame(at: pipeline.segmenter.frameRate)
             let id = ids[frame] ?? cue.id
             ids[frame] = id
             return Cue(id: id, start: cue.start, end: cue.end, text: cue.text)

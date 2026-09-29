@@ -26,7 +26,7 @@ public enum MatchText {
     }
 
     /// Whether `term` occurs in `text` as whole words. Both are normalized.
-    static func contains(_ text: String, term: String) -> Bool {
+    public static func contains(_ text: String, term: String) -> Bool {
         guard !term.isEmpty else { return false }
         var searchRange = text.startIndex..<text.endIndex
         while let range = text.range(of: term, range: searchRange) {
