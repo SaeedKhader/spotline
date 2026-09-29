@@ -42,6 +42,10 @@ extension EditorCommand {
         id: "file.importSubtitles", title: "Import Subtitles…", category: .file,
         defaultShortcut: KeyShortcut(.character("o"), modifiers: [.command, .shift])
     )
+    /// Offers the subtitle tracks muxed into the open media for import.
+    public static let importEmbeddedSubtitles = EditorCommand(
+        id: "file.importEmbeddedSubtitles", title: "Import Embedded Subtitles…", category: .file
+    )
     public static let exportSubtitles = EditorCommand(
         id: "file.exportSubtitles", title: "Export Subtitles…", category: .file,
         defaultShortcut: KeyShortcut(.character("e"), modifiers: [.command, .shift])
@@ -171,7 +175,7 @@ extension EditorCommand {
 
     /// Every command the app knows, in menu order.
     public static let all: [EditorCommand] = [
-        openMedia, importSubtitles, exportSubtitles,
+        openMedia, importSubtitles, importEmbeddedSubtitles, exportSubtitles,
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
         previousCue, nextCue, previousShotChange, nextShotChange,

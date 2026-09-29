@@ -52,6 +52,8 @@ targets:
         buildPhase: resources
       - path: Fixtures/styled-23.976.ass
         buildPhase: resources
+      - path: Fixtures/embedded-subs.mkv
+        buildPhase: resources
     dependencies:
       - target: Spotline
       - package: SpotlineKit

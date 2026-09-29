@@ -199,6 +199,11 @@ Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
 - **Issues panel:** under the cue list (a split, closed by default), one row per issue in cue order with severity, cue number, start and message; clicking selects the cue. The footer gained the panel toggle and the preset's name (its tooltip explains the limits). Cue-row icons and the mini-map show errors in red and warnings in orange.
 - The video shows a top cue and a bottom cue at the same time (a sign over dialogue); the top one's accessibility ID is `video.subtitle.top`.
 
+### Embedded subtitle tracks
+- **mpv never renders subtitles** (`sid=no`, `sub-auto=no`): the only text over the picture is Spotline's cue overlay, so a file's own tracks can't be mistaken for the cues being edited.
+- **Import on open.** When media opens, `MediaAnalyzer.subtitleTracks(in:)` lists its subtitle streams (codec, language, title, default/forced/SDH, text or image). The first time a file with any opens (remembered per path in user defaults; every time in UI tests), a sheet offers them: the default text track is preselected, image-based tracks (PGS, VobSub, DVB) are listed but disabled with the reason, and "Also save a copy" asks where to save the result (suggesting `<video>.<lang>.<ext>` next to the video). File › Import Embedded Subtitles… reopens the sheet later.
+- **Reading.** `MediaAnalyzer.subtitles(in:streamIndex:)` demuxes one stream with FFmpeg, timed from the container's start time like mpv's clock. SubRip and WebVTT packets are cue text kept as written; ASS keeps its header (styles, `[Script Info]`) via `SubtitleTrack(assHeader:events:)`; other text codecs (MP4 timed text) go through FFmpeg's decoder to ASS events and become plain cues. Import is one undoable edit, like importing a file; the cues then have no file until exported.
+
 ## 7. Pro workflow features (backlog, roughly in order)
 
 - J/K/L shuttle, frame step, set in/out at playhead, "snap to shot change", nudge by frame, split/merge cues, ripple.
