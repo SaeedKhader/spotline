@@ -27,8 +27,8 @@ struct SpotlineBench {
           --only NAME            only samples whose name contains NAME
           --source CODE          spoken language and reference source subtitles (default: en)
           --target CODE          translation language and reference (default: ar)
-          --transcriber NAME     apple (default) or whisper (needs OPENAI_API_KEY)
-          --translator NAME      apple (default) or claude (needs ANTHROPIC_API_KEY)
+          --transcriber NAME     apple (default), whisper or scribe (keys from Settings › AI, else OPENAI_API_KEY, ELEVENLABS_API_KEY)
+          --translator NAME      apple (default) or claude (key from Settings › AI, else ANTHROPIC_API_KEY)
           --preset ID            QC preset: netflix (default), netflixChildren, broadcast, basic
           --skip-translation     transcription only
           --fresh                ignore cached model results
@@ -249,8 +249,11 @@ struct Benchmark {
                 return allow
             }
         case "whisper":
-            guard let key = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] else { throw AIError.missingAPIKey(provider: "OpenAI") }
+            guard let key = Self.apiKey(.openAI, environment: "OPENAI_API_KEY") else { throw AIError.missingAPIKey(provider: "OpenAI") }
             return OpenAITranscriber(apiKey: key)
+        case "scribe":
+            guard let key = Self.apiKey(.elevenLabs, environment: "ELEVENLABS_API_KEY") else { throw AIError.missingAPIKey(provider: "ElevenLabs") }
+            return ElevenLabsTranscriber(apiKey: key)
         default:
             throw Options.Error(message: "No transcriber \(options.transcriber).")
         }
@@ -260,11 +263,17 @@ struct Benchmark {
         switch options.translator {
         case "apple": return AppleTranslator()
         case "claude":
-            guard let key = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"] else { throw AIError.missingAPIKey(provider: "Anthropic") }
+            guard let key = Self.apiKey(.anthropic, environment: "ANTHROPIC_API_KEY") else { throw AIError.missingAPIKey(provider: "Anthropic") }
             return ClaudeTranslator(apiKey: key)
         default:
             throw Options.Error(message: "No translator \(options.translator).")
         }
+    }
+
+    /// The key the app keeps in the Keychain (Settings › AI), else the environment variable.
+    static func apiKey(_ provider: APIKeyStore.Provider, environment: String) -> String? {
+        APIKeyStore(service: "io.github.saeedkhader.spotline.ai").key(for: provider)
+            ?? ProcessInfo.processInfo.environment[environment]
     }
 
     static func cacheKey(_ name: String) -> String {

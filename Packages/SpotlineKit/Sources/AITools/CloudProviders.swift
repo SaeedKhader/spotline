@@ -25,13 +25,14 @@ struct HTTPClient: Sendable {
         throw AIError.provider("The request failed.")
     }
 
-    /// The provider's error message ({"error": {"message": …}}), else the status.
+    /// The provider's error message ({"error": {"message": …}}, ElevenLabs'
+    /// {"detail": {"message": …}}), else the status.
     static func message(from data: Data, status: Int) -> String {
-        struct Envelope: Decodable {
-            struct Body: Decodable { var message: String }
-            var error: Body
-        }
+        struct Body: Decodable { var message: String }
+        struct Envelope: Decodable { var error: Body }
+        struct Detail: Decodable { var detail: Body }
         if let envelope = try? JSONDecoder().decode(Envelope.self, from: data) { return envelope.error.message }
+        if let detail = try? JSONDecoder().decode(Detail.self, from: data) { return detail.detail.message }
         return "The provider answered with status \(status)."
     }
 }
@@ -138,6 +139,84 @@ public struct OpenAITranscriber: Transcriber {
 
     private static func letters(_ text: String) -> String {
         String(text.lowercased().filter { $0.isLetter || $0.isNumber })
+    }
+}
+
+// MARK: - ElevenLabs Scribe
+
+/// Cloud transcription with ElevenLabs Scribe (word timestamps). The dialogue
+/// goes up in one piece as Ogg Opus, silence between chunks kept, so the model
+/// hears the whole scene and its times are media times.
+public struct ElevenLabsTranscriber: Transcriber {
+    public var name: String { "ElevenLabs Scribe (cloud)" }
+    public static let model = "scribe_v2"
+    let apiKey: String
+    let http: HTTPClient
+    var endpoint = URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!
+
+    public init(apiKey: String, session: URLSession = .shared) {
+        self.apiKey = apiKey
+        http = HTTPClient(session: session)
+    }
+
+    public func transcribe(
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([TranscribedWord]) -> Void
+    ) async throws -> [TranscribedWord] {
+        let encoded = try OpusEncoder.oggOpus(Self.samples(of: audio))
+        progress(0.1)
+        let boundary = "spotline-\(UUID().uuidString)"
+        var form = MultipartForm(boundary: boundary)
+        form.add(name: "model_id", value: Self.model)
+        form.add(name: "timestamps_granularity", value: "word")
+        form.add(name: "tag_audio_events", value: "false")
+        if let language { form.add(name: "language_code", value: Languages.base(language)) }
+        form.add(name: "file", filename: "dialogue.ogg", contentType: "audio/ogg", data: encoded)
+        var request = URLRequest(url: endpoint, timeoutInterval: 1800)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = form.finish()
+        let words = try Self.words(from: await http.send(request))
+        found(words)
+        progress(1)
+        return words
+    }
+
+    /// The chunks on one timeline from zero, with silence where there was no speech.
+    static func samples(of audio: PreparedAudio) -> [Float] {
+        let rate = Int64(PreparedAudio.sampleRate)
+        func offset(_ time: MediaTime) -> Int { Int(time.value * rate / time.timescale) }
+        let count = max(offset(audio.duration), audio.chunks.map { offset($0.start) + $0.samples.count }.max() ?? 0)
+        var samples = [Float](repeating: 0, count: count)
+        for chunk in audio.chunks {
+            let start = offset(chunk.start)
+            samples.replaceSubrange(start..<(start + chunk.samples.count), with: chunk.samples)
+        }
+        return samples
+    }
+
+    struct Response: Decodable {
+        struct Word: Decodable {
+            var text: String
+            var type: String
+            var start: Double?
+            var end: Double?
+        }
+
+        var words: [Word]
+    }
+
+    /// Words only (not spacing or sound events), with the punctuation Scribe attaches to them.
+    static func words(from data: Data) throws -> [TranscribedWord] {
+        try JSONDecoder().decode(Response.self, from: data).words.compactMap { word in
+            let text = word.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard word.type == "word", !text.isEmpty, let start = word.start else { return nil }
+            let begin = MediaTime(value: Int64((start * 1000).rounded()), timescale: 1000)
+            let end = MediaTime(value: Int64(((word.end ?? start) * 1000).rounded()), timescale: 1000)
+            return TranscribedWord(text: text, start: begin, end: max(end, begin))
+        }
+        .sorted { $0.start < $1.start }
     }
 }
 

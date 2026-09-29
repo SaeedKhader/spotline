@@ -1,4 +1,5 @@
 import Foundation
+import MediaAnalysis
 import QualityControl
 import SubtitleCore
 import Testing
@@ -104,5 +105,34 @@ struct TranslationFixUpTests {
         // Not in the source, or already agreed: left alone.
         #expect(enforcer.apply(to: "بذور ميجا", source: "Seeds") == "بذور ميجا")
         #expect(enforcer.apply(to: "بذور ضخمة", source: "Mega seeds") == "بذور ضخمة")
+    }
+}
+
+struct ElevenLabsTests {
+    @Test func scribeWordsKeepPunctuationAndSkipSpacingAndEvents() throws {
+        let json = """
+            {"language_code": "en", "text": "Morty, come on.", "words": [
+              {"text": "Morty,", "type": "word", "start": 3.12, "end": 3.5},
+              {"text": " ", "type": "spacing", "start": 3.5, "end": 3.52},
+              {"text": "(laughs)", "type": "audio_event", "start": 3.52, "end": 3.9},
+              {"text": "come", "type": "word", "start": 3.9, "end": 4.1},
+              {"text": "on.", "type": "word", "start": 4.1, "end": 4.3}
+            ]}
+            """
+        let words = try ElevenLabsTranscriber.words(from: Data(json.utf8))
+        #expect(words.map(\.text) == ["Morty,", "come", "on."])
+        #expect(words[0].start == MediaTime(value: 3120, timescale: 1000))
+    }
+
+    @Test func chunksGoOnOneTimelineWithSilenceBetween() {
+        let audio = PreparedAudio(
+            source: .mix, audioStreamIndex: 0, duration: MediaTime(value: 3, timescale: 1),
+            chunks: [AudioChunk(id: 0, start: MediaTime(value: 1, timescale: 1), samples: [Float](repeating: 0.5, count: 16_000))]
+        )
+        let samples = ElevenLabsTranscriber.samples(of: audio)
+        #expect(samples.count == 48_000)
+        #expect(samples[15_999] == 0)
+        #expect(samples[16_000] == 0.5)
+        #expect(samples[32_000] == 0)
     }
 }

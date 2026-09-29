@@ -39,6 +39,10 @@ public struct AIProviderFactory {
                     guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                     guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
                     return OpenAITranscriber(apiKey: key)
+                case .elevenLabsScribe:
+                    guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
+                    guard let key = keys.key(for: .elevenLabs) else { throw AIError.missingAPIKey(provider: "ElevenLabs") }
+                    return ElevenLabsTranscriber(apiKey: key)
                 }
             },
             translator: { settings in

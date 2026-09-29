@@ -9,13 +9,16 @@ public struct AISettings: Sendable, Equatable {
         case appleSpeech
         /// OpenAI's Whisper API, sent as Opus audio.
         case openAIWhisper
+        /// ElevenLabs Scribe, sent as Opus audio.
+        case elevenLabsScribe
 
         public var id: String { rawValue }
-        public var isCloud: Bool { self == .openAIWhisper }
+        public var isCloud: Bool { self != .appleSpeech }
         public var title: String {
             switch self {
             case .appleSpeech: "On this Mac (Apple Speech)"
             case .openAIWhisper: "OpenAI Whisper (cloud)"
+            case .elevenLabsScribe: "ElevenLabs Scribe (cloud)"
             }
         }
     }
@@ -74,11 +77,13 @@ public struct APIKeyStore: Sendable {
     public enum Provider: String, Sendable, CaseIterable {
         case openAI
         case anthropic
+        case elevenLabs
 
         public var displayName: String {
             switch self {
             case .openAI: "OpenAI"
             case .anthropic: "Anthropic"
+            case .elevenLabs: "ElevenLabs"
             }
         }
     }
