@@ -92,8 +92,42 @@ struct MPVPlayerTests {
             player.handle.string("track-list/\($0)/type") == "sub"
         }
         #expect(subtitleTracks.count == 4)
-        #expect(player.handle.string("sid") == "no")
-        #expect(player.handle.string("current-tracks/sub/id") == nil)
+        expectNoSubtitles(player)
+    }
+
+    @Test func neverLoadsSubtitleFilesNextToTheMediaOrShowsSubtitlesAfterReopening() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "MPVPlayerTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let media = directory.appending(path: "movie.mkv")
+        try FileManager.default.copyItem(at: Self.fixtures.appending(path: "embedded-subs.mkv"), to: media)
+        for name in ["movie.srt", "movie.en.srt"] {
+            try FileManager.default.copyItem(at: Self.fixtures.appending(path: "testsrc-23.976.srt"), to: directory.appending(path: name))
+        }
+        let player = try await makeLoadedPlayer(Self.fixture)
+        player.load(media)
+        try await waitUntil(player) { $0.mediaURL == media && $0.frameRate != nil }
+        #expect(subtitleTrackCount(player) == 4, "Only the file's own tracks, no external files")
+        expectNoSubtitles(player)
+        player.step(by: 30)
+        try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) == 30 }
+        player.load(media)
+        try await waitUntil(player) { $0.mediaURL == media && $0.position.nearestFrame(at: .fps23_976) == 0 }
+        expectNoSubtitles(player)
+    }
+
+    func subtitleTrackCount(_ player: MPVPlayer) -> Int {
+        (0..<(player.handle.string("track-list/count").flatMap(Int.init) ?? 0)).filter {
+            player.handle.string("track-list/\($0)/type") == "sub"
+        }.count
+    }
+
+    func expectNoSubtitles(_ player: MPVPlayer, sourceLocation: SourceLocation = #_sourceLocation) {
+        #expect(player.handle.string("sid") == "no", sourceLocation: sourceLocation)
+        #expect(player.handle.string("secondary-sid") == "no", sourceLocation: sourceLocation)
+        #expect(player.handle.string("current-tracks/sub/id") == nil, sourceLocation: sourceLocation)
+        #expect(player.handle.string("sub-visibility") == "no", sourceLocation: sourceLocation)
+        #expect(player.handle.string("osd-level") == "0", sourceLocation: sourceLocation)
     }
 
     @Test func playsBackward() async throws {
