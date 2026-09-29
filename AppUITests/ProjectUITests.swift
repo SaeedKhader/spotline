@@ -1,8 +1,8 @@
 import SpotlineAccessibility
 import XCTest
 
-/// Projects (`.spotline` packages): reopening one shows its cues and video, and
-/// one whose video is gone still opens its cues.
+/// Projects (`.spotline` packages): reopening one shows its cues and video (and
+/// lists it in File › Open Recent), and one whose video is gone still opens its cues.
 final class ProjectUITests: XCTestCase {
     /// Writes a small project package: two cues, and a video at `mediaPath`.
     private func writeProject(named name: String, mediaPath: String) throws -> URL {
@@ -58,6 +58,21 @@ final class ProjectUITests: XCTestCase {
         waitForValue(of: app.staticTexts[AccessibilityID.Transport.frameRate], toEqual: "23.976 fps")
         // "Pilot", or "Pilot.spotline" where the Finder shows every extension.
         XCTAssertTrue(app.windows.matching(NSPredicate(format: "title BEGINSWITH 'Pilot'")).firstMatch.exists, "The window is named after the project")
+    }
+
+    @MainActor
+    func testOpenedProjectIsInOpenRecent() throws {
+        let fixture = try XCTUnwrap(Bundle(for: ProjectUITests.self).url(forResource: "testsrc-23.976.mp4", withExtension: nil))
+        let name = "Recent \(UUID().uuidString.prefix(8))"
+        let app = launch(project: try writeProject(named: name, mediaPath: fixture.path))
+        XCTAssertTrue(app.cueCells(.text).firstMatch.waitForExistence(timeout: 10), "No cue rows")
+        let file = app.menuBars.menuBarItems["File"]
+        file.click()
+        let openRecent = file.menus.menuItems["Open Recent"]
+        XCTAssertTrue(openRecent.waitForExistence(timeout: 5))
+        openRecent.click()
+        XCTAssertTrue(openRecent.menus.menuItems[name].waitForExistence(timeout: 5), "The project is listed in File › Open Recent")
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     @MainActor
