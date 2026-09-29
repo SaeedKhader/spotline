@@ -103,7 +103,8 @@ public final class EditorState {
         @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void) async throws -> [MediaTime] =
         EditorState.shotChangeAnalyzer(cache: .standard)
 
-    /// The subtitle tracks muxed into the open media, once read.
+    /// The text subtitle tracks muxed into the open media, once read. Image-based
+    /// tracks (PGS, VobSub) are left out: they cannot be imported.
     public private(set) var embeddedSubtitles: [EmbeddedSubtitleTrack] = []
     /// Whether the sheet offering to import one of `embeddedSubtitles` is shown.
     public private(set) var isEmbeddedSubtitlesSheetShown = false
@@ -874,7 +875,7 @@ public final class EditorState {
 
     // MARK: - Embedded subtitles
 
-    /// Lists the new media's subtitle tracks, and offers them the first time a file opens.
+    /// Lists the new media's text subtitle tracks, and offers them the first time a file opens.
     private func findEmbeddedSubtitles() {
         embeddedSubtitlesTask?.cancel()
         embeddedSubtitles = []
@@ -883,7 +884,7 @@ public final class EditorState {
         guard let url = status.mediaURL else { return }
         let list = listEmbeddedSubtitles
         embeddedSubtitlesTask = Task { [weak self] in
-            let tracks = (try? await list(url)) ?? []
+            let tracks = ((try? await list(url)) ?? []).filter(\.isText)
             guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
             self.embeddedSubtitles = tracks
             if !tracks.isEmpty, self.markEmbeddedSubtitlesOffered(for: url) { self.isEmbeddedSubtitlesSheetShown = true }

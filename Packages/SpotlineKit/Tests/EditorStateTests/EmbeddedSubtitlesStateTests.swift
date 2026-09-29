@@ -45,7 +45,7 @@ struct EmbeddedSubtitlesStateTests {
         editor.open(media)
         await settle { editor.isEmbeddedSubtitlesSheetShown }
         #expect(editor.isEmbeddedSubtitlesSheetShown)
-        #expect(editor.embeddedSubtitles == Self.tracks)
+        #expect(editor.embeddedSubtitles == [Self.tracks[0]], "Image-based tracks are left out")
         #expect(editor.canPerform(.importEmbeddedSubtitles))
     }
 
@@ -89,6 +89,14 @@ struct EmbeddedSubtitlesStateTests {
         #expect(editor.subtitleFile == nil)
         editor.perform(.undo)
         #expect(editor.track.cues.map(\.text) == ["Mine"])
+    }
+
+    @Test func mediaWithOnlyImageTracksOffersNothing() async {
+        let editor = makeEditor(tracks: [Self.tracks[1]])
+        editor.open(media)
+        for _ in 0..<50 { await Task.yield() }
+        #expect(!editor.isEmbeddedSubtitlesSheetShown)
+        #expect(!editor.canPerform(.importEmbeddedSubtitles))
     }
 
     @Test func imageTracksCannotBeImported() async {

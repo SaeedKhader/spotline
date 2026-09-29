@@ -8,15 +8,14 @@ final class EmbeddedSubtitlesUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    /// embedded-subs.mkv: SubRip (default, stream 2), ASS (3), PGS (4, image-based) and French WebVTT (5).
+    /// embedded-subs.mkv: SubRip (default, stream 2), ASS (3), PGS (4, image-based, not offered) and French WebVTT (5).
     @MainActor
     func testOffersTheTracksAndImportsTheChosenOne() throws {
         let app = launchApp(media: "embedded-subs.mkv")
         let subRip = app.buttons[AccessibilityID.EmbeddedSubtitles.track(2)]
         XCTAssertTrue(subRip.waitForExistence(timeout: 10), "No offer to import. Hierarchy:\n\(app.debugDescription)")
         XCTAssertTrue(subRip.isSelected, "The default text track is chosen")
-        XCTAssertFalse(app.buttons[AccessibilityID.EmbeddedSubtitles.track(4)].exists, "PGS cannot be imported as text")
-        XCTAssertTrue(app.descendants(matching: .any)[AccessibilityID.EmbeddedSubtitles.imageTracks].exists)
+        XCTAssertFalse(app.buttons[AccessibilityID.EmbeddedSubtitles.track(4)].exists, "PGS cannot be imported, so it is hidden")
 
         app.buttons[AccessibilityID.EmbeddedSubtitles.track(5)].click()
         app.buttons[AccessibilityID.EmbeddedSubtitles.importButton].click()
