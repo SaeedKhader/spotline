@@ -149,6 +149,9 @@ public struct OpenAITranscriber: Transcriber {
 /// hears the whole scene and its times are media times.
 public struct ElevenLabsTranscriber: Transcriber {
     public var name: String { "ElevenLabs Scribe (cloud)" }
+    /// Its word times start a little late: measured with `spotline-bench` on
+    /// synthesized speech with exact onsets (0.07 s) and two TV episodes (0.1 s).
+    public var wordStartLead: Double { -0.05 }
     public static let model = "scribe_v2"
     let apiKey: String
     let http: HTTPClient
