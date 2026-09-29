@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.title = editor.subtitleFile?.url.lastPathComponent ?? "Spotline"
             window.representedURL = editor.subtitleFile?.url
             window.isDocumentEdited = editor.hasUnsavedChanges
+            window.subtitle = editor.sourceFile.map { "Translating from \($0.url.lastPathComponent)" } ?? ""
         } onChange: { [weak self, weak window] in
             Task { @MainActor in
                 guard let self, let window else { return }

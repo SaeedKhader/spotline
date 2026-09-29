@@ -2,11 +2,31 @@ import Foundation
 
 /// Source and target pairs already translated, suggested again when the same
 /// or a similar line comes up (in this file, the next episode or a sequel).
+///
+/// Sources are normalized once (see `MatchText`), so looking up a line compares
+/// it against every entry without re-reading them.
 public struct TranslationMemory: Hashable, Sendable, Codable {
     public private(set) var entries: [Entry]
+    /// Each entry's normalized source and its words, in step with `entries`.
+    private var keys: [String]
+    private var words: [[Substring]]
 
     public init(entries: [Entry] = []) {
         self.entries = entries
+        keys = entries.map { MatchText.normalize($0.source) }
+        words = keys.map(MatchText.words)
+    }
+
+    private enum CodingKeys: String, CodingKey { case entries }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(entries: try container.decode([Entry].self, forKey: .entries))
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(entries, forKey: .entries)
     }
 
     public struct Entry: Hashable, Sendable, Codable {
@@ -36,15 +56,21 @@ public struct TranslationMemory: Hashable, Sendable, Codable {
     public static let fuzzyThreshold = 0.7
 
     /// Remembers a translation. A pair whose source is already stored replaces it.
-    /// Empty sources or targets are ignored.
-    public mutating func record(source: String, target: String, at date: Date = Date()) {
+    /// Empty sources or targets are ignored. Returns whether anything changed.
+    @discardableResult
+    public mutating func record(source: String, target: String, at date: Date = Date()) -> Bool {
         let key = MatchText.normalize(source)
-        guard !key.isEmpty, !MatchText.normalize(target).isEmpty else { return }
-        if let index = entries.firstIndex(where: { MatchText.normalize($0.source) == key }) {
-            guard entries[index].target != target || entries[index].source != source else { return }
+        guard !key.isEmpty, !MatchText.normalize(target).isEmpty else { return false }
+        if let index = keys.firstIndex(of: key) {
+            guard entries[index].target != target || entries[index].source != source else { return false }
             entries.remove(at: index)
+            keys.remove(at: index)
+            words.remove(at: index)
         }
         entries.append(Entry(source: source, target: target, updated: date))
+        keys.append(key)
+        words.append(MatchText.words(key))
+        return true
     }
 
     /// The best matches for `source`, best first: exact ones, then fuzzy ones
@@ -52,19 +78,18 @@ public struct TranslationMemory: Hashable, Sendable, Codable {
     public func matches(for source: String, limit: Int = 3) -> [Match] {
         let key = MatchText.normalize(source)
         guard !key.isEmpty else { return [] }
-        let words = MatchText.words(key)
+        let sourceWords = MatchText.words(key)
         var found: [Match] = []
-        for entry in entries {
-            let other = MatchText.normalize(entry.source)
-            if other == key {
+        for (index, entry) in entries.enumerated() {
+            if keys[index] == key {
                 found.append(Match(entry: entry, score: 1, isExact: true))
                 continue
             }
-            let otherWords = MatchText.words(other)
+            let otherWords = words[index]
             // Skip pairs whose lengths alone rule out the threshold.
-            let shorter = Double(min(words.count, otherWords.count)), longer = Double(max(words.count, otherWords.count))
+            let shorter = Double(min(sourceWords.count, otherWords.count)), longer = Double(max(sourceWords.count, otherWords.count))
             guard longer > 0, shorter / longer >= Self.fuzzyThreshold else { continue }
-            var score = MatchText.similarity(words, otherWords)
+            var score = MatchText.similarity(sourceWords, otherWords)
             // Same words, different punctuation: nearly exact.
             if score == 1 { score = 0.99 }
             if score >= Self.fuzzyThreshold { found.append(Match(entry: entry, score: score, isExact: false)) }
@@ -75,7 +100,7 @@ public struct TranslationMemory: Hashable, Sendable, Codable {
     /// The exact match for `source`, if any.
     public func exactMatch(for source: String) -> Entry? {
         let key = MatchText.normalize(source)
-        guard !key.isEmpty else { return nil }
-        return entries.last { MatchText.normalize($0.source) == key }
+        guard !key.isEmpty, let index = keys.lastIndex(of: key) else { return nil }
+        return entries[index]
     }
 }

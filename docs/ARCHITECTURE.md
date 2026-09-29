@@ -120,7 +120,7 @@ As built in M2:
 1. SRT, WebVTT (import/export) — M2
 2. ASS/SSA (styles preserved) — M4, done
 3. TTML / IMSC1.1 text profile (Netflix, Apple, Amazon deliveries) — M4, done
-4. EBU STL (binary, broadcast) — M5
+4. EBU STL (binary, broadcast) — M5, done
 5. SCC / 608 captions — later
 
 Round-trip tests for every format live in `SubtitleFormats` with golden files.
@@ -198,6 +198,17 @@ Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
 - **Review menu:** Show Issues (⌥⌘I), Previous/Next Cue with Issues (⌥⌘↑/↓, moved from Cue), Fix Overlaps and Short Gaps (was Fix Overlaps; same command ID), and the QC Preset picker.
 - **Issues panel:** under the cue list (a split, closed by default), one row per issue in cue order with severity, cue number, start and message; clicking selects the cue. The footer gained the panel toggle and the preset's name (its tooltip explains the limits). Cue-row icons and the mini-map show errors in red and warnings in orange.
 - The video shows a top cue and a bottom cue at the same time (a sign over dialogue); the top one's accessibility ID is `video.subtitle.top`.
+
+### As built in M5 (translation)
+- **Translation mode.** Translation › Open Source Subtitles… (⌥⌘O) reads a file as the read-only source; the editor's track is the target. An empty target becomes the source's timing with no text (one undoable edit); cues already there are paired with the source cue they overlap most (same position first). Each target cue links to its source (`Cue.sourceCueID`); splits keep the link. Close Source Subtitles leaves the mode. The window subtitle reads "Translating from <file>", and export suggests `<name>.<target language>.<ext>` beside the source.
+- **Layout.** Each cue row shows the source text (read-only, selectable) beside the target editor, each in its own direction: `TextDirection` comes from the language (Arabic, Hebrew, Persian, Urdu are right to left), else from the text's letters. The list widens in translation mode. No new panels in the main window: the source column, glossary chips and memory suggestions live in the rows.
+- **Languages.** Source and target languages come from the file, else `NLLanguageRecognizer`; a new translation's target is the last one chosen (Arabic by default). Translation › Target Language changes it (undoable; exports carry it).
+- **Glossary** (`Translation.Glossary`): source term, agreed translation, note, per language pair. Terms match whole words ignoring case, accents, Arabic/Hebrew vowel marks, hamza forms, tatweel and ى/ي, ة/ه (`MatchText`). A row shows the terms its source uses, green when the target uses the translation and orange when not. Translation › Show Glossary (⌥⌘G) opens a floating panel to edit terms; Import Glossary… reads CSV or tab-separated files (source, target, note; header optional).
+- **Translation memory** (`Translation.TranslationMemory`): pairs are stored when you leave a translated cue, on export, and with Add All Translations to Memory. The selected row lists up to three suggestions (exact 100%, fuzzy from 70% by word-level edit distance); click one, or Use Best Memory Match (⌃⌘M). Fill Untranslated Cues from Memory fills every empty cue with an exact match in one undoable edit. Copy Source to Target (⌥⌘C) copies names and signs.
+- **Storage.** Until project files exist, glossary and memory live in `~/Library/Application Support/<bundle id>/Translation/<source>-<target>/` (`glossary.json`, `memory.json`). The glossary moves into the project package later; the memory stays shared. UI tests use neither.
+- **QC on the target.** M4's presets, issues panel and Review menu check the target. Translation adds: an empty target whose source has text is "Not translated" (an error), a glossary term whose translation is missing is a warning, and an unsure addressee guess is a warning.
+- **Gender and addressee fields (7b).** `SubtitleTrack.speakers` (`Speaker`: name, gender, confidence, source inferred/confirmed), `Cue.speakerID` and `Cue.addressee` (`AddresseeTag`: male, female, dual, group male/female/mixed, unknown, with confidence and source). No manual tagging UI: M6's AI fills them. A tagged cue shows a ♂/♀/group chip, orange when it is a guess below 75% (`needsReview`), and QC lists those guesses.
+- **EBU STL** (`SubtitleFormats.EBUSTL`): reads and writes the GSI and TTI blocks. `STL25.01` is 25 fps; `STL30.01` is read and written as 29.97 non-drop. Character tables: Latin (ISO 6937, with accents as prefix diacritics), Cyrillic, Arabic, Greek and Hebrew (ISO 8859-5 to -8), chosen on export from the text's script. Italics and underline map to `<i>`/`<u>`; teletext colour, double-height and box codes are dropped on read; rows in the top half make top cues; extension blocks join and long text is split across them; comments and user data are skipped; times are taken from the programme start (TCP), which is kept (`EBU.TCP`) with the title, translator, publisher and country. Written as teletext (DSC 1, 23 rows, 40 characters), centred, bottom lines ending on row 22. Characters the table lacks become "?". A text `.stl` (Spruce STL) is not read.
 
 ## 7. Pro workflow features (backlog, roughly in order)
 

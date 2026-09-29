@@ -27,23 +27,19 @@ public struct Glossary: Hashable, Sendable, Codable {
         public var entry: Entry
         /// True when the target text contains the agreed translation (or it has none).
         public var isUsed: Bool
+
+        public init(entry: Entry, isUsed: Bool) {
+            self.entry = entry
+            self.isUsed = isUsed
+        }
     }
 
     /// The entries whose source term occurs in `source` as whole words (ignoring
     /// case and accents), in source order, and whether `target` uses them.
     public func matches(source: String, target: String) -> [Match] {
-        let source = MatchText.normalize(source)
-        guard !source.isEmpty else { return [] }
-        let target = MatchText.normalize(target)
-        return entries.compactMap { entry -> (Match, String.Index)? in
-            let term = MatchText.normalize(entry.source)
-            guard MatchText.contains(source, term: term), let position = source.range(of: term)?.lowerBound else { return nil }
-            let translation = MatchText.normalize(entry.target)
-            let isUsed = translation.isEmpty || MatchText.contains(target, term: translation)
-            return (Match(entry: entry, isUsed: isUsed), position)
-        }
-        .sorted { $0.1 < $1.1 }
-        .map(\.0)
+        let index = GlossaryIndex(self)
+        let normalizedTarget = MatchText.normalize(target)
+        return index.entries(inSource: source).map { Match(entry: $0, isUsed: index.isUsed($0, inNormalizedTarget: normalizedTarget)) }
     }
 
     /// Entries read from CSV or tab-separated text: source, target and an optional
@@ -106,5 +102,37 @@ public struct Glossary: Hashable, Sendable, Codable {
         }
         fields.append(field)
         return fields
+    }
+}
+
+/// A glossary with its terms normalized once, for checking many cues.
+public struct GlossaryIndex: Sendable {
+    private let terms: [(entry: Glossary.Entry, term: String, translation: String)]
+
+    public init(_ glossary: Glossary) {
+        terms = glossary.entries.map { ($0, MatchText.normalize($0.source), MatchText.normalize($0.target)) }
+    }
+
+    public var isEmpty: Bool { terms.isEmpty }
+
+    /// Entries whose source term occurs in `source` as whole words, in source order.
+    public func entries(inSource source: String) -> [Glossary.Entry] {
+        guard !terms.isEmpty else { return [] }
+        let source = MatchText.normalize(source)
+        guard !source.isEmpty else { return [] }
+        return terms.compactMap { item -> (Glossary.Entry, String.Index)? in
+            guard !item.term.isEmpty, MatchText.contains(source, term: item.term),
+                  let position = source.range(of: item.term)?.lowerBound
+            else { return nil }
+            return (item.entry, position)
+        }
+        .sorted { $0.1 < $1.1 }
+        .map(\.0)
+    }
+
+    /// Whether normalized target text (see `MatchText.normalize`) uses the entry's translation.
+    public func isUsed(_ entry: Glossary.Entry, inNormalizedTarget target: String) -> Bool {
+        let translation = terms.first { $0.entry.id == entry.id }?.translation ?? MatchText.normalize(entry.target)
+        return translation.isEmpty || MatchText.contains(target, term: translation)
     }
 }

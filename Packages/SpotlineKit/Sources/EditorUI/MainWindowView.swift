@@ -17,8 +17,9 @@ public struct MainWindowView: View {
     public var body: some View {
         VSplitView {
             HSplitView {
+                // Translation mode shows source and target side by side.
                 CueEditorList(editor: editor)
-                    .frame(minWidth: 420, idealWidth: 560)
+                    .frame(minWidth: editor.isTranslating ? 640 : 420, idealWidth: editor.isTranslating ? 820 : 560)
                 VideoSurfaceView(editor: editor)
                     .frame(minWidth: 400, minHeight: 240)
             }
@@ -194,6 +195,22 @@ struct QCPresetPicker: View {
         )) {
             ForEach(QCPreset.all) { preset in
                 Text(preset.name).tag(preset.id)
+            }
+        }
+    }
+}
+
+/// Chooses the language the translation is in, in the Translation menu.
+struct TargetLanguagePicker: View {
+    let editor: EditorState
+
+    var body: some View {
+        Picker("Target Language", selection: Binding(
+            get: { editor.track.languageCode },
+            set: { editor.setTargetLanguage($0) }
+        )) {
+            ForEach(editor.targetLanguageChoices, id: \.self) { code in
+                Text(EditorState.languageName(code)).tag(code)
             }
         }
     }

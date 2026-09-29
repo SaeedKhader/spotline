@@ -3,9 +3,15 @@ import QualityControl
 import SpotlineAccessibility
 import SubtitleCore
 import SwiftUI
+import Translation
 
 /// Every cue as an editable row: number, start and end, reading speed and the
 /// text itself. Only rows on screen are built, so long files stay fast.
+///
+/// In translation mode each row shows the source cue's text (read-only, with
+/// its glossary terms) beside the target text, each in its own direction
+/// (Arabic and Hebrew right to left); the selected row lists translation memory
+/// suggestions.
 ///
 /// Click a row to select it (the playhead moves to it); Up and Down select the
 /// previous and next cue, Return edits the text and Esc goes back to the list.
@@ -53,11 +59,14 @@ struct CueEditorList: View {
     }
 
     private var rows: some View {
-        ScrollViewReader { proxy in
+        let directions = TextDirections(
+            source: editor.isTranslating ? editor.sourceDirection : .leftToRight, target: editor.targetDirection
+        )
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(editor.track.cues.enumerated()), id: \.element.id) { index, cue in
-                        CueRow(editor: editor, cue: cue, number: index + 1, focusedText: $focusedText)
+                        CueRow(editor: editor, cue: cue, number: index + 1, directions: directions, focusedText: $focusedText)
                             .id(cue.id)
                             .contentShape(Rectangle())
                             .onTapGesture {
@@ -86,11 +95,22 @@ struct CueEditorList: View {
     }
 }
 
+/// Which way source and target text run.
+private struct TextDirections: Equatable {
+    var source: TextDirection
+    var target: TextDirection
+}
+
+extension TextDirection {
+    var layoutDirection: LayoutDirection { self == .rightToLeft ? .rightToLeft : .leftToRight }
+}
+
 /// One cue: its number, start and end, reading speed, review warnings, text and actions.
 private struct CueRow: View {
     let editor: EditorState
     let cue: Cue
     let number: Int
+    let directions: TextDirections
     var focusedText: FocusState<Cue.ID?>.Binding
     @State private var isHovered = false
 
@@ -112,6 +132,34 @@ private struct CueRow: View {
                 speedAndIssues
             }
             VStack(alignment: .trailing, spacing: 6) {
+                if editor.isTranslating {
+                    HStack(alignment: .top, spacing: 8) {
+                        SourceText(editor: editor, cueID: cue.id, source: editor.sourceCues[cue.id], direction: directions.source)
+                            .frame(maxWidth: .infinity)
+                        textEditor
+                            .frame(maxWidth: .infinity)
+                    }
+                    if isSelected {
+                        MemorySuggestions(editor: editor, cueID: cue.id, direction: directions.target)
+                    }
+                } else {
+                    textEditor
+                }
+                if isHovered || isSelected {
+                    actions
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(rowBackground)
+        .onHover { isHovered = $0 }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AccessibilityID.CueList.row(cue.id))
+    }
+
+    /// The cue's text (the target, in translation mode), typed in its language's direction.
+    private var textEditor: some View {
                 TextEditor(text: Binding(
                     get: { editor.cue(withID: cue.id)?.text ?? "" },
                     set: { editor.setText($0, forCue: cue.id) }
@@ -129,18 +177,8 @@ private struct CueRow: View {
                     focusedText.wrappedValue = nil
                     return .handled
                 }
+                .environment(\.layoutDirection, directions.target.layoutDirection)
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
-                if isHovered || isSelected {
-                    actions
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(rowBackground)
-        .onHover { isHovered = $0 }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(AccessibilityID.CueList.row(cue.id))
     }
 
     private var rowBackground: some View {
@@ -166,6 +204,16 @@ private struct CueRow: View {
                 .help("Reading speed in characters per second")
                 .accessibilityValue("\(speed)")
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .readingSpeed))
+            if let tag = cue.addressee {
+                // Filled in by AI tagging (M6); shown so a guess can be spotted, never entered by hand.
+                Text(tag.addressee.symbol)
+                    .font(.caption)
+                    .foregroundStyle(tag.needsReview ? Color.orange : Color.secondary)
+                    .help("Spoken to: \(tag.addressee.rawValue), \(Int((tag.confidence * 100).rounded()))% sure")
+                    .accessibilityLabel("Addressee")
+                    .accessibilityValue(tag.addressee.rawValue)
+                    .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .addressee))
+            }
             if !issues.isEmpty {
                 let messages = issues.map(\.message).joined(separator: "\n")
                 let severity = issues.map(\.severity).max() ?? .warning
@@ -211,6 +259,104 @@ private struct CueRow: View {
             editor.perform(command)
         }
         .disabled(command == .mergeWithNext && editor.track.cues.last?.id == cue.id)
+    }
+}
+
+/// The source cue's text, read-only and selectable, with the glossary terms it uses.
+private struct SourceText: View {
+    let editor: EditorState
+    let cueID: Cue.ID
+    let source: Cue?
+    let direction: TextDirection
+
+    var body: some View {
+        let text = source.map { SubtitleText.visibleLines(of: $0.text).joined(separator: "\n") } ?? ""
+        VStack(alignment: .leading, spacing: 4) {
+            Text(text.isEmpty ? "No source cue" : text)
+                .font(.system(size: 15))
+                .foregroundStyle(text.isEmpty ? .tertiary : .secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, minHeight: 50, alignment: .topLeading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
+                .help("Source")
+                .accessibilityLabel("Source")
+                .accessibilityValue(text)
+                .accessibilityIdentifier(AccessibilityID.CueList.cell(cueID, .source))
+            let matches = editor.glossaryMatches(for: cueID)
+            if !matches.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(Array(matches.enumerated()), id: \.offset) { index, match in
+                        GlossaryChip(match: match)
+                            .accessibilityIdentifier(AccessibilityID.CueList.glossaryTerm(cueID, index))
+                    }
+                }
+            }
+        }
+        .environment(\.layoutDirection, direction.layoutDirection)
+    }
+}
+
+/// "Winterfell → وينترفيل": green when the translation uses the agreed term, orange when not.
+private struct GlossaryChip: View {
+    let match: Glossary.Match
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: match.isUsed ? "checkmark" : "character.book.closed")
+            Text("\(match.entry.source) → \(match.entry.target)")
+                .lineLimit(1)
+        }
+        .font(.caption)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .foregroundStyle(match.isUsed ? Color.green : Color.orange)
+        .background((match.isUsed ? Color.green : Color.orange).opacity(0.12), in: Capsule())
+        .help(match.entry.note.isEmpty ? "Glossary" : "Glossary: \(match.entry.note)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(match.entry.source)
+        .accessibilityValue("\(match.entry.target)\(match.isUsed ? "" : " (not used)")")
+    }
+}
+
+/// Translation memory suggestions for the selected cue: click one to use it.
+private struct MemorySuggestions: View {
+    let editor: EditorState
+    let cueID: Cue.ID
+    let direction: TextDirection
+
+    var body: some View {
+        let matches = editor.memoryMatches(for: cueID)
+        if !matches.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(matches.enumerated()), id: \.offset) { index, match in
+                    Button {
+                        editor.useMemoryMatch(match, forCue: cueID)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(match.percent)
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(match.isExact ? Color.green : Color.yellow)
+                                .frame(width: 38, alignment: .trailing)
+                            Text(SubtitleText.visibleLines(of: match.entry.target).joined(separator: " / "))
+                                .lineLimit(2)
+                                .environment(\.layoutDirection, direction.layoutDirection)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Use this translation. Memory source: \(match.entry.source)")
+                    .accessibilityLabel("Memory match \(match.percent)")
+                    .accessibilityValue(match.entry.target)
+                    .accessibilityIdentifier(AccessibilityID.CueList.memoryMatch(cueID, index))
+                }
+            }
+            .font(.callout)
+            .padding(6)
+            .background(.background.opacity(0.4), in: RoundedRectangle(cornerRadius: 7))
+        }
     }
 }
 
