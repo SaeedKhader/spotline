@@ -56,17 +56,19 @@ final class TimelineUITests: XCTestCase {
         app.menuBars.menuItems[EditorCommand.toggleSnapping.title].click()
         let cue = app.timelineCueBlocks.element(boundBy: 1)
         XCTAssertTrue(cue.waitForExistence(timeout: 10))
-        // 100 points per second: 20 points is half a second, 12 or 13 frames at 25 fps.
+        // 100 points per second: 25 points is a quarter second, about 6 frames at 25 fps.
+        // (A bigger move would run into "Blue" at 3.2 s, which cues may not overlap.)
         let start = cue.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.click(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: 50, dy: 0)))
+        start.click(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: 25, dy: 0)))
 
-        // "After the cut" started at frame 50; half a second later is frame 62 or 63.
+        // "After the cut" started at frame 50 and keeps its 20-frame duration.
         let inPoint = app.cueCells(.inPoint).element(boundBy: 1)
         let moved = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value IN %@", ["00:00:02:12", "00:00:02:13"]), object: inPoint
+            predicate: NSPredicate(format: "value IN %@", ["00:00:02:05", "00:00:02:06", "00:00:02:07"]), object: inPoint
         )
         XCTAssertEqual(XCTWaiter().wait(for: [moved], timeout: 10), .completed, "In is \(inPoint.value ?? "nil")")
-        XCTAssertEqual(app.cueCells(.duration).element(boundBy: 1).value as? String, "0.800")
+        let outPoint = app.cueCells(.outPoint).element(boundBy: 1).value as? String
+        XCTAssertTrue(["00:00:03:00", "00:00:03:01", "00:00:03:02"].contains(outPoint ?? ""), "Out is \(outPoint ?? "nil")")
     }
 
     /// two-tracks.mkv: an English stereo track (default) and an Arabic 5.1 track.

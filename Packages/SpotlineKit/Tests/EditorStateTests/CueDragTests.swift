@@ -42,6 +42,16 @@ struct CueDragTests {
         #expect(drag.timing(movedBy: 15, snapTargets: [edge], tolerance: f(2)).start == edge)
     }
 
+    @Test func staysInsideItsRoom() {
+        let drag = CueDrag(part: .body, start: f(10), end: f(20), rate: rate, earliestStart: f(5), latestEnd: f(30))
+        #expect(drag.timing(movedBy: 50, snapTargets: [], tolerance: noSnap) == (f(20), f(30)))
+        #expect(drag.timing(movedBy: -50, snapTargets: [], tolerance: noSnap) == (f(5), f(15)))
+        let trimOut = CueDrag(part: .outPoint, start: f(10), end: f(20), rate: rate, latestEnd: f(30))
+        #expect(trimOut.timing(movedBy: 50, snapTargets: [], tolerance: noSnap) == (f(10), f(30)))
+        let trimIn = CueDrag(part: .inPoint, start: f(10), end: f(20), rate: rate, earliestStart: f(5))
+        #expect(trimIn.timing(movedBy: -50, snapTargets: [], tolerance: noSnap) == (f(5), f(20)))
+    }
+
     @Test func movingSnapsEitherEdge() {
         let drag = CueDrag(part: .body, start: f(10), end: f(20), rate: rate)
         // End lands at 31, one frame from the target at 30.

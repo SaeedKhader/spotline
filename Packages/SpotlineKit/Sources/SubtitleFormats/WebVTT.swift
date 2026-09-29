@@ -2,9 +2,9 @@ import SubtitleCore
 
 /// WebVTT (.vtt), per https://www.w3.org/TR/webvtt1/.
 ///
-/// Reads cues and skips NOTE, STYLE and REGION blocks. Cue identifiers and cue
-/// settings (position, line, align) are not kept yet: the cue model gains
-/// positioning in M4. Writing is canonical: a bare `WEBVTT` header and
+/// Reads cues and skips NOTE, STYLE and REGION blocks. A `line` setting in
+/// the upper half becomes the top position; cue identifiers and other
+/// settings (position, align, size) are not kept yet. Writing is canonical: a bare `WEBVTT` header and
 /// `HH:MM:SS.mmm` times.
 enum WebVTT {
     static func parse(_ text: String) throws(SubtitleParseError) -> [Cue] {
@@ -40,7 +40,7 @@ enum WebVTT {
             }
             let (start, end) = try parseTimingLine(block[timingIndex], lineNumber: timingIndex + 1)
             let payload = block[(timingIndex + 1)...].joined(separator: "\n")
-            cues.append(Cue(start: start, end: end, text: payload))
+            cues.append(Cue(start: start, end: end, text: payload, position: position(settings: block[timingIndex])))
         }
         return cues
     }
@@ -52,11 +52,24 @@ enum WebVTT {
             output += formatTimestamp(cue.start, fractionSeparator: ".")
             output += " --> "
             output += formatTimestamp(cue.end, fractionSeparator: ".")
+            if cue.position == .top { output += " line:0" }
             output += "\n"
             // "-->" may not appear in a cue payload.
             for line in payloadLines(cue.text) { output += line.replacing("-->", with: "--&gt;") + "\n" }
         }
         return output
+    }
+
+    /// Top when the `line` setting puts the cue in the upper half: a line
+    /// number counted from the top (0 or more) or a percentage under 50.
+    static func position(settings timingLine: Substring) -> CuePosition {
+        guard let arrow = timingLine.range(of: "-->") else { return .bottom }
+        for setting in timingLine[arrow.upperBound...].split(whereSeparator: \.isWhitespace) where setting.hasPrefix("line:") {
+            let value = setting.dropFirst(5).prefix { $0 != "," }
+            if value.hasSuffix("%"), let percent = Double(value.dropLast()) { return percent < 50 ? .top : .bottom }
+            if let line = Int(value) { return line >= 0 ? .top : .bottom }
+        }
+        return .bottom
     }
 
     /// True when `line` is `keyword` alone or followed by a space or tab.

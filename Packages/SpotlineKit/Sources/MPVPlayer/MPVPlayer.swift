@@ -103,6 +103,20 @@ public final class MPVPlayer: PlaybackEngine {
         handle.command(["seek", String(format: "%.9f", seconds), "absolute+exact"])
     }
 
+    public func play(rate: Double) {
+        guard status.hasMedia, rate != 0 else { return }
+        requestedFrame = nil
+        handle.command(["set", "play-direction", rate < 0 ? "backward" : "forward"])
+        handle.command(["set", "speed", String(abs(rate))])
+        handle.command(["set", "pause", "no"])
+        var next = status
+        next.rate = rate
+        if next != status {
+            status = next
+            onStatusChange?(next)
+        }
+    }
+
     public func step(by frames: Int) {
         guard status.hasMedia, let rate = status.frameRate else { return }
         let current = requestedFrame ?? status.position.nearestFrame(at: rate)

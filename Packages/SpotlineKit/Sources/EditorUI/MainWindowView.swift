@@ -3,7 +3,9 @@ import SpotlineAccessibility
 import SubtitleCore
 import SwiftUI
 
-/// The editor window: video and inspector on top, transport, timeline and cue list below.
+/// The editor window. Top: the cue list (each row edits its cue) on the left
+/// and the video on the right. Bottom: the actions bar, the mini-map of the
+/// whole media and the timeline.
 public struct MainWindowView: View {
     let editor: EditorState
 
@@ -14,25 +16,36 @@ public struct MainWindowView: View {
     public var body: some View {
         VSplitView {
             HSplitView {
+                CueEditorList(editor: editor)
+                    .frame(minWidth: 420, idealWidth: 560)
                 VideoSurfaceView(editor: editor)
-                    .frame(minWidth: 480, minHeight: 270)
-                InspectorView(editor: editor)
-                    .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
+                    .frame(minWidth: 400, minHeight: 240)
             }
+            .frame(minHeight: 280)
             VStack(spacing: 0) {
-                TransportBar(editor: editor)
+                ActionsBar(editor: editor)
                 Divider()
-                TimelineRepresentable(editor: editor, content: editor.timelineContent)
-                    .frame(height: 110)
+                MiniMapView(editor: editor)
+                    .frame(height: 30)
                 Divider()
-                CueListView(editor: editor)
+                TimelineHost(editor: editor)
+                    .frame(minHeight: 90)
             }
-            .frame(minHeight: 240)
+            .frame(minHeight: 170, idealHeight: 220)
         }
-        .frame(minWidth: 960, minHeight: 640)
+        .frame(minWidth: 960, minHeight: 600)
         .transaction { transaction in
             if editor.launchOptions.isUITestMode { transaction.disablesAnimations = true }
         }
+    }
+}
+
+/// The timeline, in its own view so the playhead redraws only it.
+struct TimelineHost: View {
+    let editor: EditorState
+
+    var body: some View {
+        TimelineRepresentable(editor: editor, content: editor.timelineContent)
     }
 }
 
@@ -46,9 +59,7 @@ struct VideoSurfaceView: View {
             if let videoView = editor.playback.videoView() {
                 HostedVideoView(view: videoView)
             }
-            if let cue = editor.cueAtPlayhead {
-                SubtitleOverlay(cue: cue)
-            }
+            SubtitleOverlayHost(editor: editor)
             if !editor.hasMedia {
                 VStack(spacing: 12) {
                     Image(systemName: "film")
@@ -79,38 +90,6 @@ struct HostedVideoView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
-struct TransportBar: View {
-    let editor: EditorState
-
-    var body: some View {
-        HStack(spacing: 12) {
-            CommandButton(command: .stepBackward, systemImage: "backward.frame", editor: editor)
-            CommandButton(
-                command: .togglePlay,
-                systemImage: editor.isPlaying ? "pause.fill" : "play.fill",
-                editor: editor
-            )
-            CommandButton(command: .stepForward, systemImage: "forward.frame", editor: editor)
-            Spacer()
-            AnalysisStatusView(editor: editor)
-            Text(editor.timecode.description)
-                .font(.system(.title3, design: .monospaced))
-                .accessibilityLabel("Timecode")
-                .accessibilityValue(editor.timecode.description)
-                .accessibilityIdentifier(AccessibilityID.Transport.timecode)
-            Text(editor.frameRate.description)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Frame rate")
-                .accessibilityValue(editor.frameRate.description)
-                .accessibilityIdentifier(AccessibilityID.Transport.frameRate)
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(AccessibilityID.Transport.root)
-    }
-}
-
 /// A button that runs an editor command and is findable by its command ID:
 /// a borderless icon when given `systemImage`, else a titled button.
 struct CommandButton: View {
@@ -126,6 +105,7 @@ struct CommandButton: View {
                 } label: {
                     Label(command.title, systemImage: systemImage)
                         .labelStyle(.iconOnly)
+                        .foregroundStyle(editor.isOn(command) == true ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                 }
                 .buttonStyle(.borderless)
             } else {
@@ -138,31 +118,49 @@ struct CommandButton: View {
     }
 }
 
-/// The cue under the playhead, drawn over the bottom of the video.
+/// Shows the cue at the playhead, in its own view so only it redraws as the video plays.
+struct SubtitleOverlayHost: View {
+    let editor: EditorState
+
+    var body: some View {
+        if let cue = editor.cueAtPlayhead {
+            SubtitleOverlay(cue: cue)
+        }
+    }
+}
+
+/// The cue under the playhead as a delivery would show it: white text with a
+/// thin black outline, centered inside the title-safe area (90% of the
+/// picture), at the bottom or top.
 struct SubtitleOverlay: View {
     let cue: Cue
 
     var body: some View {
         let text = SubtitleText.visibleLines(of: cue.text).joined(separator: "\n")
         GeometryReader { geometry in
+            let margin = geometry.size.height * 0.05
             VStack {
-                Spacer()
+                if cue.position == .bottom { Spacer() }
                 if !text.isEmpty {
                     Text(text)
-                        .font(.system(size: max(12, geometry.size.height * 0.05), weight: .medium))
+                        .font(.system(size: max(12, geometry.size.height * 0.055), weight: .medium))
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white)
-                        .shadow(color: .black, radius: 2)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 4))
-                        .padding(.bottom, geometry.size.height * 0.06)
+                        // A one-point outline from four offset shadows, plus a soft drop shadow.
+                        .shadow(color: .black, radius: 0, x: 1, y: 1)
+                        .shadow(color: .black, radius: 0, x: -1, y: -1)
+                        .shadow(color: .black, radius: 0, x: 1, y: -1)
+                        .shadow(color: .black, radius: 0, x: -1, y: 1)
+                        .shadow(color: .black.opacity(0.6), radius: 3)
+                        .padding(.horizontal, geometry.size.width * 0.05)
+                        .padding(cue.position == .bottom ? .bottom : .top, margin)
                         .accessibilityLabel("Subtitle")
                         .accessibilityValue(text)
                         .accessibilityIdentifier(AccessibilityID.Video.subtitle)
                 }
+                if cue.position == .top { Spacer() }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .allowsHitTesting(false)
     }
@@ -229,7 +227,8 @@ extension EditorState {
             speech: isSpeechHighlighted ? speech : nil,
             speechAnalyzedUntil: speechJob?.analyzedUntil,
             analyzedUntil: analyzedUntil,
-            scale: timelineScale
+            scale: timelineScale,
+            scrollRequest: timelineScrollRequest
         )
     }
 }

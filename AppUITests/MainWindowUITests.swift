@@ -8,10 +8,10 @@ final class MainWindowUITests: XCTestCase {
         let app = launchApp()
         for id in [
             AccessibilityID.Video.surface,
-            AccessibilityID.Inspector.root,
-            AccessibilityID.Transport.root,
-            AccessibilityID.Timeline.root,
             AccessibilityID.CueList.root,
+            AccessibilityID.Transport.root,
+            AccessibilityID.MiniMap.root,
+            AccessibilityID.Timeline.root,
         ] {
             let element = app.descendants(matching: .any).matching(identifier: id).firstMatch
             XCTAssertTrue(element.waitForExistence(timeout: 10), "Missing \(id)")

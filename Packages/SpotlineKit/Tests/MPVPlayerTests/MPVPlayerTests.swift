@@ -72,6 +72,20 @@ struct MPVPlayerTests {
         try await waitUntil(player) { $0.selectedAudioTrackID == tracks[1].id && $0.audioStreamIndex == 2 }
     }
 
+    @Test func playsBackward() async throws {
+        let player = try await makeLoadedPlayer()
+        player.seek(toFrame: 100, rate: .fps23_976)
+        try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) == 100 }
+        player.play(rate: -2)
+        #expect(player.status.rate == -2)
+        try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) < 80 }
+        player.setPaused(true)
+        player.play(rate: 1)
+        #expect(player.status.rate == 1)
+        let from = frame(player)
+        try await waitUntil(player) { $0.position.nearestFrame(at: .fps23_976) > from + 3 }
+    }
+
     @Test func seeksLandOnTheExactFrame() async throws {
         let player = try await makeLoadedPlayer()
         for target: Int64 in [57, 1, 118, 24] {

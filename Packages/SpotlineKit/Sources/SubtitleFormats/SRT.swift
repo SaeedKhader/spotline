@@ -40,9 +40,21 @@ enum SRT {
                 textLines.append(lines[index])
                 index += 1
             }
-            cues.append(Cue(start: start, end: end, text: textLines.joined(separator: "\n")))
+            let (text, position) = Self.position(of: textLines.joined(separator: "\n"))
+            cues.append(Cue(start: start, end: end, text: text, position: position))
         }
         return cues
+    }
+
+    /// The ASS-style override SRT files use for top-of-screen subtitles.
+    static let topTag = "{\\an8}"
+
+    /// Reads a leading `{\an7}`, `{\an8}` or `{\an9}` (top left, center, right) as a top position.
+    static func position(of text: String) -> (String, CuePosition) {
+        for tag in ["{\\an7}", "{\\an8}", "{\\an9}"] where text.hasPrefix(tag) {
+            return (String(text.dropFirst(tag.count)), .top)
+        }
+        return (text, .bottom)
     }
 
     static func serialize(_ cues: [Cue]) -> String {
@@ -52,7 +64,9 @@ enum SRT {
             block += " --> "
             block += formatTimestamp(cue.end, fractionSeparator: ",")
             block += "\n"
-            for line in payloadLines(cue.text) { block += line + "\n" }
+            for (index, line) in payloadLines(cue.text).enumerated() {
+                block += (index == 0 && cue.position == .top ? Self.topTag : "") + line + "\n"
+            }
             return block
         }
         .joined(separator: "\n")

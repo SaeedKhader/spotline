@@ -15,6 +15,7 @@ public enum AccessibilityID {
         public static let subtitle = "video.subtitle"
     }
 
+    /// The actions bar above the timeline (transport, editing buttons, timecode).
     public enum Transport {
         public static let root = "transport"
         public static let timecode = "transport.timecode"
@@ -36,25 +37,32 @@ public enum AccessibilityID {
         public static func shotChange(_ index: Int) -> String { "timeline.shotChange.\(index)" }
     }
 
+    /// The cue list, where each row is also the cue's editor.
     public enum CueList {
         public static let root = "cueList"
         public static func row(_ cueID: UUID) -> String { "cueList.row.\(cueID.uuidString)" }
-        /// One cell of a cue's row, e.g. `cueList.row.<id>.text`.
+        /// One field of a cue's row, e.g. `cueList.row.<id>.text` (the text editor).
         public static func cell(_ cueID: UUID, _ column: Column) -> String { "\(row(cueID)).\(column.rawValue)" }
+        /// A row's button for an editor command, e.g. `cueList.row.<id>.command.cue.delete`.
+        public static func action(_ cueID: UUID, _ commandID: String) -> String { "\(row(cueID)).\(command(commandID))" }
+        /// The footer counting cues that need review; its value is e.g. "7 cues need review".
+        public static let reviewSummary = "cueList.review"
 
         public enum Column: String, CaseIterable, Sendable {
-            case number, inPoint = "in", outPoint = "out", duration, text
+            case number
+            case inPoint = "in"
+            case outPoint = "out"
+            case readingSpeed = "cps"
+            /// The Default/Top position switch.
+            case position
+            /// Review warnings; the value lists them.
+            case issues
+            case text
         }
     }
 
-    public enum Inspector {
-        public static let root = "inspector"
-        /// The selected cue's text editor.
-        public static let text = "inspector.text"
-        public static let inPoint = "inspector.in"
-        public static let outPoint = "inspector.out"
-        public static let duration = "inspector.duration"
-        /// Characters per line against the guideline, e.g. "38/42 · 12/42".
-        public static let lineLengths = "inspector.lineLengths"
+    /// The overview strip of the whole media between the actions bar and the timeline.
+    public enum MiniMap {
+        public static let root = "miniMap"
     }
 }

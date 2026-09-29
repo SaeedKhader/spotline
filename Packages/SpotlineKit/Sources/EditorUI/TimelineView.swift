@@ -23,6 +23,8 @@ struct TimelineContent: Equatable {
     var analyzedUntil: MediaTime?
     /// Points per second.
     var scale: Double = 100
+    /// The latest request to show a time (from the mini-map).
+    var scrollRequest: TimelineScrollRequest?
 }
 
 /// Bridges `TimelineView` into SwiftUI.
@@ -141,6 +143,9 @@ final class TimelineView: NSView {
             originSeconds = old.playhead.seconds - Double(anchor) / scale
         }
         if content.playhead != old.playhead { keepVisible(content.playhead.seconds) }
+        if let request = content.scrollRequest, request != old.scrollRequest {
+            originSeconds = request.centerSeconds - visibleSeconds / 2
+        }
         if content.selectedCueID != old.selectedCueID, let cue = content.cues.first(where: { $0.id == content.selectedCueID }) {
             keepVisible(cue.start.seconds)
         }
@@ -160,6 +165,17 @@ final class TimelineView: NSView {
         var playheadOnly = old
         playheadOnly.playhead = content.playhead
         invalidateAccessibility(announce: playheadOnly != content || originSeconds != originBefore)
+        reportViewport()
+    }
+
+    private var reportedViewport: ClosedRange<Double>?
+
+    /// Tells the editor what is visible (for the mini-map), after the current view update.
+    private func reportViewport() {
+        let viewport = originSeconds...(originSeconds + visibleSeconds)
+        guard viewport != reportedViewport else { return }
+        reportedViewport = viewport
+        DispatchQueue.main.async { [editor] in editor.timelineDidShow(viewport) }
     }
 
     /// Pages the view when `seconds` is off screen, leaving it a tenth of the way in.
@@ -174,6 +190,7 @@ final class TimelineView: NSView {
         super.setFrameSize(newSize)
         clampOrigin()
         invalidateAccessibility()
+        reportViewport()
     }
 
     // MARK: - Drawing
@@ -360,7 +377,10 @@ final class TimelineView: NSView {
             editor.select(cue.id)
             drag = ActiveDrag(
                 cueID: cue.id,
-                model: CueDrag(part: part, start: cue.start, end: cue.end, rate: content.frameRate),
+                model: CueDrag(
+                    part: part, start: cue.start, end: cue.end, rate: content.frameRate,
+                    earliestStart: editor.room(for: cue.id).earliestStart, latestEnd: editor.room(for: cue.id).latestEnd
+                ),
                 startX: point.x
             )
             cursor(for: part).set()
@@ -409,6 +429,7 @@ final class TimelineView: NSView {
         clampOrigin()
         needsDisplay = true
         invalidateAccessibility()
+        reportViewport()
     }
 
     override func magnify(with event: NSEvent) {
@@ -524,7 +545,10 @@ final class TimelineView: NSView {
     /// Moves a cue edge by whole frames (accessibility increment and decrement).
     private func nudge(_ id: Cue.ID, part: CueDrag.Part, by frames: Int64) {
         guard let cue = content.cues.first(where: { $0.id == id }) else { return }
-        let model = CueDrag(part: part, start: cue.start, end: cue.end, rate: content.frameRate)
+        let model = CueDrag(
+                    part: part, start: cue.start, end: cue.end, rate: content.frameRate,
+                    earliestStart: editor.room(for: cue.id).earliestStart, latestEnd: editor.room(for: cue.id).latestEnd
+                )
         let timing = model.timing(movedBy: frames, snapTargets: [], tolerance: .zero)
         editor.setTiming(start: timing.start, end: timing.end, forCue: id, actionName: model.actionName)
     }

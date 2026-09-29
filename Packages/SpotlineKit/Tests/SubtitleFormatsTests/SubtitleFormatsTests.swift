@@ -142,3 +142,33 @@ struct FormatDetectionTests {
         #expect(try SubtitleFile.decode(Data([0x43, 0x61, 0x66, 0xE9])) == "Café")
     }
 }
+
+struct PositionTests {
+    @Test func srtTopTagBecomesAPosition() throws {
+        let cues = try SubtitleFormat.srt.parse("1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Sign\nreads\n\n2\n00:00:03,000 --> 00:00:04,000\n{\\an2}Bottom\n")
+        #expect(cues[0].position == .top)
+        #expect(cues[0].text == "Sign\nreads")
+        #expect(cues[1].position == .bottom)
+        #expect(cues[1].text == "{\\an2}Bottom", "Other tags stay in the text")
+        #expect(SubtitleFormat.srt.serialize([cues[0]]) == "1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Sign\nreads\n")
+    }
+
+    @Test(arguments: [
+        ("line:0", CuePosition.top), ("line:2", .top), ("line:-1", .bottom),
+        ("line:10%", .top), ("line:90%,end", .bottom), ("align:start", .bottom),
+    ])
+    func vttLineSetting(_ setting: String, _ expected: CuePosition) throws {
+        let cues = try SubtitleFormat.webVTT.parse("WEBVTT\n\n00:01.000 --> 00:02.000 \(setting)\nx\n")
+        #expect(cues[0].position == expected)
+    }
+
+    @Test func topConvertsBetweenFormats() throws {
+        let cue = Cue(start: .zero, end: MediaTime(value: 1, timescale: 1), text: "Up here", position: .top)
+        let vtt = SubtitleFormat.webVTT.serialize([cue])
+        #expect(vtt == "WEBVTT\n\n00:00:00.000 --> 00:00:01.000 line:0\nUp here\n")
+        let back = try SubtitleFormat.srt.parse(SubtitleFormat.srt.serialize(try SubtitleFormat.webVTT.parse(vtt)))
+        #expect(back[0].position == .top)
+        #expect(back[0].text == "Up here")
+    }
+}
+
