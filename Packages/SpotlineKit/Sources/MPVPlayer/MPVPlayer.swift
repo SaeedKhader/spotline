@@ -44,7 +44,10 @@ public final class MPVPlayer: PlaybackEngine {
         handle = try MPVHandle(
             options: [
                 "vo": configuration.showsVideo ? "libmpv" : "null",
-                "ao": configuration.playsAudio ? "coreaudio" : "null",
+                // mpv's coreaudio output fails to start on some devices (it can't set
+                // the channel layout, even for stereo), and mpv then plays silently.
+                // AVFoundation's renderer works there; coreaudio stays as a fallback.
+                "ao": configuration.playsAudio ? "avfoundation,coreaudio" : "null",
                 "hwdec": configuration.usesHardwareDecoding ? "videotoolbox" : "no",
                 "hr-seek": "yes",
                 "hr-seek-framedrop": "no",
