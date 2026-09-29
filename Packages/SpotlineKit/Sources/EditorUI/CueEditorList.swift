@@ -230,16 +230,6 @@ private struct CueRow: View {
                     RoundedRectangle(cornerRadius: 7)
                         .strokeBorder(cue.isAIGenerated == true ? AnyShapeStyle(Color.accentColor.opacity(0.45)) : AnyShapeStyle(.separator))
                 )
-                .overlay(alignment: .topTrailing) {
-                    if cue.isAIGenerated == true {
-                        Image(systemName: "sparkles")
-                            .font(.caption2)
-                            .foregroundStyle(.tint)
-                            .padding(5)
-                            .help("Written by \(editor.aiToolName(for: cue)); edit it to make it yours")
-                            .accessibilityLabel("Written by AI")
-                    }
-                }
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
                     focusedText.wrappedValue = nil
@@ -247,6 +237,17 @@ private struct CueRow: View {
                 }
                 .environment(\.layoutDirection, directions.target.layoutDirection)
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
+                // After the identifier, so the text cell stays the text view itself (its value is the text).
+                .overlay(alignment: .topTrailing) {
+                    if cue.isAIGenerated == true {
+                        Image(systemName: "sparkles")
+                            .font(.caption2)
+                            .foregroundStyle(.tint)
+                            .padding(5)
+                            .help("Written by \(editor.aiToolName(for: cue)); edit it to make it yours")
+                            .accessibilityHidden(true)
+                    }
+                }
     }
 
     private var rowBackground: some View {
