@@ -49,13 +49,10 @@ final class TranslationUITests: XCTestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH 'glossary.entry.' AND identifier ENDSWITH '.source'"))
             .firstMatch
         XCTAssertTrue(source.waitForExistence(timeout: 10), "No glossary row")
+        // Tab moves from the term to its translation.
         source.click()
-        source.typeText("John")
-        let target = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'glossary.entry.' AND identifier ENDSWITH '.target'"))
-            .firstMatch
-        target.click()
-        target.typeText("Jean")
+        app.typeText("John\t")
+        app.typeText("Jean")
 
         // Cue 2's source says "John": its row shows the term, not yet used.
         let chip = app.descendants(matching: .any)

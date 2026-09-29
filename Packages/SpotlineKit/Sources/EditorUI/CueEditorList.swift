@@ -331,26 +331,26 @@ private struct MemorySuggestions: View {
         if !matches.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(matches.enumerated()), id: \.offset) { index, match in
-                    Button {
-                        editor.useMemoryMatch(match, forCue: cueID)
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(match.percent)
-                                .font(.caption.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(match.isExact ? Color.green : Color.yellow)
-                                .frame(width: 38, alignment: .trailing)
-                            Text(SubtitleText.visibleLines(of: match.entry.target).joined(separator: " / "))
-                                .lineLimit(2)
-                                .environment(\.layoutDirection, direction.layoutDirection)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .contentShape(Rectangle())
+                    // A tap target like the issues panel's rows, so the row's own tap doesn't take the click.
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(match.percent)
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(match.isExact ? Color.green : Color.yellow)
+                            .frame(width: 38, alignment: .trailing)
+                        Text(SubtitleText.visibleLines(of: match.entry.target).joined(separator: " / "))
+                            .lineLimit(2)
+                            .environment(\.layoutDirection, direction.layoutDirection)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .onTapGesture { editor.useMemoryMatch(match, forCue: cueID) }
                     .help("Use this translation. Memory source: \(match.entry.source)")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Memory match \(match.percent)")
                     .accessibilityValue(match.entry.target)
                     .accessibilityIdentifier(AccessibilityID.CueList.memoryMatch(cueID, index))
+                    .accessibilityAction { editor.useMemoryMatch(match, forCue: cueID) }
                 }
             }
             .font(.callout)
