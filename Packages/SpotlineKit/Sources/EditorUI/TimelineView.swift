@@ -15,6 +15,10 @@ struct TimelineContent: Equatable {
     var frameRate: FrameRate = .fps23_976
     var shotChanges: [Int64] = []
     var waveform: Waveform?
+    /// When set, speech is drawn brightly and everything else dimmed.
+    var speech: [SpeechRegion]?
+    /// While speech detection runs, how far it has got; later audio is drawn undimmed.
+    var speechAnalyzedUntil: MediaTime?
     /// While analysis runs, the time it has reached; later media is drawn as pending.
     var analyzedUntil: MediaTime?
     /// Points per second.
@@ -140,10 +144,13 @@ final class TimelineView: NSView {
         if content.selectedCueID != old.selectedCueID, let cue = content.cues.first(where: { $0.id == content.selectedCueID }) {
             keepVisible(cue.start.seconds)
         }
-        let waveformDescription: String? = switch content.waveform?.source {
+        var waveformDescription: String? = switch content.waveform?.source {
         case .centerChannel: "Waveform: center channel (dialogue)"
         case .mix: "Waveform: all channels mixed"
         case nil: nil
+        }
+        if let description = waveformDescription, content.speech != nil {
+            waveformDescription = description + ", speech highlighted"
         }
         if toolTip != waveformDescription { toolTip = waveformDescription }
         clampOrigin()
@@ -220,13 +227,27 @@ final class TimelineView: NSView {
         let gain = 0.95 / loudest
         let middle = lane.midY
         let halfHeight = lane.height / 2
-        NSColor.secondaryLabelColor.withAlphaComponent(0.45).setFill()
+        let plain = NSColor.secondaryLabelColor.withAlphaComponent(0.45)
+        let spoken = NSColor.systemMint.withAlphaComponent(0.85)
+        let dimmed = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+        let regions = content.speech ?? []
+        let classifiedUntil = content.speech == nil ? -Double.infinity : content.speechAnalyzedUntil?.seconds ?? .infinity
+        var regionIndex = 0
         let secondsPerPoint = 1 / scale
         var column: CGFloat = 0
         while column < bounds.width {
             let start = originSeconds + Double(column) * secondsPerPoint
-            let peak = min(Double(waveform.peak(from: start, to: start + secondsPerPoint)) * gain, 1)
+            let end = start + secondsPerPoint
+            let peak = min(Double(waveform.peak(from: start, to: end)) * gain, 1)
             let height = max(CGFloat(peak) * halfHeight, 0.5)
+            // Speech bright, music and effects dimmed, where speech detection has run.
+            if start < classifiedUntil {
+                while regionIndex < regions.count, regions[regionIndex].end.seconds <= start { regionIndex += 1 }
+                let isSpeech = regionIndex < regions.count && regions[regionIndex].start.seconds < end
+                (isSpeech ? spoken : dimmed).setFill()
+            } else {
+                plain.setFill()
+            }
             NSRect(x: column, y: middle - height, width: 1, height: height * 2).fill()
             column += 1
         }

@@ -11,7 +11,7 @@ import SubtitleCore
 /// until Spotline has project files, this cache lives in ~/Library/Caches.
 public struct AnalysisCache: Sendable {
     /// Bumped whenever the analyzer's output changes, so old entries are ignored.
-    public static let formatVersion = 3
+    public static let formatVersion = 4
 
     public let directory: URL
 
@@ -32,6 +32,14 @@ public struct AnalysisCache: Sendable {
 
     public func store(_ analysis: AudioAnalysis, for media: URL, audioStream: Int?) {
         save(analysis, kind: "waveform-\(audioStream.map(String.init) ?? "main")", for: media)
+    }
+
+    public func speech(for media: URL, audioStream: Int?) -> [SpeechRegion]? {
+        load([SpeechRegion].self, kind: "speech-\(audioStream.map(String.init) ?? "main")", for: media)
+    }
+
+    public func store(speech: [SpeechRegion], for media: URL, audioStream: Int?) {
+        save(speech, kind: "speech-\(audioStream.map(String.init) ?? "main")", for: media)
     }
 
     public func shotChanges(for media: URL) -> [MediaTime]? {

@@ -46,12 +46,16 @@ public final class EditorState {
 
     /// The open media's waveform, filled in while it is being read.
     public private(set) var audioAnalysis: AudioAnalysis?
+    /// Where people speak in the waveform's audio, filled in while detected.
+    public private(set) var speech: [SpeechRegion]?
     /// The open media's shot changes, filled in while they are being found.
     public private(set) var shotChanges: [MediaTime]?
     /// The two analysis jobs while they run, nil once done. They run side by
     /// side: the waveform takes seconds, shot changes take minutes on a feature.
     public private(set) var waveformJob: AnalysisJob?
     public private(set) var shotChangesJob: AnalysisJob?
+    public private(set) var speechJob: AnalysisJob?
+    @ObservationIgnored private var speechTask: Task<Void, Never>?
     @ObservationIgnored private var waveformTask: Task<Void, Never>?
     @ObservationIgnored private var shotChangesTask: Task<Void, Never>?
     /// The audio stream the running or finished waveform reads, once known.
@@ -60,6 +64,9 @@ public final class EditorState {
     @ObservationIgnored public var analyzeWaveform:
         @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress<AudioAnalysis>) -> Void) async throws -> AudioAnalysis =
         EditorState.waveformAnalyzer(cache: .standard)
+    @ObservationIgnored public var analyzeSpeech:
+        @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress<[SpeechRegion]>) -> Void) async throws -> [SpeechRegion] =
+        EditorState.speechAnalyzer(cache: .standard)
     @ObservationIgnored public var analyzeShotChanges:
         @Sendable (URL, @escaping @Sendable (MediaAnalyzer.Progress<[MediaTime]>) -> Void) async throws -> [MediaTime] =
         EditorState.shotChangeAnalyzer(cache: .standard)
@@ -69,6 +76,8 @@ public final class EditorState {
     public static let timelineScaleRange: ClosedRange<Double> = 0.5...2_000
     /// Whether timeline drags snap to shot changes, the playhead and other cues' edges.
     public private(set) var isSnappingEnabled = true
+    /// Whether the waveform draws speech brightly and dims music and effects.
+    public private(set) var isSpeechHighlighted = true
 
     @ObservationIgnored public let undoManager: UndoManager
     public private(set) var canUndo = false
@@ -105,6 +114,7 @@ public final class EditorState {
         playback.onStatusChange = { [weak self] status in self?.playbackDidChange(status) }
         if !launchOptions.usesAnalysisCache {
             analyzeWaveform = Self.waveformAnalyzer(cache: nil)
+            analyzeSpeech = Self.speechAnalyzer(cache: nil)
             analyzeShotChanges = Self.shotChangeAnalyzer(cache: nil)
         }
         if let url = launchOptions.mediaURL { open(url) }
@@ -173,7 +183,7 @@ public final class EditorState {
             timelineScale < Self.timelineScaleRange.upperBound
         case EditorCommand.zoomOut.id:
             timelineScale > Self.timelineScaleRange.lowerBound
-        case EditorCommand.toggleSnapping.id:
+        case EditorCommand.toggleSnapping.id, EditorCommand.toggleSpeechHighlight.id:
             true
         case EditorCommand.previousCue.id:
             selectedCueIndex.map { $0 > 0 } ?? !track.cues.isEmpty
@@ -199,7 +209,11 @@ public final class EditorState {
 
     /// The on/off state of a toggle command, nil for other commands.
     public func isOn(_ command: EditorCommand) -> Bool? {
-        command.id == EditorCommand.toggleSnapping.id ? isSnappingEnabled : nil
+        switch command.id {
+        case EditorCommand.toggleSnapping.id: isSnappingEnabled
+        case EditorCommand.toggleSpeechHighlight.id: isSpeechHighlighted
+        default: nil
+        }
     }
 
     /// Runs `command`. Returns false when it is unknown or not currently possible.
@@ -241,6 +255,8 @@ public final class EditorState {
             setTimelineScale(timelineScale / 1.5)
         case EditorCommand.toggleSnapping.id:
             isSnappingEnabled.toggle()
+        case EditorCommand.toggleSpeechHighlight.id:
+            isSpeechHighlighted.toggle()
         case EditorCommand.previousCue.id:
             selectNeighbour(offset: -1)
         case EditorCommand.nextCue.id:
@@ -533,10 +549,12 @@ public final class EditorState {
 
     /// While analysis runs, how far into the media every running job has read.
     public var analyzedUntil: MediaTime? {
-        [waveformJob, shotChangesJob].compactMap { $0?.analyzedUntil }.min()
+        [waveformJob, speechJob, shotChangesJob].compactMap { $0?.analyzedUntil }.min()
     }
 
+    /// Starts the waveform and speech jobs for the playing audio track.
     private func startWaveformAnalysis() {
+        startSpeechAnalysis()
         waveformTask?.cancel()
         audioAnalysis = nil
         waveformJob = nil
@@ -558,6 +576,32 @@ public final class EditorState {
             }
             self.waveformJob = nil
         }
+    }
+
+    private func startSpeechAnalysis() {
+        speechTask?.cancel()
+        speech = nil
+        speechJob = nil
+        guard let url = status.mediaURL else { return }
+        speechJob = AnalysisJob()
+        let analyze = analyzeSpeech
+        let stream = status.audioStreamIndex
+        let report: @Sendable (MediaAnalyzer.Progress<[SpeechRegion]>) -> Void = { [weak self] progress in
+            guard let editor = self else { return }
+            Task { @MainActor in editor.speechDidProgress(progress, for: url) }
+        }
+        speechTask = Task { [weak self] in
+            let result = try? await analyze(url, stream, report)
+            guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
+            if let result { self.speech = result }
+            self.speechJob = nil
+        }
+    }
+
+    private func speechDidProgress(_ progress: MediaAnalyzer.Progress<[SpeechRegion]>, for url: URL) {
+        guard status.mediaURL == url, let job = speechJob, let next = job.advanced(by: progress) else { return }
+        speechJob = next
+        if let partial = progress.partial { speech = partial }
     }
 
     private func startShotChangeAnalysis() {
@@ -609,6 +653,24 @@ public final class EditorState {
                 }
             }
             cache?.store(result, for: url, audioStream: stream)
+            return result
+        }
+    }
+
+    private nonisolated static func speechAnalyzer(
+        cache: AnalysisCache?
+    ) -> @Sendable (URL, Int?, @escaping @Sendable (MediaAnalyzer.Progress<[SpeechRegion]>) -> Void) async throws -> [SpeechRegion] {
+        { url, stream, progress in
+            if let cached = cache?.speech(for: url, audioStream: stream) { return cached }
+            var options = MediaAnalyzer.Options()
+            options.audioStreamIndex = stream
+            let result = try await runDetached { [options] in
+                try MediaAnalyzer.speech(in: url, options: options) { report in
+                    progress(report)
+                    return !Task.isCancelled
+                }
+            }
+            cache?.store(speech: result, for: url, audioStream: stream)
             return result
         }
     }
