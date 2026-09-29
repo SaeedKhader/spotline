@@ -208,6 +208,9 @@ public final class EditorState {
     /// Asks the user where to export, suggesting the current file. Tests replace it.
     @ObservationIgnored public var chooseExportDestination: @MainActor (SubtitleFileReference?) -> SubtitleFileReference? =
         EditorPanels.chooseExportDestination(suggesting:)
+    /// Asks whether to export unsaved subtitles before new media replaces them. Tests replace it.
+    @ObservationIgnored public var confirmReplacingSubtitles: @MainActor () -> ReplaceSubtitlesChoice =
+        EditorPanels.confirmReplacingSubtitles
     /// Shows a failed import or export to the user. Tests replace it.
     @ObservationIgnored public var reportError: @MainActor (_ title: String, _ error: any Error) -> Void = EditorPanels.showError
 
@@ -492,9 +495,49 @@ public final class EditorState {
 
     // MARK: - Media and files
 
-    /// Opens a media file, replacing the current one.
+    /// Opens a media file. Replacing open media starts over: the subtitles,
+    /// the translation source, undo, the selection and the analysis belong to
+    /// the old media. Unsaved subtitles can be exported first, or the open cancelled.
+    /// Subtitles imported before any media opens are kept for it.
     public func open(_ url: URL) {
+        if hasMedia {
+            if hasUnsavedChanges, !track.cues.isEmpty, !launchOptions.isUITestMode {
+                switch confirmReplacingSubtitles() {
+                case .export:
+                    guard let destination = chooseExportDestination(subtitleFile ?? suggestedTranslationFile) else { return }
+                    exportSubtitles(to: destination)
+                    guard !hasUnsavedChanges else { return }
+                case .discard:
+                    break
+                case .cancel:
+                    return
+                }
+            }
+            resetForNewMedia()
+        }
         playback.load(url)
+    }
+
+    /// Forgets everything that belongs to the open media. View preferences
+    /// (zoom, QC preset, snapping, time display) and the glossary and memory stay.
+    private func resetForNewMedia() {
+        isEditingText = false
+        endTextEditSession()
+        shuttleRate = 0
+        selectedCueID = nil
+        track = SubtitleTrack()
+        subtitleFile = nil
+        if sourceTrack != nil { closeSourceSubtitles() }
+        undoManager.removeAllActions()
+        refreshUndoState()
+        hasUnsavedChanges = false
+        // Cleared now, not when the new media loads, so nothing of the old media shows meanwhile.
+        cancelAnalysis()
+        embeddedSubtitlesTask?.cancel()
+        embeddedSubtitles = []
+        embeddedSubtitlesJob = nil
+        isEmbeddedSubtitlesSheetShown = false
+        scrollTimeline(toCenter: 0)
     }
 
     /// Replaces the cues with the file's. Undoable; reports errors through `reportError`.
@@ -1067,6 +1110,17 @@ public final class EditorState {
         [waveformJob, speechJob, shotChangesJob].compactMap { $0?.analyzedUntil }.min()
     }
 
+    private func cancelAnalysis() {
+        for task in [waveformTask, speechTask, shotChangesTask] { task?.cancel() }
+        audioAnalysis = nil
+        speech = nil
+        shotChanges = nil
+        waveformJob = nil
+        speechJob = nil
+        shotChangesJob = nil
+        analyzedAudioStream = nil
+    }
+
     /// Starts the waveform and speech jobs for the playing audio track.
     private func startWaveformAnalysis() {
         startSpeechAnalysis()
@@ -1263,6 +1317,13 @@ public struct AnalysisJob: Equatable, Sendable {
             analyzedUntil: progress.partial != nil ? progress.analyzedUntil : analyzedUntil
         )
     }
+}
+
+/// What to do with unsaved subtitles when new media replaces them.
+public enum ReplaceSubtitlesChoice: Sendable {
+    case export
+    case discard
+    case cancel
 }
 
 /// A subtitle file on disk and the format it is written in.
