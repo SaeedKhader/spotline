@@ -23,6 +23,8 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
         case view
         /// Quality control: stepping through issues and fixing them.
         case review
+        /// Translating from a source track: glossary and translation memory.
+        case translation
     }
 
     public init(id: String, title: String, category: Category, defaultShortcut: KeyShortcut? = nil) {
@@ -173,6 +175,40 @@ extension EditorCommand {
         defaultShortcut: KeyShortcut(.leftArrow, modifiers: .command)
     )
 
+    public static let openSourceSubtitles = EditorCommand(
+        id: "translation.openSource", title: "Open Source Subtitles…", category: .translation,
+        defaultShortcut: KeyShortcut(.character("o"), modifiers: [.command, .option])
+    )
+    public static let closeSourceSubtitles = EditorCommand(
+        id: "translation.closeSource", title: "Close Source Subtitles", category: .translation
+    )
+    /// Replaces the selected cue's text with its source cue's (names, numbers, signs).
+    public static let copySourceToTarget = EditorCommand(
+        id: "translation.copySource", title: "Copy Source to Target", category: .translation,
+        defaultShortcut: KeyShortcut(.character("c"), modifiers: [.command, .option])
+    )
+    /// Uses the translation memory's best suggestion for the selected cue.
+    public static let useMemoryMatch = EditorCommand(
+        id: "translation.useMemoryMatch", title: "Use Best Memory Match", category: .translation,
+        defaultShortcut: KeyShortcut(.character("m"), modifiers: [.command, .control])
+    )
+    /// Fills every untranslated cue that has an exact (100%) memory match, as one edit.
+    public static let fillExactMatches = EditorCommand(
+        id: "translation.fillExactMatches", title: "Fill Untranslated Cues from Memory", category: .translation
+    )
+    /// Stores every translated cue with its source in the translation memory.
+    public static let addTranslationsToMemory = EditorCommand(
+        id: "translation.addToMemory", title: "Add All Translations to Memory", category: .translation
+    )
+    public static let showGlossary = EditorCommand(
+        id: "translation.showGlossary", title: "Show Glossary", category: .translation,
+        defaultShortcut: KeyShortcut(.character("g"), modifiers: [.command, .option])
+    )
+    /// Adds terms from a CSV or tab-separated file (source, target, note).
+    public static let importGlossary = EditorCommand(
+        id: "translation.importGlossary", title: "Import Glossary…", category: .translation
+    )
+
     /// Every command the app knows, in menu order.
     public static let all: [EditorCommand] = [
         openMedia, importSubtitles, importEmbeddedSubtitles, exportSubtitles,
@@ -183,6 +219,8 @@ extension EditorCommand {
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, nextAudioTrack,
         toggleMilliseconds,
+        openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
+        addTranslationsToMemory, showGlossary, importGlossary,
     ]
 
     public static func named(_ id: String) -> EditorCommand? {

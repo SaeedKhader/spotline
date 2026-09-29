@@ -9,14 +9,20 @@ public struct LaunchOptions: Sendable {
     public var mediaURL: URL?
     /// Subtitles to import at launch, from `-OpenSubtitles <path>`.
     public var subtitlesURL: URL?
+    /// Source subtitles to translate from at launch, from `-OpenSource <path>`.
+    public var sourceSubtitlesURL: URL?
     /// Reuse cached media analysis. Off in UI tests and with `-NoAnalysisCache`,
     /// so analysis always runs (and can be watched filling in the timeline).
     public var usesAnalysisCache: Bool
 
-    public init(isUITestMode: Bool = false, mediaURL: URL? = nil, subtitlesURL: URL? = nil, usesAnalysisCache: Bool? = nil) {
+    public init(
+        isUITestMode: Bool = false, mediaURL: URL? = nil, subtitlesURL: URL? = nil, sourceSubtitlesURL: URL? = nil,
+        usesAnalysisCache: Bool? = nil
+    ) {
         self.isUITestMode = isUITestMode
         self.mediaURL = mediaURL
         self.subtitlesURL = subtitlesURL
+        self.sourceSubtitlesURL = sourceSubtitlesURL
         self.usesAnalysisCache = usesAnalysisCache ?? !isUITestMode
     }
 
@@ -30,6 +36,7 @@ public struct LaunchOptions: Sendable {
             isUITestMode: arguments.contains("-UITestMode"),
             mediaURL: path(after: "-OpenMedia"),
             subtitlesURL: path(after: "-OpenSubtitles"),
+            sourceSubtitlesURL: path(after: "-OpenSource"),
             usesAnalysisCache: arguments.contains("-UITestMode") || arguments.contains("-NoAnalysisCache") ? false : true
         )
     }

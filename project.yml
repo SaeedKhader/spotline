@@ -52,6 +52,10 @@ targets:
         buildPhase: resources
       - path: Fixtures/styled-23.976.ass
         buildPhase: resources
+      - path: Fixtures/translation-source-23.976.srt
+        buildPhase: resources
+      - path: Fixtures/arabic-25.stl
+        buildPhase: resources
       - path: Fixtures/embedded-subs.mkv
         buildPhase: resources
     dependencies:

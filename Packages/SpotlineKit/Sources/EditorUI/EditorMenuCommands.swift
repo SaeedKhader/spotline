@@ -31,6 +31,12 @@ public struct EditorMenuCommands: Commands {
             Divider()
             QCPresetPicker(editor: editor)
         }
+        CommandMenu("Translation") {
+            buttons(for: .translation)
+            Divider()
+            TargetLanguagePicker(editor: editor)
+                .disabled(!editor.isTranslating)
+        }
         CommandMenu("Timeline") {
             buttons(for: .timeline)
         }

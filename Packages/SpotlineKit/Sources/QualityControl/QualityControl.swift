@@ -18,6 +18,12 @@ public struct QCIssue: Hashable, Sendable {
         case startNearShotChange(frames: Int64)
         /// Ends this many frames after (positive) or before (negative) a shot change.
         case endNearShotChange(frames: Int64)
+        /// In translation mode: the source cue has text, this one has none.
+        case notTranslated
+        /// In translation mode: the source uses a glossary term, the target not its agreed translation.
+        case glossaryTermNotUsed(source: String, target: String)
+        /// A tool guessed who the line addresses and was unsure (docs/ARCHITECTURE.md, 7b).
+        case addresseeGuess
     }
 
     public enum Severity: Int, Comparable, Sendable {
@@ -33,9 +39,14 @@ public struct QCIssue: Hashable, Sendable {
 
     public var severity: Severity {
         switch kind {
-        case .empty, .overlapsNext: .error
+        case .empty, .overlapsNext, .notTranslated: .error
         default: .warning
         }
+    }
+
+    public init(kind: Kind, message: String) {
+        self.kind = kind
+        self.message = message
     }
 }
 

@@ -11,10 +11,17 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     public var style: String?
     /// Who speaks the line (the ASS "Name" field).
     public var speaker: String?
+    /// In a translation, the source-language cue this one translates.
+    public var sourceCueID: UUID?
+    /// The speaker in the track's cast list (`SubtitleTrack.speakers`), once known.
+    public var speakerID: Speaker.ID?
+    /// Who the line is spoken to, for languages whose grammar depends on it (docs/ARCHITECTURE.md, 7b).
+    public var addressee: AddresseeTag?
 
     public init(
         id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom,
-        style: String? = nil, speaker: String? = nil
+        style: String? = nil, speaker: String? = nil, sourceCueID: UUID? = nil, speakerID: Speaker.ID? = nil,
+        addressee: AddresseeTag? = nil
     ) {
         self.id = id
         self.start = start
@@ -23,6 +30,9 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
         self.position = position
         self.style = style
         self.speaker = speaker
+        self.sourceCueID = sourceCueID
+        self.speakerID = speakerID
+        self.addressee = addressee
     }
 
     public var duration: MediaTime { end - start }
@@ -54,16 +64,19 @@ public struct SubtitleTrack: Identifiable, Hashable, Sendable, Codable {
     public var styles: [SubtitleStyle]
     /// Header fields kept for round trips, e.g. the ASS `[Script Info]` keys (`PlayResX`, `Title`).
     public var properties: [String: String]
+    /// The cast: who speaks, with their gender when known. Cues refer to them by `speakerID`.
+    public var speakers: [Speaker]
 
     public init(
         id: UUID = UUID(), languageCode: String = "und", cues: [Cue] = [], styles: [SubtitleStyle] = [],
-        properties: [String: String] = [:]
+        properties: [String: String] = [:], speakers: [Speaker] = []
     ) {
         self.id = id
         self.languageCode = languageCode
         self.cues = cues
         self.styles = styles
         self.properties = properties
+        self.speakers = speakers
     }
 
     /// The style named `name`, else the one named "Default", else the first.

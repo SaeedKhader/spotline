@@ -22,7 +22,19 @@ struct SpeechDetectionTests {
         return url
     }
 
-    @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: say.path)))
+    /// Whether `say` makes audible speech here. Some CI images have no voice
+    /// installed and write silence, which would test nothing.
+    static let sayMakesSpeech: Bool = {
+        guard FileManager.default.isExecutableFile(atPath: say.path), let url = try? makeSpeechFile() else { return false }
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard let data = try? Data(contentsOf: url), data.count > 44 else { return false }
+        let peak = data.dropFirst(44).withUnsafeBytes { bytes in
+            bytes.bindMemory(to: Int16.self).reduce(0) { max($0, abs(Int($1))) }
+        }
+        return peak > 1_000
+    }()
+
+    @Test(.enabled(if: sayMakesSpeech, "macOS text-to-speech makes no audible speech on this machine"))
     func findsTheSpokenPart() throws {
         let url = try Self.makeSpeechFile()
         defer { try? FileManager.default.removeItem(at: url) }
