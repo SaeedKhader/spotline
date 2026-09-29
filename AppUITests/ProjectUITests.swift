@@ -46,7 +46,7 @@ final class ProjectUITests: XCTestCase {
         XCTAssertEqual(texts.count, 2)
         XCTAssertEqual(texts.element(boundBy: 0).value as? String, "Saved in the project")
         waitForValue(of: app.staticTexts[AccessibilityID.Transport.frameRate], toEqual: "23.976 fps")
-        XCTAssertTrue(app.windows["Pilot"].exists, "The window is named after the project")
+        XCTAssertTrue(app.windows.matching(NSPredicate(format: "title == 'Pilot'")).firstMatch.exists, "The window is named after the project")
     }
 
     @MainActor

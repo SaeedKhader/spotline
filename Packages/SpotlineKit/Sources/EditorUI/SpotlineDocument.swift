@@ -155,3 +155,30 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
         return true
     }
 }
+
+/// Opens projects as documents and anything else (a video from the Finder or
+/// Dock) as the video of a new project. AppKit also passes the values of launch
+/// flags (`-OpenMedia <path>`, `-ApplePersistenceIgnoreState YES`) as files to
+/// open; `EditorWorkspace.openLaunchProject` has opened the real ones already,
+/// so they are skipped rather than shown as "can't open" errors.
+public final class ProjectDocumentController: NSDocumentController {
+    override public func openDocument(
+        withContentsOf url: URL, display displayDocument: Bool,
+        completionHandler: @escaping (NSDocument?, Bool, (any Error)?) -> Void
+    ) {
+        guard url.pathExtension != ProjectFile.fileExtension else {
+            super.openDocument(withContentsOf: url, display: displayDocument, completionHandler: completionHandler)
+            return
+        }
+        MainActor.assumeIsolated {
+            let workspace = EditorWorkspace.shared
+            let options = workspace.launchOptions
+            let launchFiles = [options.mediaURL, options.subtitlesURL, options.sourceSubtitlesURL].compactMap { $0?.standardizedFileURL }
+            // Launch flag values that are not files ("-ApplePersistenceIgnoreState YES") arrive too.
+            if !launchFiles.contains(url.standardizedFileURL), FileManager.default.fileExists(atPath: url.path) {
+                workspace.openMediaInNewProject(url)
+            }
+        }
+        completionHandler(nil, false, nil)
+    }
+}

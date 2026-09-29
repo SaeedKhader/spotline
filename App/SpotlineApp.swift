@@ -5,6 +5,11 @@ import SwiftUI
 struct SpotlineApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    init() {
+        // Made before anything asks for the shared controller, so it becomes the shared one.
+        _ = ProjectDocumentController()
+    }
+
     var body: some Scene {
         // Project windows are AppKit documents (see AppDelegate); SwiftUI supplies
         // the menus and the Settings window.
