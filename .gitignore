@@ -9,3 +9,6 @@ build/
 .swiftpm/
 xcuserdata/
 *.xcresult
+
+# Local code signing, written by scripts/setup-local-signing.sh
+Config/Local.xcconfig

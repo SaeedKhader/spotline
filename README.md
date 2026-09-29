@@ -23,6 +23,8 @@ xcodegen generate      # creates Spotline.xcodeproj from project.yml
 open Spotline.xcodeproj
 ```
 
+Local builds are signed ad hoc, so the Keychain asks again for the AI API keys after every rebuild. To sign them with your Apple Development certificate instead, run `scripts/setup-local-signing.sh` once, then `xcodegen generate`; allow Keychain access once more and it sticks. `scripts/bench.sh <samples>` builds, signs and runs `spotline-bench` the same way.
+
 Run the package unit tests without Xcode's UI:
 
 ```sh
