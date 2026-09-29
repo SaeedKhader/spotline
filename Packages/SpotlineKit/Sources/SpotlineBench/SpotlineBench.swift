@@ -28,7 +28,7 @@ struct SpotlineBench {
           --source CODE          spoken language and reference source subtitles (default: en)
           --target CODE          translation language and reference (default: ar)
           --transcriber NAME     apple (default), whisper or scribe (keys from Settings › AI, else OPENAI_API_KEY, ELEVENLABS_API_KEY)
-          --translator NAME      apple (default) or claude (key from Settings › AI, else ANTHROPIC_API_KEY)
+          --translator NAME      apple (default), claude (Sonnet) or claude-opus (key from Settings › AI, else ANTHROPIC_API_KEY)
           --preset ID            QC preset: netflix (default), netflixChildren, broadcast, basic
           --skip-translation     transcription only
           --fresh                ignore cached model results
@@ -266,9 +266,9 @@ struct Benchmark {
     func makeTranslator() throws -> any CueTranslator {
         switch options.translator {
         case "apple": return AppleTranslator()
-        case "claude":
+        case "claude", "claude-opus":
             guard let key = Self.apiKey(.anthropic, environment: "ANTHROPIC_API_KEY") else { throw AIError.missingAPIKey(provider: "Anthropic") }
-            return ClaudeTranslator(apiKey: key)
+            return ClaudeTranslator(apiKey: key, model: options.translator == "claude" ? ClaudeTranslator.defaultModel : ClaudeTranslator.opusModel)
         default:
             throw Options.Error(message: "No translator \(options.translator).")
         }

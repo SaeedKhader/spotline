@@ -293,8 +293,11 @@ struct MultipartForm {
 /// every valid variant, recommends one from the scene and says why in a line.
 /// It also names the people it recognizes, which builds the cast.
 public struct ClaudeTranslator: CueTranslator {
-    public var name: String { "Claude (cloud)" }
-    public static let model = "claude-opus-5-5"
+    public var name: String { model == Self.defaultModel ? "Claude (cloud)" : "Claude \(model) (cloud)" }
+    /// Sonnet by default, at half Opus's price; Opus is a setting.
+    public static let defaultModel = "claude-sonnet-5-5"
+    public static let opusModel = "claude-opus-5-5"
+    let model: String
     let apiKey: String
     let http: HTTPClient
     var endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
@@ -302,8 +305,9 @@ public struct ClaudeTranslator: CueTranslator {
     var batchSize = 40
     var contextLines = 6
 
-    public init(apiKey: String, session: URLSession = .shared) {
+    public init(apiKey: String, model: String = ClaudeTranslator.defaultModel, session: URLSession = .shared) {
         self.apiKey = apiKey
+        self.model = model
         http = HTTPClient(session: session)
     }
 
@@ -340,7 +344,7 @@ public struct ClaudeTranslator: CueTranslator {
         urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         urlRequest.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: Self.body(for: request))
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: Self.body(for: request, model: model))
         let data = try await http.send(urlRequest)
         return try Self.translations(from: data, request: request)
     }
@@ -365,7 +369,7 @@ public struct ClaudeTranslator: CueTranslator {
     }
 
     /// The Messages API request: structured output constrained to a JSON schema.
-    static func body(for request: TranslationRequest) -> [String: Any] {
+    static func body(for request: TranslationRequest, model: String = defaultModel) -> [String: Any] {
         var item: [String: Any] = ["id": string, "text": string]
         var output: [String: Any] = [:]
         if request.targetIsGendered {

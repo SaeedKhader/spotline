@@ -19,7 +19,8 @@ struct CloudProviderTests {
     @Test func claudeRequestAsksForStructuredOutput() throws {
         let cast = [CastMember(name: "Beth", gender: .female, isConfirmed: true, voices: ["speaker_1"]), CastMember(name: "Morty", gender: .male)]
         let body = ClaudeTranslator.body(for: request(cast: cast))
-        #expect(body["model"] as? String == "claude-opus-5-5")
+        #expect(body["model"] as? String == "claude-sonnet-5-5")
+        #expect(ClaudeTranslator.body(for: request(), model: ClaudeTranslator.opusModel)["model"] as? String == "claude-opus-5-5")
         #expect(body["fallbacks"] as? String == "default")
         let config = try #require(body["output_config"] as? [String: Any])
         let format = try #require(config["format"] as? [String: Any])
