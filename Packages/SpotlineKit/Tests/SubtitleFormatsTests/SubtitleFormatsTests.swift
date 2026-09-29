@@ -45,7 +45,8 @@ struct GoldenFileTests {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        for format in SubtitleFormat.allCases {
+        // EBU STL keeps frames, not milliseconds; EBUSTLTests covers it.
+        for format in SubtitleFormat.allCases where !format.isBinary {
             let url = directory.appending(path: "out.\(format.fileExtension)")
             try SubtitleFile.write(cues, as: format, to: url)
             let (readFormat, track) = try SubtitleFile.read(from: url)

@@ -7,13 +7,15 @@ import SubtitleCore
 /// inline tags such as `<i>` and entities such as `&amp;`, so import followed
 /// by export changes nothing but layout (numbering, timestamp padding, line
 /// endings). ASS/SSA and TTML convert their markup to the same conventions
-/// (see `Markup`), and keep their styles and header in the track.
+/// (see `Markup`), and keep their styles and header in the track. EBU STL is
+/// binary (see `EBUSTL`); read and write it with `decode(_:)` and `encode(_:frameRate:)`.
 public enum SubtitleFormat: String, CaseIterable, Sendable {
     case srt
     case webVTT
     case ass
     case ssa
     case ttml
+    case ebuSTL
 
     public var fileExtension: String {
         switch self {
@@ -22,6 +24,7 @@ public enum SubtitleFormat: String, CaseIterable, Sendable {
         case .ass: "ass"
         case .ssa: "ssa"
         case .ttml: "ttml"
+        case .ebuSTL: "stl"
         }
     }
 
@@ -37,6 +40,7 @@ public enum SubtitleFormat: String, CaseIterable, Sendable {
         case .ass: "Advanced SubStation Alpha (.ass)"
         case .ssa: "SubStation Alpha (.ssa)"
         case .ttml: "TTML / IMSC 1.1 (.ttml)"
+        case .ebuSTL: "EBU STL (.stl)"
         }
     }
 
@@ -49,8 +53,15 @@ public enum SubtitleFormat: String, CaseIterable, Sendable {
         self = format
     }
 
-    /// The format of a file, from its extension or else its contents.
+    /// Binary formats are read and written as bytes, not text.
+    public var isBinary: Bool { self == .ebuSTL }
+
+    /// The format of a text file, from its extension or else its contents.
     public static func detect(fileExtension: String, text: String) -> SubtitleFormat? {
+        if let format = SubtitleFormat(fileExtension: fileExtension), format == .ebuSTL {
+            // A text .stl is Spruce STL, which Spotline doesn't read.
+            return nil
+        }
         if let format = SubtitleFormat(fileExtension: fileExtension), format != .ttml || fileExtension.lowercased() != "xml" || text.contains("<tt") {
             return format
         }
@@ -79,7 +90,20 @@ public enum SubtitleFormat: String, CaseIterable, Sendable {
         case .webVTT: SubtitleTrack(cues: try WebVTT.parse(text))
         case .ass, .ssa: try ASS.parse(text)
         case .ttml: try TTML.parse(text)
+        case .ebuSTL: throw SubtitleParseError(line: 1, reason: "EBU STL is binary; read it with decode(_:)")
         }
+    }
+
+    /// The track in a file's bytes: EBU STL, or text in any encoding `SubtitleFile.decode(_:)` reads.
+    public func decode(_ data: Data) throws -> SubtitleTrack {
+        if self == .ebuSTL { return try EBUSTL.parse(data) }
+        return try parseTrack(SubtitleFile.decode(data))
+    }
+
+    /// The file's bytes: UTF-8 text, or EBU STL frames at `frameRate`.
+    public func encode(_ track: SubtitleTrack, frameRate: FrameRate) -> Data {
+        if self == .ebuSTL { return EBUSTL.serialize(track, frameRate: frameRate) }
+        return Data(serialize(track).utf8)
     }
 
     /// The file contents for `cues`, with `\n` line endings.
@@ -95,6 +119,7 @@ public enum SubtitleFormat: String, CaseIterable, Sendable {
         case .ass: ASS.serialize(track, variant: .ass)
         case .ssa: ASS.serialize(track, variant: .ssa)
         case .ttml: TTML.serialize(track)
+        case .ebuSTL: preconditionFailure("EBU STL is binary; write it with encode(_:frameRate:)")
         }
     }
 }
@@ -116,21 +141,24 @@ public struct SubtitleParseError: Error, Equatable, Sendable, CustomStringConver
 public enum SubtitleFile {
     /// Reads `url`, choosing the format from its extension or contents.
     public static func read(from url: URL) throws -> (format: SubtitleFormat, track: SubtitleTrack) {
-        let text = try decode(Data(contentsOf: url))
+        let data = try Data(contentsOf: url)
+        if EBUSTL.isEBUSTL(data) { return (.ebuSTL, try EBUSTL.parse(data)) }
+        let text = try decode(data)
         guard let format = SubtitleFormat.detect(fileExtension: url.pathExtension, text: text) else {
-            throw SubtitleParseError(line: 1, reason: "Not a subtitle file Spotline can read (SRT, WebVTT, ASS, SSA or TTML)")
+            throw SubtitleParseError(line: 1, reason: "Not a subtitle file Spotline can read (SRT, WebVTT, ASS, SSA, TTML or EBU STL)")
         }
         return (format, try format.parseTrack(text))
     }
 
-    /// Writes a track to `url` as UTF-8 without a byte order mark.
-    public static func write(_ track: SubtitleTrack, as format: SubtitleFormat, to url: URL) throws {
-        try Data(format.serialize(track).utf8).write(to: url, options: .atomic)
+    /// Writes a track to `url`: text as UTF-8 without a byte order mark, EBU STL
+    /// with times in frames at `frameRate`.
+    public static func write(_ track: SubtitleTrack, as format: SubtitleFormat, frameRate: FrameRate = .fps25, to url: URL) throws {
+        try format.encode(track, frameRate: frameRate).write(to: url, options: .atomic)
     }
 
-    /// Writes `cues` to `url` as UTF-8 without a byte order mark.
-    public static func write(_ cues: [Cue], as format: SubtitleFormat, to url: URL) throws {
-        try write(SubtitleTrack(cues: cues), as: format, to: url)
+    /// Writes `cues` to `url` (see `write(_:as:frameRate:to:)`).
+    public static func write(_ cues: [Cue], as format: SubtitleFormat, frameRate: FrameRate = .fps25, to url: URL) throws {
+        try write(SubtitleTrack(cues: cues), as: format, frameRate: frameRate, to: url)
     }
 
     /// Decodes subtitle file bytes: UTF-8 or UTF-16 with a byte order mark,
