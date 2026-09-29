@@ -23,6 +23,8 @@ struct EditorCommandTests {
         #expect(!EditorCommand.nextCue.defaultShortcut!.conflictsWithTextEditing, "Moves between cues while typing")
         #expect(EditorCommand.shuttleForward.defaultShortcut!.conflictsWithTextEditing)
         #expect(EditorCommand.goToStart.defaultShortcut!.conflictsWithTextEditing)
+        #expect(EditorCommand.goToEnd.defaultShortcut!.conflictsWithTextEditing)
+        #expect(!EditorCommand.transcribe.defaultShortcut!.conflictsWithTextEditing)
         #expect(EditorCommand.deleteCue.defaultShortcut!.conflictsWithTextEditing)
         #expect(!EditorCommand.undo.defaultShortcut!.conflictsWithTextEditing)
         #expect(!EditorCommand.addCue.defaultShortcut!.conflictsWithTextEditing)

@@ -18,8 +18,14 @@ public struct EditorMenuCommands: Commands {
         CommandGroup(replacing: .undoRedo) {
             buttons(for: .editing)
         }
+        // View: what the window shows, and the timeline's zoom, snapping and speech highlight.
         CommandGroup(after: .toolbar) {
             buttons(for: .view)
+            Divider()
+            buttons(for: .timeline, only: [.zoomIn, .zoomOut])
+            Divider()
+            buttons(for: .timeline, only: [.toggleSnapping, .toggleSpeechHighlight])
+            Divider()
         }
         CommandMenu("Cue") {
             buttons(for: .cue)
@@ -46,12 +52,14 @@ public struct EditorMenuCommands: Commands {
             Divider()
             buttons(for: .ai, only: [.cancelAITask])
         }
-        CommandMenu("Timeline") {
-            buttons(for: .timeline)
-        }
         CommandMenu("Playback") {
-            buttons(for: .playback)
+            buttons(for: .playback, only: [.togglePlay, .shuttleBackward, .pause, .shuttleForward])
             Divider()
+            buttons(for: .playback, only: [.stepBackward, .stepForward, .goToStart, .goToEnd])
+            Divider()
+            buttons(for: .playback, only: [.previousShotChange, .nextShotChange])
+            Divider()
+            buttons(for: .playback, only: [.nextAudioTrack])
             AudioTrackPicker(editor: editor)
                 .disabled(editor.audioTracks.isEmpty)
         }

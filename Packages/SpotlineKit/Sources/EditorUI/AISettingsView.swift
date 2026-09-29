@@ -34,23 +34,32 @@ public struct AISettingsView: View {
                     ForEach(AISettings.TranslationProvider.allCases) { Text($0.title).tag($0) }
                 }
                 .accessibilityIdentifier(AccessibilityID.AISettings.translationProvider)
+                if let problem = providerProblem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .accessibilityValue(problem)
+                        .accessibilityIdentifier(AccessibilityID.AISettings.providerProblem)
+                }
             } header: {
                 Text("Providers")
             } footer: {
-                Text("On this Mac, audio and text never leave your computer. Speaker and addressee detection and cleanup always run on this Mac. Claude also reads each scene to decide who is spoken to and offers ♂/♀/group variants when unsure.")
+                Text("On this Mac, audio and text never leave your computer. Speakers, addressees and cleanup always run here.")
                     .foregroundStyle(.secondary)
             }
 
             Section {
                 Toggle("Allow cloud providers", isOn: $editor.aiSettings.allowsCloud)
                     .accessibilityIdentifier(AccessibilityID.AISettings.allowsCloud)
-                keyField("OpenAI API key", text: $openAIKey, provider: .openAI)
-                keyField("Anthropic API key", text: $anthropicKey, provider: .anthropic)
-                keyField("ElevenLabs API key", text: $elevenLabsKey, provider: .elevenLabs)
+                Group {
+                    keyField("OpenAI API key", text: $openAIKey, provider: .openAI)
+                    keyField("Anthropic API key", text: $anthropicKey, provider: .anthropic)
+                    keyField("ElevenLabs API key", text: $elevenLabsKey, provider: .elevenLabs)
+                }
+                .disabled(!editor.aiSettings.allowsCloud)
             } header: {
                 Text("Cloud")
             } footer: {
-                Text("Cloud providers receive the dialogue audio (compressed as Opus) or the subtitle text. Check your contract before sending material under NDA. Keys are kept in your Keychain.")
+                Text("Cloud providers receive the dialogue audio or the subtitle text; check your contract before sending material under NDA. Keys are saved in your Keychain when you leave the field.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -64,23 +73,59 @@ public struct AISettingsView: View {
         }
     }
 
+    /// Why a chosen cloud provider can't run yet, if it can't.
+    private var providerProblem: String? {
+        let settings = editor.aiSettings
+        let candidates: [(name: String, key: APIKeyStore.Provider)?] = [
+            settings.transcription == .openAIWhisper ? ("OpenAI Whisper", .openAI) : nil,
+            settings.transcription == .elevenLabsScribe ? ("ElevenLabs Scribe", .elevenLabs) : nil,
+            settings.translation == .claude ? ("Claude", .anthropic) : nil,
+        ]
+        let needed = candidates.compactMap { $0 }
+        guard let first = needed.first else { return nil }
+        if !settings.allowsCloud { return "\(first.name) needs Allow cloud providers turned on." }
+        if let missing = needed.first(where: { !savedKeys.contains($0.key) }) {
+            return "\(missing.name) needs an API key."
+        }
+        return nil
+    }
+
     private func keyField(_ title: String, text: Binding<String>, provider: APIKeyStore.Provider) -> some View {
-        HStack {
-            SecureField(title, text: text)
-                .onSubmit { save(text.wrappedValue, for: provider) }
-                .accessibilityIdentifier(AccessibilityID.AISettings.apiKey(provider.rawValue))
-            Button("Save") { save(text.wrappedValue, for: provider) }
-                .disabled(text.wrappedValue == (keys.key(for: provider) ?? ""))
-            if savedKeys.contains(provider) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .help("Saved in your Keychain")
-            }
+        KeyField(title: title, text: text, isSaved: savedKeys.contains(provider), provider: provider) {
+            save(text.wrappedValue, for: provider)
         }
     }
 
     private func save(_ key: String, for provider: APIKeyStore.Provider) {
+        guard key != (keys.key(for: provider) ?? "") else { return }
         keys.setKey(key, for: provider)
         if keys.key(for: provider) != nil { savedKeys.insert(provider) } else { savedKeys.remove(provider) }
+    }
+}
+
+/// An API key field that saves when you press Return or leave it, with a check once the Keychain has it.
+private struct KeyField: View {
+    let title: String
+    @Binding var text: String
+    let isSaved: Bool
+    let provider: APIKeyStore.Provider
+    let save: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack {
+            SecureField(title, text: $text)
+                .focused($isFocused)
+                .onSubmit(save)
+                .onChange(of: isFocused) { _, focused in if !focused { save() } }
+                .accessibilityIdentifier(AccessibilityID.AISettings.apiKey(provider.rawValue))
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .opacity(isSaved ? 1 : 0)
+                .help("Saved in your Keychain")
+                .accessibilityLabel("Saved")
+                .accessibilityValue(isSaved ? "saved" : "not saved")
+                .accessibilityIdentifier(AccessibilityID.AISettings.apiKeySaved(provider.rawValue))
+        }
     }
 }

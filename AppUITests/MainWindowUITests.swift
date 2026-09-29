@@ -22,7 +22,7 @@ final class MainWindowUITests: XCTestCase {
     func testFixtureOpensAtItsFrameRate() throws {
         let app = launchApp()
         waitForValue(of: app.staticTexts[AccessibilityID.Transport.frameRate], toEqual: "23.976 fps")
-        XCTAssertFalse(app.buttons[AccessibilityID.command(EditorCommand.openMedia.id)].exists)
+        XCTAssertFalse(app.descendants(matching: .any)[AccessibilityID.Video.emptyState].exists)
     }
 
     @MainActor
@@ -82,9 +82,14 @@ final class MainWindowUITests: XCTestCase {
     }
 
     @MainActor
-    func testWithoutMediaOffersOpenAndDisablesPlayback() throws {
+    func testWithoutMediaPointsAtOpenAndDisablesPlayback() throws {
         let app = launchApp(openFixture: false)
-        XCTAssertTrue(button(EditorCommand.openMedia, in: app).isEnabled)
+        // Hints that name the menu command, not buttons: the menus own these commands.
+        let video = app.descendants(matching: .any)[AccessibilityID.Video.emptyState]
+        XCTAssertTrue(video.waitForExistence(timeout: 10))
+        XCTAssertTrue((video.value as? String ?? "").contains(EditorCommand.openMedia.title))
+        XCTAssertTrue(app.descendants(matching: .any)[AccessibilityID.CueList.emptyState].exists)
+        XCTAssertFalse(app.buttons[AccessibilityID.command(EditorCommand.openMedia.id)].exists)
         XCTAssertFalse(app.buttons[AccessibilityID.command(EditorCommand.togglePlay.id)].isEnabled)
         XCTAssertFalse(app.buttons[AccessibilityID.command(EditorCommand.stepForward.id)].isEnabled)
     }

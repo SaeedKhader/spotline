@@ -1,4 +1,12 @@
 public enum SubtitleText {
+    /// Dialogue: two or more lines that each start with a dash, one speaker
+    /// per line ("- Rick?\n- What now?"). Bidi marks before the dash don't count.
+    public static func isDialogue(_ lines: [String]) -> Bool {
+        lines.count > 1 && lines.allSatisfy {
+            $0.trimmingCharacters(in: .whitespaces.union(["\u{200F}", "\u{202B}", "\u{200E}"])).hasPrefix("-")
+        }
+    }
+
     /// The text as a viewer reads it: lines without inline markup such as
     /// `<i>`, `</b>`, `<v Anna>` or `{\an8}`, and with common entities decoded.
     public static func visibleLines(of text: String) -> [String] {

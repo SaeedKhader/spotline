@@ -50,10 +50,19 @@ struct EditorStateTests {
         #expect(!editor.isPlaying)
     }
 
+    @Test func goToEndPausesOnTheLastFrame() {
+        let editor = makeEditor()
+        editor.perform(.togglePlay)
+        #expect(editor.perform(.goToEnd))
+        #expect(!editor.isPlaying)
+        let last = editor.status.duration!.nearestFrame(at: editor.frameRate) - 1
+        #expect(editor.currentFrame == last)
+    }
+
     @Test func playbackCommandsNeedMedia() {
         let editor = makeEditor(openMedia: false)
         #expect(editor.canPerform(.openMedia))
-        for command in [EditorCommand.togglePlay, .stepForward, .stepBackward, .goToStart] {
+        for command in [EditorCommand.togglePlay, .stepForward, .stepBackward, .goToStart, .goToEnd] {
             #expect(!editor.perform(command), "\(command.id)")
         }
     }

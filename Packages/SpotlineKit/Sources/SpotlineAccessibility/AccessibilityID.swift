@@ -15,6 +15,8 @@ public enum AccessibilityID {
         public static let subtitle = "video.subtitle"
         /// A cue shown at the top of the picture, e.g. a sign over dialogue.
         public static let topSubtitle = "video.subtitle.top"
+        /// The hint shown before any media is open.
+        public static let emptyState = "video.empty"
     }
 
     /// The actions bar above the timeline (transport, editing buttons, timecode).
@@ -47,8 +49,10 @@ public enum AccessibilityID {
         public static func cell(_ cueID: UUID, _ column: Column) -> String { "\(row(cueID)).\(column.rawValue)" }
         /// A row's button for an editor command, e.g. `cueList.row.<id>.command.cue.delete`.
         public static func action(_ cueID: UUID, _ commandID: String) -> String { "\(row(cueID)).\(command(commandID))" }
-        /// The footer counting cues that need review; its value is e.g. "7 cues need review".
+        /// The count of cues that need review, in the actions bar; its value is e.g. "7 cues need review".
         public static let reviewSummary = "cueList.review"
+        /// The hint shown while there are no cues; its value says what to do first.
+        public static let emptyState = "cueList.empty"
         /// In translation mode, the n-th glossary term found in a cue's source (0-based);
         /// its value is the agreed translation and whether the target uses it.
         public static func glossaryTerm(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).glossary.\(index)" }
@@ -74,7 +78,7 @@ public enum AccessibilityID {
             case inPoint = "in"
             case outPoint = "out"
             case readingSpeed = "cps"
-            /// The Default/Top position switch.
+            /// The button that shows the cue at the top or bottom; its value is "top" or "bottom".
             case position
             /// Review warnings; the value lists them.
             case issues
@@ -103,10 +107,10 @@ public enum AccessibilityID {
         }
     }
 
-    /// The issues panel under the cue list (Review › Show Issues).
+    /// The issues panel under the cue list (View › Show Issues).
     public enum Issues {
         public static let root = "issues"
-        /// The QC preset's name; its help explains the limits.
+        /// The QC preset's name, beside the review count in the actions bar; its help explains the limits.
         public static let preset = "issues.preset"
         /// One issue; its label is the cue number and its value the message.
         public static func item(_ cueID: UUID, _ offset: Int) -> String { "issues.item.\(cueID.uuidString).\(offset)" }
@@ -119,6 +123,10 @@ public enum AccessibilityID {
         public static let translationProvider = "settings.ai.translation"
         public static let allowsCloud = "settings.ai.allowsCloud"
         public static func apiKey(_ provider: String) -> String { "settings.ai.key.\(provider)" }
+        /// Beside a key field; its value is "saved" once the Keychain has the key.
+        public static func apiKeySaved(_ provider: String) -> String { "\(apiKey(provider)).saved" }
+        /// Shown when a chosen cloud provider can't run yet (cloud off, or no key); its value says why.
+        public static let providerProblem = "settings.ai.problem"
     }
 
     /// Settings › Agents.

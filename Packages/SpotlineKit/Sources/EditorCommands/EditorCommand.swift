@@ -17,7 +17,7 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
         /// Creating and changing cues.
         case cue
         case navigation
-        /// Timeline zoom and snapping.
+        /// Timeline zoom, snapping and speech highlight (in the View menu).
         case timeline
         /// How things are displayed.
         case view
@@ -25,7 +25,8 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
         case review
         /// Translating from a source track: glossary and translation memory.
         case translation
-        /// AI tools, which propose changes for review, and the review itself.
+        /// AI tools: transcription, translation and speakers fill the track;
+        /// cleanup proposes changes, reviewed here too.
         case ai
     }
 
@@ -113,19 +114,20 @@ extension EditorCommand {
     )
     /// A toggle: see `EditorState.isOn(_:)`.
     public static let toggleIssuesPanel = EditorCommand(
-        id: "review.toggleIssuesPanel", title: "Show Issues", category: .review,
+        id: "review.toggleIssuesPanel", title: "Show Issues", category: .view,
         defaultShortcut: KeyShortcut(.character("i"), modifiers: [.command, .option])
     )
     public static let shuttleBackward = EditorCommand(
-        id: "playback.shuttleBackward", title: "Play Backward (Faster Each Press)", category: .playback,
+        id: "playback.shuttleBackward", title: "Shuttle Backward", category: .playback,
         defaultShortcut: KeyShortcut(.character("j"))
     )
+    /// J and L play backward and forward, faster with each press; K pauses.
     public static let pause = EditorCommand(
         id: "playback.pause", title: "Pause", category: .playback,
         defaultShortcut: KeyShortcut(.character("k"))
     )
     public static let shuttleForward = EditorCommand(
-        id: "playback.shuttleForward", title: "Play Forward (Faster Each Press)", category: .playback,
+        id: "playback.shuttleForward", title: "Shuttle Forward", category: .playback,
         defaultShortcut: KeyShortcut(.character("l"))
     )
     /// A toggle: see `EditorState.isOn(_:)`.
@@ -133,11 +135,11 @@ extension EditorCommand {
         id: "view.toggleMilliseconds", title: "Show Timecodes in Milliseconds", category: .view
     )
     public static let previousShotChange = EditorCommand(
-        id: "navigation.previousShotChange", title: "Go to Previous Shot Change", category: .navigation,
+        id: "navigation.previousShotChange", title: "Go to Previous Shot Change", category: .playback,
         defaultShortcut: KeyShortcut(.leftArrow, modifiers: .option)
     )
     public static let nextShotChange = EditorCommand(
-        id: "navigation.nextShotChange", title: "Go to Next Shot Change", category: .navigation,
+        id: "navigation.nextShotChange", title: "Go to Next Shot Change", category: .playback,
         defaultShortcut: KeyShortcut(.rightArrow, modifiers: .option)
     )
     public static let zoomIn = EditorCommand(
@@ -176,6 +178,11 @@ extension EditorCommand {
         id: "playback.goToStart", title: "Go to Start", category: .playback,
         defaultShortcut: KeyShortcut(.leftArrow, modifiers: .command)
     )
+    /// Pauses on the media's last frame.
+    public static let goToEnd = EditorCommand(
+        id: "playback.goToEnd", title: "Go to End", category: .playback,
+        defaultShortcut: KeyShortcut(.rightArrow, modifiers: .command)
+    )
 
     public static let openSourceSubtitles = EditorCommand(
         id: "translation.openSource", title: "Open Source Subtitles…", category: .translation,
@@ -211,20 +218,26 @@ extension EditorCommand {
         id: "translation.importGlossary", title: "Import Glossary…", category: .translation
     )
 
-    /// Makes cues from the media's dialogue, with speakers (proposed for review).
-    public static let transcribe = EditorCommand(id: "ai.transcribe", title: "Transcribe Audio", category: .ai)
-    /// Translates the empty target cues with context, glossary and memory (proposed for review).
+    /// Makes cues from the media's dialogue, with speakers, straight into the gaps of the track.
+    public static let transcribe = EditorCommand(
+        id: "ai.transcribe", title: "Transcribe Audio", category: .ai,
+        defaultShortcut: KeyShortcut(.character("r"), modifiers: [.command, .control])
+    )
+    /// Fills the empty target cues with context, glossary and memory.
     /// Outside translation mode the current cues become the source first.
     public static let translateWithAI = EditorCommand(
         id: "ai.translate", title: "Translate with AI", category: .ai,
         defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .control])
     )
     /// Finds who speaks each cue (voice) and who it addresses (scene), for gendered translations.
-    public static let detectSpeakers = EditorCommand(id: "ai.detectSpeakers", title: "Detect Speakers and Addressees", category: .ai)
+    public static let detectSpeakers = EditorCommand(
+        id: "ai.detectSpeakers", title: "Detect Speakers and Addressees", category: .ai,
+        defaultShortcut: KeyShortcut(.character("s"), modifiers: [.command, .control])
+    )
     public static let maskProfanity = EditorCommand(id: "ai.maskProfanity", title: "Mask Profanity", category: .ai)
     public static let removeHearingImpaired = EditorCommand(id: "ai.removeHearingImpaired", title: "Remove Hearing-Impaired Text", category: .ai)
     public static let fixPunctuation = EditorCommand(id: "ai.fixPunctuation", title: "Fix Spacing and Punctuation", category: .ai)
-    /// Stops the running AI task; nothing is proposed.
+    /// Stops the running AI task; what it already filled in stays (and undoes).
     public static let cancelAITask = EditorCommand(
         id: "ai.cancel", title: "Cancel AI Task", category: .ai,
         defaultShortcut: KeyShortcut(.character("."), modifiers: .command)
@@ -257,7 +270,7 @@ extension EditorCommand {
         previousCue, nextCue, previousShotChange, nextShotChange,
         toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
-        togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, nextAudioTrack,
+        togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
         toggleMilliseconds,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, showGlossary, importGlossary,

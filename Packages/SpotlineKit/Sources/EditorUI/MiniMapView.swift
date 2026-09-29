@@ -67,7 +67,7 @@ private struct MiniMapContent: View {
                 let color: Color = switch issues[cue.id]?.map(\.severity).max() {
                 case .error: .red
                 case .warning: .orange
-                case nil: .teal.opacity(0.8)
+                case nil: cue.isAIGenerated == true ? Color.aiTint.opacity(0.8) : .teal.opacity(0.8)
                 }
                 context.fill(Path(rect), with: .color(color))
             }

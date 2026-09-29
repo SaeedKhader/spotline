@@ -17,6 +17,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var agentAccess = AgentAccess(editor: editor)
     private var mainWindowController: NSWindowController?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // A dark workspace, as in pro video tools, so the picture stands out:
+        // the editor, Settings, the glossary, sheets and alerts alike.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         showMainWindow()
         _ = agentAccess
@@ -56,8 +62,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.identifier = NSUserInterfaceItemIdentifier("main")
             window.title = "Spotline"
             window.setContentSize(NSSize(width: 1280, height: 820))
-            // A dark workspace, as in pro video tools, so the picture stands out.
-            window.appearance = NSAppearance(named: .darkAqua)
             window.isReleasedWhenClosed = false
             window.center()
             window.setFrameAutosaveName("MainWindow")

@@ -2,6 +2,7 @@ import EditorCommands
 import QualityControl
 import SpotlineAccessibility
 import SubtitleCore
+import SubtitleTranslation
 import SwiftUI
 
 /// The editor window. Top: the cue list (each row edits its cue) on the left
@@ -57,7 +58,7 @@ struct TimelineHost: View {
     }
 }
 
-/// The player's video, or a prompt to open media when nothing is loaded.
+/// The player's video, or a hint to open media when nothing is loaded.
 struct VideoSurfaceView: View {
     let editor: EditorState
 
@@ -69,14 +70,19 @@ struct VideoSurfaceView: View {
             }
             SubtitleOverlayHost(editor: editor)
             if !editor.hasMedia {
-                VStack(spacing: 12) {
+                let hint = "Drop a video here (\(EditorCommand.openMedia.menuHint("File")))"
+                VStack(spacing: 10) {
                     Image(systemName: "film")
                         .font(.largeTitle)
                     Text("No Media")
-                    Button(EditorCommand.openMedia.title) { editor.perform(.openMedia) }
-                        .accessibilityIdentifier(AccessibilityID.command(EditorCommand.openMedia.id))
+                        .font(.title3)
+                    Text(hint)
+                        .font(.callout)
                 }
                 .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(hint)
+                .accessibilityIdentifier(AccessibilityID.Video.emptyState)
             }
         }
         .dropDestination(for: URL.self) { urls, _ in
@@ -144,7 +150,12 @@ struct SubtitleOverlay: View {
     let cue: Cue
 
     var body: some View {
-        let text = SubtitleText.visibleLines(of: cue.text).joined(separator: "\n")
+        let lines = SubtitleText.visibleLines(of: cue.text)
+        let text = lines.joined(separator: "\n")
+        // Dialogue lines line up on their dashes: a block aligned to the start
+        // of the text's direction (right for Arabic), centred as a whole.
+        let isDialogue = SubtitleText.isDialogue(lines)
+        let direction: LayoutDirection = TextDirection.of(text: text) == .rightToLeft ? .rightToLeft : .leftToRight
         GeometryReader { geometry in
             let margin = geometry.size.height * 0.05
             VStack {
@@ -152,7 +163,8 @@ struct SubtitleOverlay: View {
                 if !text.isEmpty {
                     Text(text)
                         .font(.system(size: max(12, geometry.size.height * 0.055), weight: .medium))
-                        .multilineTextAlignment(.center)
+                        .multilineTextAlignment(isDialogue ? .leading : .center)
+                        .environment(\.layoutDirection, direction)
                         .foregroundStyle(.white)
                         // A one-point outline from four offset shadows, plus a soft drop shadow.
                         .shadow(color: .black, radius: 0, x: 1, y: 1)

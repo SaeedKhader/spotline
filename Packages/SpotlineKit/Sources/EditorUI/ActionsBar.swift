@@ -2,9 +2,9 @@ import EditorCommands
 import SpotlineAccessibility
 import SwiftUI
 
-/// The strip above the mini-map: transport and editing buttons on the left,
-/// analysis status, timecode and frame rate on the right. Every button runs
-/// the same command as its menu item.
+/// The strip above the mini-map: transport and editing buttons on the left;
+/// the review count, analysis status, timecode and frame rate on the right.
+/// Every button runs the same command as its menu item.
 struct ActionsBar: View {
     let editor: EditorState
 
@@ -31,6 +31,7 @@ struct ActionsBar: View {
                 CommandButton(command: .zoomIn, systemImage: "plus.magnifyingglass", editor: editor)
             }
             Spacer(minLength: 8)
+            ReviewSummary(editor: editor)
             AnalysisStatusView(editor: editor)
             TimecodeView(editor: editor)
             Text(editor.frameRate.description)
@@ -73,5 +74,31 @@ private struct TimecodeView: View {
             .accessibilityLabel("Timecode")
             .accessibilityValue(editor.timecode.description)
             .accessibilityIdentifier(AccessibilityID.Transport.timecode)
+    }
+}
+
+/// "3 cues need review" under the QC preset. View › Show Issues lists them;
+/// ⌥⌘↑ and ⌥⌘↓ step through them.
+private struct ReviewSummary: View {
+    let editor: EditorState
+
+    var body: some View {
+        let count = editor.issues.count
+        let summary = count == 0 ? "No cues need review" : count == 1 ? "1 cue needs review" : "\(count) cues need review"
+        HStack(spacing: 4) {
+            Label(summary, systemImage: count == 0 ? "checkmark.circle" : "exclamationmark.triangle.fill")
+                .foregroundStyle(count == 0 ? Color.secondary : Color.orange)
+                .help(count == 0 ? summary : "\(summary): \(EditorCommand.toggleIssuesPanel.menuHint("View")) lists them")
+                .accessibilityValue(summary)
+                .accessibilityIdentifier(AccessibilityID.CueList.reviewSummary)
+            Text("· \(editor.qcPreset.name)")
+                .foregroundStyle(.tertiary)
+                .help(editor.qcPreset.summary)
+                .accessibilityLabel("QC preset")
+                .accessibilityValue(editor.qcPreset.name)
+                .accessibilityIdentifier(AccessibilityID.Issues.preset)
+        }
+        .font(.caption)
+        .lineLimit(1)
     }
 }
