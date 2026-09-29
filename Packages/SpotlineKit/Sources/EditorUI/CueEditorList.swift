@@ -224,7 +224,22 @@ private struct CueRow: View {
                 .padding(.vertical, 4)
                 .frame(minHeight: 58)
                 .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.separator))
+                // Text an AI tool wrote is tinted until someone edits it.
+                .background(cue.isAIGenerated == true ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(cue.isAIGenerated == true ? AnyShapeStyle(Color.accentColor.opacity(0.45)) : AnyShapeStyle(.separator))
+                )
+                .overlay(alignment: .topTrailing) {
+                    if cue.isAIGenerated == true {
+                        Image(systemName: "sparkles")
+                            .font(.caption2)
+                            .foregroundStyle(.tint)
+                            .padding(5)
+                            .help("Written by \(editor.aiToolName(for: cue)); edit it to make it yours")
+                            .accessibilityLabel("Written by AI")
+                    }
+                }
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
                     focusedText.wrappedValue = nil

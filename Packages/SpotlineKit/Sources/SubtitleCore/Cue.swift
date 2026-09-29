@@ -20,6 +20,9 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     /// The line for each addressee it could be spoken to, when a translator was
     /// unsure: one click swaps the text (docs/ARCHITECTURE.md, 7b). Nil otherwise.
     public var variants: [TextVariant]?
+    /// True while the text is as an AI tool wrote it (transcription, translation);
+    /// cleared when the user edits it. The cue list tints these.
+    public var isAIGenerated: Bool?
 
     public init(
         id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom,

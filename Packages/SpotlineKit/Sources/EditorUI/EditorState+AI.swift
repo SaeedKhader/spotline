@@ -138,8 +138,6 @@ extension EditorState {
     }
 
     private func finishReview(of ids: Set<Cue.ID>?, in review: ProposedChangeSet, selecting next: Cue.ID?) {
-        // A tool still running keeps sending results; decided changes stay decided.
-        decidedChanges.formUnion(ids ?? Set(review.changes.map(\.cueID)))
         let rest = ids.map { review.removing($0) }
         pendingReview = rest.flatMap { $0.isEmpty ? nil : $0 }
         if let ids, let selected = selectedCueID, ids.contains(selected) {
@@ -163,6 +161,11 @@ extension EditorState {
         pendingReview = review
         let first = review.changes.min { $0.cue.start < $1.cue.start }
         if let first { select(first.cueID) }
+    }
+
+    /// "transcription" or "translation", for the tint's tooltip.
+    func aiToolName(for cue: Cue) -> String {
+        sourceCues[cue.id] != nil ? "translation" : "transcription"
     }
 
     // MARK: Addressee variants
@@ -192,21 +195,56 @@ extension EditorState {
 
     // MARK: Running tools
 
-    /// Shows what a running tool has found so far. Changes already decided are left out;
-    /// the first result selects its first change unless the user is on a cue.
-    func showPartialReview(_ proposal: ProposedChangeSet, serial: Int) {
-        guard aiTask != nil, serial > partialSerial else { return }
-        partialSerial = serial
-        let open = proposal.removing(decidedChanges)
-        let wasEmpty = pendingReview == nil
-        pendingReview = open.isEmpty ? nil : open
-        if wasEmpty, selectedCueID == nil, let first = open.changes.min(by: { $0.cue.start < $1.cue.start }) {
-            select(first.cueID)
+    /// Writes what a running tool has found so far into the track, as one undoable
+    /// step per batch. Transcription and translation only fill empty cues and gaps,
+    /// so they skip review (cleanup, which rewrites text, is reviewed). A result that
+    /// would overwrite something the user did meanwhile is left out: a new cue that
+    /// now overlaps one, or a translation for a cue the user has typed in.
+    func applyResults(_ proposal: ProposedChangeSet, serial: Int? = nil) {
+        guard aiTask != nil else { return }
+        if let serial {
+            guard serial > partialSerial else { return }
+            partialSerial = serial
         }
+        var changes: [ProposedChange] = []
+        for var change in proposal.changes {
+            change.cue.isAIGenerated = true
+            switch change.kind {
+            case .insert:
+                if let current = cue(withID: change.cueID) {
+                    // Already written: only the speaker, found at the end, is new.
+                    guard current.speakerID == nil, let speaker = change.cue.speakerID else { continue }
+                    var after = current
+                    after.speakerID = speaker
+                    if let update = ProposedChange.update(from: current, to: after) { changes.append(update) }
+                } else if !track.cues.contains(where: { $0.position == .bottom && $0.start < change.cue.end && change.cue.start < $0.end }) {
+                    changes.append(change)
+                }
+            case .update(let before):
+                guard let current = cue(withID: change.cueID) else { continue }
+                if appliedAIChanges.contains(change.cueID) {
+                    guard current.speakerID == nil, let speaker = change.cue.speakerID else { continue }
+                    var after = current
+                    after.speakerID = speaker
+                    if let update = ProposedChange.update(from: current, to: after) { changes.append(update) }
+                } else if before.text == change.cue.text || current.text == before.text {
+                    if before.text == change.cue.text { change.cue.isAIGenerated = current.isAIGenerated }
+                    change.cue.text = before.text == change.cue.text ? current.text : change.cue.text
+                    changes.append(change)
+                }
+            case .delete:
+                continue
+            }
+        }
+        guard !changes.isEmpty else { return }
+        appliedAIChanges.formUnion(changes.map(\.cueID))
+        let applied = ProposedChangeSet(title: proposal.title, changes: changes, newSpeakers: proposal.newSpeakers)
+        edit(proposal.title) { track in applied.apply(to: &track) }
+        if selectedCueID == nil, let first = changes.min(by: { $0.cue.start < $1.cue.start }) { select(first.cueID) }
     }
 
-    /// Runs `work` in the background with progress in the actions bar. Results it
-    /// passes to `propose` show for review at once; its final proposal replaces them.
+    /// Runs `work` in the background with progress over the cue list. Results it
+    /// passes to `propose` go into the track at once; its final result adds the rest.
     private func startAITask(
         _ title: String,
         _ work: @escaping @MainActor (
@@ -214,12 +252,12 @@ extension EditorState {
         ) async throws -> ProposedChangeSet
     ) {
         aiTask = AITaskStatus(title: title, fraction: 0)
-        decidedChanges = []
+        appliedAIChanges = []
         partialSerial = 0
         let serial = SerialCounter()
         let propose: @Sendable (ProposedChangeSet) -> Void = { [weak self] proposal in
             let number = serial.next()
-            Task { @MainActor in self?.showPartialReview(proposal, serial: number) }
+            Task { @MainActor in self?.applyResults(proposal, serial: number) }
         }
         let report: @Sendable (Double) -> Void = { [weak self] fraction in
             Task { @MainActor in
@@ -231,30 +269,17 @@ extension EditorState {
             do {
                 let final = try await work(report, propose)
                 guard let self, !Task.isCancelled else { return }
+                self.applyResults(final)
                 self.aiTask = nil
-                let proposal = final.removing(self.decidedChanges)
-                if proposal.isEmpty, !self.decidedChanges.isEmpty {
-                    self.pendingReview = nil
-                } else if proposal.isEmpty {
-                    self.reportError("\(title) found nothing to change.", AIError.nothingToDo("Every cue is already as the tool would make it."))
-                } else {
-                    self.showFinalReview(proposal)
+                if self.appliedAIChanges.isEmpty {
+                    self.reportError("\(title) found nothing to add.", AIError.nothingToDo("Every cue is already as the tool would make it."))
                 }
             } catch {
                 guard let self else { return }
                 self.aiTask = nil
-                // What was found before the failure stays for review.
+                // What was written before the failure stays (and undoes like any edit).
                 if !(error is CancellationError), !Task.isCancelled { self.reportError("\(title) stopped.", error) }
             }
-        }
-    }
-
-    /// The finished proposal: selects its first change unless the user is already reviewing.
-    private func showFinalReview(_ proposal: ProposedChangeSet) {
-        let wasEmpty = pendingReview == nil
-        pendingReview = proposal
-        if wasEmpty || selectedCueID.flatMap({ proposal.change(forCue: $0) }) == nil && selectedCue == nil {
-            if let first = proposal.changes.min(by: { $0.cue.start < $1.cue.start }) { select(first.cueID) }
         }
     }
 
@@ -295,7 +320,7 @@ extension EditorState {
         let existing = track.cues
         let prepare = prepareAudio
         let accumulator = TranscriptAccumulator(segmenter: segmenter)
-        startAITask("Transcribing") { [weak self] progress, propose in
+        startAITask("Transcription") { progress, propose in
             let audio = try await prepare(url, stream) { progress($0 * 0.15) }
             let words = try await transcriber.transcribe(audio, language: language) { progress(0.15 + $0 * 0.75) } found: { words in
                 // Cues show as soon as they are complete; speakers come at the end.
@@ -307,17 +332,7 @@ extension EditorState {
                 return (cues, VoiceSpeakerAnalyzer().analyze(cues, in: audio))
             }
             progress(1)
-            var proposal = Proposals.transcription(cues, existing: existing, speakers: speakers)
-            // Cues accepted while transcribing get their speakers as a change of their own.
-            if let self {
-                for cue in cues where self.decidedChanges.contains(cue.id) {
-                    guard let current = self.cue(withID: cue.id), let speaker = speakers.assignments[cue.id]?.speakerID else { continue }
-                    var after = current
-                    after.speakerID = speaker
-                    if let change = ProposedChange.update(from: current, to: after) { proposal.changes.append(change) }
-                }
-                self.decidedChanges.subtract(proposal.changes.filter { $0.kind != .insert }.map(\.cueID))
-            }
+            let proposal = Proposals.transcription(cues, existing: existing, speakers: speakers)
             return proposal
         }
     }
@@ -344,7 +359,7 @@ extension EditorState {
         let snapshot = track
         let language = spokenLanguage
         let prepare = prepareAudio
-        startAITask("Detecting speakers") { [weak self] progress, _ in
+        startAITask("Speakers and Addressees") { [weak self] progress, _ in
             let audio = try await prepare(url, stream) { progress($0 * 0.4) }
             let result = try await Self.runDetached {
                 VoiceSpeakerAnalyzer().analyze(cues, in: audio).reusingSpeakers(of: cues, from: snapshot.speakers)
@@ -386,7 +401,7 @@ extension EditorState {
         let examples = Dictionary(cues.compactMap { cue in
             sourceCues[cue.id].flatMap { memory.matches(for: $0.text, limit: 1).first }.map { (cue.id, ($0.entry.source, $0.entry.target)) }
         }, uniquingKeysWith: { first, _ in first })
-        startAITask("Translating") { [weak self] progress, propose in
+        startAITask("Translation") { [weak self] progress, propose in
             var speakers: VoiceSpeakerAnalyzer.Result?
             if needsSpeakers, let url {
                 let audio = try await prepare(url, stream) { progress($0 * 0.15) }

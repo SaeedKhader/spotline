@@ -37,22 +37,21 @@ struct AIStateTests {
         }
     }
 
-    @Test func transcriptionIsProposedThenAcceptedAsOneEdit() async {
+    @Test func transcriptionGoesStraightIntoTheCueList() async {
         let editor = makeEditor()
         #expect(editor.perform(.transcribe))
-        #expect(editor.aiTask?.title == "Transcribing")
+        #expect(editor.aiTask?.title == "Transcription")
         await finish(editor)
-        let review = try! #require(editor.pendingReview)
-        #expect(review.changes.map(\.cue.text) == ["Hello there. How are you?", "Fine, thanks."])
-        #expect(editor.track.cues.isEmpty, "Nothing is applied before review")
-        #expect(editor.proposedInserts.count == 2)
-        #expect(editor.selectedCueID == review.changes[0].cueID)
-        // Tools wait while a review is open.
-        #expect(!editor.canPerform(.transcribe))
-
-        #expect(editor.perform(.acceptAllChanges))
+        #expect(editor.pendingReview == nil, "Transcription is not reviewed")
         #expect(editor.track.cues.map(\.text) == ["Hello there. How are you?", "Fine, thanks."])
-        #expect(editor.pendingReview == nil)
+        #expect(editor.track.cues.allSatisfy { $0.isAIGenerated == true })
+        // Typing makes a cue the user's.
+        editor.setText("Hello there! How are you?", forCue: editor.track.cues[0].id)
+        #expect(editor.track.cues[0].isAIGenerated == nil)
+        // One undo step per batch: the first sentence came before the second.
+        editor.perform(.undo)
+        editor.perform(.undo)
+        #expect(editor.track.cues.map(\.text) == ["Hello there. How are you?"])
         editor.perform(.undo)
         #expect(editor.track.cues.isEmpty)
     }
@@ -101,9 +100,7 @@ struct AIStateTests {
         editor.setTargetLanguage("ar")
         #expect(editor.perform(.translateWithAI))
         await finish(editor)
-        let review = try #require(editor.pendingReview)
-        #expect(review.changes.count == 2)
-        editor.perform(.acceptAllChanges)
+        #expect(editor.pendingReview == nil)
         let first = editor.track.cues[0]
         #expect(first.text == "[ar] Where are you going? ♀")
         #expect(first.addressee?.needsReview == true)
@@ -133,11 +130,10 @@ struct AIStateTests {
         #expect(editor.track.languageCode == "ar")
         #expect(editor.track.cues[0].speakerID == speaker.id)
         await finish(editor)
-        editor.perform(.acceptAllChanges)
         #expect(editor.track.cues.map(\.text) == ["[ar] Where are you going? ♀", "[ar] Home."])
     }
 
-    @Test func transcribedCuesCanBeAcceptedWhileTranscribing() async throws {
+    @Test func cuesShowWhileTranscribingAndEditsAreKept() async throws {
         let editor = makeEditor()
         let release = AsyncStream<Void>.makeStream()
         let words = ScriptedTranscriber.fixture.words
@@ -147,18 +143,23 @@ struct AIStateTests {
         )
         editor.perform(.transcribe)
         // The first sentence is complete once "Fine," is heard; it shows before the task ends.
-        for _ in 0..<200 where editor.pendingReview == nil { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<200 where editor.track.cues.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(editor.aiTask != nil)
-        #expect(editor.pendingReview?.changes.map(\.cue.text) == ["Hello there. How are you?"])
-        let first = try #require(editor.pendingReview?.changes.first?.cueID)
-        editor.acceptChanges(to: [first])
         #expect(editor.track.cues.map(\.text) == ["Hello there. How are you?"])
+        let first = editor.track.cues[0].id
+        editor.setText("Hi there. How are you?", forCue: first)
 
         release.continuation.yield()
         await finish(editor)
-        // The accepted cue is not proposed again; the rest is.
-        #expect(editor.pendingReview?.changes.map(\.cue.text) == ["Fine, thanks."])
+        #expect(editor.track.cues.map(\.text) == ["Hi there. How are you?", "Fine, thanks."])
         #expect(editor.track.cues.first?.id == first)
+    }
+
+    @Test func cleanupIsStillReviewed() {
+        let editor = makeEditor(cues: [cue("Holy shit.", at: 0)])
+        editor.perform(.maskProfanity)
+        #expect(editor.pendingReview?.changes.count == 1)
+        #expect(editor.track.cues[0].text == "Holy shit.")
     }
 
     @Test func cancellingStopsWithoutProposing() async {
@@ -172,7 +173,7 @@ struct AIStateTests {
         #expect(editor.perform(.cancelAITask))
         #expect(editor.aiTask == nil)
         try? await Task.sleep(for: .milliseconds(50))
-        #expect(editor.pendingReview == nil)
+        #expect(editor.track.cues.isEmpty)
         #expect(editor.canPerform(.transcribe))
     }
 
