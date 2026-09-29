@@ -294,9 +294,9 @@ struct MultipartForm {
 /// It also names the people it recognizes, which builds the cast.
 public struct ClaudeTranslator: CueTranslator {
     public var name: String { model == Self.defaultModel ? "Claude (cloud)" : "Claude \(model) (cloud)" }
-    /// Sonnet by default, at half Opus's price; Opus is a setting.
-    public static let defaultModel = "claude-sonnet-5-5"
-    public static let opusModel = "claude-opus-5-5"
+    /// Opus by default; Sonnet, at half the price, is a setting.
+    public static let defaultModel = "claude-opus-5-5"
+    public static let sonnetModel = "claude-sonnet-5-5"
     let model: String
     let apiKey: String
     let http: HTTPClient

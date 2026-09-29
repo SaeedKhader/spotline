@@ -49,7 +49,7 @@ public struct AIProviderFactory {
                 switch settings.translation {
                 case .appleTranslation:
                     return AppleTranslator()
-                case .claude, .claudeOpus:
+                case .claude, .claudeSonnet:
                     guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                     guard let key = keys.key(for: .anthropic) else { throw AIError.missingAPIKey(provider: "Anthropic") }
                     return ClaudeTranslator(apiKey: key, model: settings.translation.claudeModel ?? ClaudeTranslator.defaultModel)
