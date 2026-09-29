@@ -106,6 +106,13 @@ struct ProjectTests {
         let source = SubtitleTrack(languageCode: "en", cues: [cue("Hello", at: 1)])
         var target = SubtitleTrack(languageCode: "ar", cues: [cue("مرحبا", at: 1)])
         target.cues[0].sourceCueID = source.cues[0].id
+        // Translation choices and the cast the translator built are part of the episode.
+        target.cues[0].voices = ["speaker_1"]
+        target.cues[0].flag = TranslationFlag(reasons: [.listener, .speaker], variants: [
+            TranslationVariant(text: "مرحبا", speaker: "Beth", speakerGender: .female, listeners: ["Morty"], listenerGender: .male, listenerCount: .one),
+            TranslationVariant(text: "مرحبا بكم", listenerGender: .mixed, listenerCount: .many),
+        ], confidence: 0.55, note: "Beth is talking to Morty")
+        target.cast = [CastMember(name: "Beth", gender: .female, isConfirmed: true, voices: ["speaker_1"])]
         let project = ProjectFile(
             media: MediaReference(url: media, projectURL: directory.appending(path: "P.spotline")), frameRate: rate, track: target,
             sourceTrack: source, qcPresetID: "netflix", selectedCueID: target.cues[0].id, playhead: MediaTime(value: 3, timescale: 2),
@@ -118,7 +125,21 @@ struct ProjectTests {
         )
         let read = try ProjectFile(fileWrapper: project.fileWrapper(cache: ProjectFile.EncodingCache()))
         #expect(read == project)
+        #expect(read.track.cues[0].flag?.note == "Beth is talking to Morty")
         #expect(project.media?.relativePath == "Episode 1.mkv")
+    }
+
+    @Test func tracksSavedBeforeTheCastStillOpen() throws {
+        // An M9 project's subtitles: speakers and addressee tags, no cast.
+        let id = UUID(), cueID = UUID()
+        let json = """
+            {"id": "\(id)", "languageCode": "ar", "styles": [], "properties": {}, "speakers": [],
+             "cues": [{"id": "\(cueID)", "start": {"value": 1, "timescale": 1}, "end": {"value": 2, "timescale": 1},
+                       "text": "مرحبا", "position": "bottom", "addressee": {"addressee": "female", "confidence": 0.6, "source": "inferred"}}]}
+            """
+        let track = try JSONDecoder().decode(SubtitleTrack.self, from: Data(json.utf8))
+        #expect(track.cues.map(\.text) == ["مرحبا"])
+        #expect(track.cast.isEmpty && track.cues[0].flag == nil)
     }
 
     @Test func projectsFromANewerSpotlineAreRefused() throws {

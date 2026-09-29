@@ -32,9 +32,9 @@ public struct ScriptedTranscriber: Transcriber {
     }
 }
 
-/// Translates by tagging each line with the target language ("[fr] Hello"). Lines
-/// with "you" in them get a female addressee at 60% with male and group variants,
-/// so the review and variant chips can be exercised.
+/// Translates by tagging each line with the target language ("[fr] Hello"). Into a
+/// gendered language, lines with "you" in them are flagged at 60%: spoken to
+/// Beth (♀, recommended), to Jerry (♂) or to both, so the review can be exercised.
 public struct ScriptedTranslator: CueTranslator {
     public var name: String { "Scripted translator" }
 
@@ -42,24 +42,32 @@ public struct ScriptedTranslator: CueTranslator {
 
     public func translate(
         _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
-        found: @escaping @Sendable ([CueTranslation]) -> Void
-    ) async throws -> [CueTranslation] {
+        found: @escaping @Sendable (TranslationBatch) -> Void
+    ) async throws -> TranslationBatch {
         let prefix = "[\(Languages.base(request.targetLanguage))] "
-        let all = request.lines.map { line in
+        let translations = request.lines.map { line in
             let text = prefix + line.source
             guard request.targetIsGendered, line.source.lowercased().contains("you") else {
                 return CueTranslation(cueID: line.cueID, text: text)
             }
-            return CueTranslation(
-                cueID: line.cueID, text: text + " ♀", addressee: AddresseeTag(.female, confidence: 0.6),
+            var flag = TranslationFlag(
+                reasons: [.listener],
                 variants: [
-                    TextVariant(addressee: .female, text: text + " ♀"), TextVariant(addressee: .male, text: text + " ♂"),
-                    TextVariant(addressee: .groupMixed, text: text + " 👥"),
-                ]
+                    TranslationVariant(text: text + " ♀", listeners: ["Beth"], listenerGender: .female, listenerCount: .one),
+                    TranslationVariant(text: text + " ♂", listeners: ["Jerry"], listenerGender: .male, listenerCount: .one),
+                    TranslationVariant(text: text + " 👥", listeners: ["Beth", "Jerry"], listenerGender: .mixed, listenerCount: .two),
+                ],
+                confidence: 0.6, note: "Beth answered last"
             )
+            flag.rerank(with: request.cast)
+            return CueTranslation(cueID: line.cueID, text: flag.chosenVariant?.text ?? text, flag: flag)
         }
-        found(all)
+        let batch = TranslationBatch(
+            translations: translations,
+            cast: request.targetIsGendered ? [CastMember(name: "Beth", gender: .female), CastMember(name: "Jerry", gender: .male)] : []
+        )
+        found(batch)
         progress(1)
-        return all
+        return batch
     }
 }

@@ -28,7 +28,7 @@ struct SpotlineBench {
           --source CODE          spoken language and reference source subtitles (default: en)
           --target CODE          translation language and reference (default: ar)
           --transcriber NAME     apple (default), whisper or scribe (keys from Settings › AI, else OPENAI_API_KEY, ELEVENLABS_API_KEY)
-          --translator NAME      apple (default) or claude (key from Settings › AI, else ANTHROPIC_API_KEY)
+          --translator NAME      apple (default), claude (Opus) or claude-sonnet (key from Settings › AI, else ANTHROPIC_API_KEY)
           --preset ID            QC preset: netflix (default), netflixChildren, broadcast, basic
           --skip-translation     transcription only
           --fresh                ignore cached model results
@@ -162,7 +162,7 @@ struct Cache {
 
     struct Translation: Codable {
         var text: String
-        var addressee: AddresseeTag?
+        var flag: TranslationFlag?
     }
 
     func load<T: Decodable>(_ type: T.Type, _ name: String) -> T? {
@@ -212,7 +212,11 @@ struct Benchmark {
                     log("  word error rate \(BenchmarkReport.percent(result.transcription!.wordErrorRate))")
                 }
                 if !options.skipTranslation, let source = sample.sourceReference, let target = sample.targetReference {
-                    let (cues, score) = try await translate(sample, source: source, reference: target, media: media, with: translator)
+                    let (cues, score) = try await translate(
+                        sample, source: source, reference: target, media: media, with: translator, words: cachedWords(sample, transcriber: transcriber)
+                    )
+                    let flagged = cues.filter { $0.flag != nil }.count
+                    if flagged > 0 { result.notes.append("\(flagged) lines flagged with variants") }
                     try SubtitleFile.write(cues, as: .srt, frameRate: media.frameRate, to: output.appending(path: "\(sample.name).\(options.target).srt"))
                     result.translation = score
                     log("  chrF \(BenchmarkReport.plain(score.chrF.score))")
@@ -262,9 +266,9 @@ struct Benchmark {
     func makeTranslator() throws -> any CueTranslator {
         switch options.translator {
         case "apple": return AppleTranslator()
-        case "claude":
+        case "claude", "claude-sonnet":
             guard let key = Self.apiKey(.anthropic, environment: "ANTHROPIC_API_KEY") else { throw AIError.missingAPIKey(provider: "Anthropic") }
-            return ClaudeTranslator(apiKey: key)
+            return ClaudeTranslator(apiKey: key, model: options.translator == "claude" ? ClaudeTranslator.defaultModel : ClaudeTranslator.sonnetModel)
         default:
             throw Options.Error(message: "No translator \(options.translator).")
         }
@@ -307,6 +311,11 @@ struct Benchmark {
 
     // MARK: Transcription
 
+    /// The transcriber's words for a sample, if a run has cached them.
+    func cachedWords(_ sample: Sample, transcriber: any Transcriber) -> [TranscribedWord]? {
+        cache.load([TranscribedWord].self, "\(sample.name).\(Self.cacheKey(transcriber.name)).\(options.source).words.json")
+    }
+
     /// Words from the model (cached), then cues exactly as the editor makes them.
     func transcribe(_ sample: Sample, media: Media, with transcriber: any Transcriber) async throws -> [Cue] {
         let key = "\(sample.name).\(Self.cacheKey(transcriber.name)).\(options.source).words.json"
@@ -327,9 +336,10 @@ struct Benchmark {
     // MARK: Translation
 
     /// Translates the reference source cues (so translation is scored apart
-    /// from transcription), with speakers and addressees found as the editor does.
+    /// from transcription), with the voices the transcriber heard in each, as the editor does.
     func translate(
-        _ sample: Sample, source: SubtitleTrack, reference: SubtitleTrack, media: Media, with translator: any CueTranslator
+        _ sample: Sample, source: SubtitleTrack, reference: SubtitleTrack, media: Media, with translator: any CueTranslator,
+        words: [TranscribedWord]?
     ) async throws -> ([Cue], TranslationScore) {
         // Spoken text only: SDH descriptions and speaker labels are not in a translation's reference.
         let cues = source.cues.compactMap { cue -> Cue? in
@@ -337,27 +347,8 @@ struct Benchmark {
             spoken.text = SubtitleText.visibleLines(of: cue.text).map(ScoringText.spokenText).filter { !$0.isEmpty }.joined(separator: "\n")
             return spoken.text.isEmpty ? nil : spoken
         }.sorted { $0.start < $1.start }
-        let gendered = Languages.addressesByGender(options.target)
-        var speakers: VoiceSpeakerAnalyzer.Result?
-        var tags: [Cue.ID: AddresseeTag] = [:]
-        if gendered {
-            let result = VoiceSpeakerAnalyzer().analyze(cues, in: media.audio)
-            speakers = result
-            let lines = cues.map { cue in
-                let assignment = result.assignments[cue.id]
-                return SceneAddresseeInferrer.Line(
-                    cueID: cue.id, text: cue.text, start: cue.start, end: cue.end,
-                    speakerID: assignment?.speakerID, speakerConfidence: assignment?.confidence ?? 0
-                )
-            }
-            tags = SceneAddresseeInferrer().infer(lines, speakers: result.speakers, language: options.source)
-        }
-        let cast = speakers?.speakers ?? []
         let lines = cues.map { cue in
-            let hint = speakers?.assignments[cue.id].flatMap { assignment in cast.firstIndex { $0.id == assignment.speakerID } }.map { index in
-                TranslationRequest.SpeakerHint(label: String(UnicodeScalar(UInt8(65 + index % 26))), gender: cast[index].gender, confidence: cast[index].confidence)
-            }
-            return TranslationRequest.Line(cueID: cue.id, source: cue.text, start: cue.start, end: cue.end, speaker: hint, addressee: tags[cue.id])
+            TranslationRequest.Line(cueID: cue.id, source: cue.text, start: cue.start, end: cue.end, voices: Self.voices(in: words ?? [], during: cue))
         }
         let index = sample.glossary.map(GlossaryIndex.init)
         let glossary = (sample.glossary?.entries ?? []).filter { entry in
@@ -373,13 +364,13 @@ struct Benchmark {
         let key = "\(sample.name).\(Self.cacheKey(translator.name)).\(options.source)-\(options.target).json"
         var translations: [CueTranslation]
         if let cached = cache.load([Cache.Translation].self, key), cached.count == cues.count {
-            translations = zip(cues, cached).map { CueTranslation(cueID: $0.id, text: $1.text, addressee: $1.addressee) }
+            translations = zip(cues, cached).map { CueTranslation(cueID: $0.id, text: $1.text, flag: $1.flag) }
         } else {
             log("  translating with \(translator.name)")
             let found = try await translator.translate(request, progress: { _ in }, found: { _ in })
-            let byID = Dictionary(found.map { ($0.cueID, $0) }, uniquingKeysWith: { first, _ in first })
+            let byID = Dictionary(found.translations.map { ($0.cueID, $0) }, uniquingKeysWith: { first, _ in first })
             translations = cues.map { byID[$0.id] ?? CueTranslation(cueID: $0.id, text: "") }
-            try cache.store(translations.map { Cache.Translation(text: $0.text, addressee: $0.addressee) }, key)
+            try cache.store(translations.map { Cache.Translation(text: $0.text, flag: $0.flag) }, key)
         }
         translations = TranslationPipeline(preset: options.preset).fix(translations, request: request)
 
@@ -387,6 +378,7 @@ struct Benchmark {
         let translated = cues.map { cue in
             var target = cue
             target.text = byID[cue.id]?.text ?? ""
+            target.flag = byID[cue.id]?.flag
             return target
         }
         let references = reference.cues.sorted { $0.start < $1.start }
@@ -401,6 +393,17 @@ struct Benchmark {
         score.rules = RuleCounts(translated, preset: options.preset, context: media.context)
         score.referenceRules = RuleCounts(reference.cues, preset: options.preset, context: media.context)
         return (translated, score)
+    }
+}
+
+extension Benchmark {
+    /// The speakers of the words inside a cue, in order of first word.
+    static func voices(in words: [TranscribedWord], during cue: Cue) -> [String]? {
+        var voices: [String] = []
+        for word in words where word.start < cue.end && cue.start < word.end {
+            if let speaker = word.speaker, !voices.contains(speaker) { voices.append(speaker) }
+        }
+        return voices.isEmpty ? nil : voices
     }
 }
 

@@ -29,8 +29,11 @@ public enum CleanupTool: String, Sendable, CaseIterable {
             }
             var after = cue
             after.text = cleaned
-            // Variants describe the old text; they no longer apply.
-            if after.variants != nil { after.variants = nil }
+            // The other ways to translate the line get the same cleanup, so swapping one in keeps it.
+            if var flag = after.flag {
+                for index in flag.variants.indices { flag.variants[index].text = clean(flag.variants[index].text, languageCode: languageCode) }
+                after.flag = flag
+            }
             return ProposedChange.update(from: cue, to: after)
         }
         return ProposedChangeSet(title: title, changes: changes)

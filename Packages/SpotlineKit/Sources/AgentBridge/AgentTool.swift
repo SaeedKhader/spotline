@@ -36,7 +36,7 @@ public enum AgentTool: String, CaseIterable, Sendable {
         case .getProject:
             "The open project: media (file, duration, frame rate, audio tracks), subtitle file, language, translation source, playhead, selected cue, cue count, QC preset and issue count, the running AI tool, and whether undo/redo are possible."
         case .getCues:
-            "Cues in time order, each with its number, id, start and end (SMPTE timecode and HH:MM:SS,mmm), text, position, speaker, QC issues, whether AI wrote it, its source text when translating, and any change an AI tool proposes for it. Use from and count to page through long files."
+            "Cues in time order, each with its number, id, start and end (SMPTE timecode and HH:MM:SS,mmm), text, position, speaker, voices, QC issues, the translation choice when a line reads more than one way, whether AI wrote it, its source text when translating, and any change an AI tool proposes for it. Use from and count to page through long files."
         case .getQCIssues:
             "Quality-control issues for every cue under the current preset (reading speed, line length, durations, gaps, overlaps, shot changes, untranslated cues, glossary terms), plus the available presets."
         case .getAIStatus:
@@ -76,7 +76,7 @@ public enum AgentTool: String, CaseIterable, Sendable {
         case .runQC:
             "Checks every cue against a QC preset (default: the current one) and returns the issues. Choosing a preset keeps it for the project."
         case .startAITool:
-            "Starts an AI tool in the background; poll get_ai_status for progress. transcribe and translate fill empty cues and gaps directly, one undoable edit per batch. detect_speakers tags speakers and addressees. The cleanup tools (mask_profanity, remove_hearing_impaired, fix_punctuation) only propose changes, which the person reviews and accepts or rejects in Spotline. Cancel a running tool with run_command ai.cancel."
+            "Starts an AI tool in the background; poll get_ai_status for progress. transcribe and translate fill empty cues and gaps directly, one undoable edit per batch. Into gendered languages, translate flags lines that read more than one way (see translation_choice in get_cues); set_cue_text with one of its variants settles one. The cleanup tools (mask_profanity, remove_hearing_impaired, fix_punctuation) only propose changes, which the person reviews and accepts or rejects in Spotline. Cancel a running tool with run_command ai.cancel."
         case .runCommand:
             "Runs any editor command by id (see list_commands), e.g. editing.undo, editing.redo, cue.fixOverlaps, navigation.nextIssue, playback.stepForward. Commands that open a file dialog have their own tools, and accepting or rejecting AI proposals is left to the person."
         }
@@ -196,7 +196,6 @@ public enum AgentTool: String, CaseIterable, Sendable {
 public enum AgentAITool: String, CaseIterable, Sendable {
     case transcribe
     case translate
-    case detectSpeakers = "detect_speakers"
     case maskProfanity = "mask_profanity"
     case removeHearingImpaired = "remove_hearing_impaired"
     case fixPunctuation = "fix_punctuation"

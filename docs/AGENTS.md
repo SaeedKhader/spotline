@@ -46,7 +46,7 @@ Add this to the client's MCP configuration (for Claude Desktop, `~/Library/Appli
 | Tool | What it does |
 |---|---|
 | `get_project` | Project file, media, subtitle file, language, translation source, playhead, selection, QC summary, AI status, undo/redo |
-| `get_cues` | Cues with number, id, timecodes, text, position, speaker, issues, source text and proposed changes (`from`, `count` to page) |
+| `get_cues` | Cues with number, id, timecodes, text, position, speaker, voices, issues, source text, translation choice (variants and why) and proposed changes (`from`, `count` to page) |
 | `get_qc_issues` | Every QC issue under the current preset, and the available presets |
 | `get_ai_status` | The running AI tool, cleanup changes waiting for review, the last AI error |
 | `list_commands` | Every editor command, whether it can run now, and toggles' state |
@@ -54,7 +54,7 @@ Add this to the client's MCP configuration (for Claude Desktop, `~/Library/Appli
 | `seek`, `play`, `pause` | Playback |
 | `open_media`, `import_subtitles`, `open_source_subtitles`, `export_subtitles` | Files, by absolute path |
 | `run_qc` | Checks against a preset and returns the issues |
-| `start_ai_tool` | `transcribe`, `translate`, `detect_speakers`, `mask_profanity`, `remove_hearing_impaired`, `fix_punctuation` |
+| `start_ai_tool` | `transcribe`, `translate`, `mask_profanity`, `remove_hearing_impaired`, `fix_punctuation` |
 | `run_command` | Any command from `list_commands` by id, e.g. `editing.undo`, `cue.fixOverlaps`, `navigation.nextIssue` |
 
 Cues are named by the number `get_cues` shows (1 is the first) or by id. Numbers shift when cues are added or removed; ids don't. Times are SMPTE timecode (`HH:MM:SS:FF`, the frame's start) or `HH:MM:SS,mmm`, and a cue's end is the first frame without it.

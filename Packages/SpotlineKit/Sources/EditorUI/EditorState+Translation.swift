@@ -240,13 +240,13 @@ extension EditorState {
 
     // MARK: Quality control
 
-    /// Untranslated cues, glossary terms not used and unsure addressee guesses.
+    /// Untranslated cues and glossary terms not used. (Lines that read more than
+    /// one way have their own review: AI › Review Translation Choices.)
     func addTranslationIssues(to issues: inout [Cue.ID: [QCIssue]]) {
         for cue in track.cues {
             var found: [QCIssue] = []
-            if let tag = cue.addressee, tag.needsReview {
-                let percent = Int((tag.confidence * 100).rounded())
-                found.append(QCIssue(kind: .addresseeGuess, message: "Addressee is a guess (\(tag.addressee.symbol), \(percent)%)"))
+            if let source = sourceCues[cue.id], let words = source.unsureWords, !words.isEmpty {
+                found.append(QCIssue(kind: .unsureWords(words), message: "Check the source transcription: \(words.map { "“\($0)”" }.joined(separator: ", "))"))
             }
             if let source = sourceCues[cue.id] {
                 let sourceHasText = !SubtitleText.visibleLines(of: source.text).joined().allSatisfy(\.isWhitespace)

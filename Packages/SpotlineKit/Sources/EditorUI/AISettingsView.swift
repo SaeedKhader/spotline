@@ -43,7 +43,7 @@ public struct AISettingsView: View {
             } header: {
                 Text("Providers")
             } footer: {
-                Text("On this Mac, audio and text never leave your computer. Speakers, addressees and cleanup always run here.")
+                Text("On this Mac, audio and text never leave your computer. Cleanup always runs here.")
                     .foregroundStyle(.secondary)
             }
 
@@ -79,7 +79,7 @@ public struct AISettingsView: View {
         let candidates: [(name: String, key: APIKeyStore.Provider)?] = [
             settings.transcription == .openAIWhisper ? ("OpenAI Whisper", .openAI) : nil,
             settings.transcription == .elevenLabsScribe ? ("ElevenLabs Scribe", .elevenLabs) : nil,
-            settings.translation == .claude ? ("Claude", .anthropic) : nil,
+            settings.translation.isCloud ? ("Claude", .anthropic) : nil,
         ]
         let needed = candidates.compactMap { $0 }
         guard let first = needed.first else { return nil }

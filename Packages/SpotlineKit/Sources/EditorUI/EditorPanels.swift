@@ -88,6 +88,21 @@ enum EditorPanels {
         }
     }
 
+    static func confirmTranslatingUnsureCues(count: Int) -> UnsureTranscriptChoice {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = count == 1 ? "1 cue has words to check. Translate anyway?" : "\(count) cues have words to check. Translate anyway?"
+        alert.informativeText = "The transcription was unsure of some words. A wrong word in the source is translated wrong too."
+        alert.addButton(withTitle: "Review Cues")
+        alert.addButton(withTitle: "Translate Anyway")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .review
+        case .alertSecondButtonReturn: return .translateAnyway
+        default: return .cancel
+        }
+    }
+
     static func showError(_ title: String, _ error: any Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning
