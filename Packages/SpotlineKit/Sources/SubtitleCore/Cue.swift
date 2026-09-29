@@ -7,13 +7,22 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     public var end: MediaTime
     public var text: String
     public var position: CuePosition
+    /// The name of the track style the cue uses (ASS/SSA), nil for the track's default.
+    public var style: String?
+    /// Who speaks the line (the ASS "Name" field).
+    public var speaker: String?
 
-    public init(id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom) {
+    public init(
+        id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom,
+        style: String? = nil, speaker: String? = nil
+    ) {
         self.id = id
         self.start = start
         self.end = end
         self.text = text
         self.position = position
+        self.style = style
+        self.speaker = speaker
     }
 
     public var duration: MediaTime { end - start }
@@ -41,10 +50,24 @@ public struct SubtitleTrack: Identifiable, Hashable, Sendable, Codable {
     /// BCP 47 language tag, "und" when unknown.
     public var languageCode: String
     public var cues: [Cue]
+    /// Named text styles cues refer to (ASS/SSA), in file order. Empty for formats without styles.
+    public var styles: [SubtitleStyle]
+    /// Header fields kept for round trips, e.g. the ASS `[Script Info]` keys (`PlayResX`, `Title`).
+    public var properties: [String: String]
 
-    public init(id: UUID = UUID(), languageCode: String = "und", cues: [Cue] = []) {
+    public init(
+        id: UUID = UUID(), languageCode: String = "und", cues: [Cue] = [], styles: [SubtitleStyle] = [],
+        properties: [String: String] = [:]
+    ) {
         self.id = id
         self.languageCode = languageCode
         self.cues = cues
+        self.styles = styles
+        self.properties = properties
+    }
+
+    /// The style named `name`, else the one named "Default", else the first.
+    public func style(named name: String?) -> SubtitleStyle? {
+        styles.first { $0.name == name } ?? styles.first { $0.name == SubtitleStyle.defaultName } ?? styles.first
     }
 }

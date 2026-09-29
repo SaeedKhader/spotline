@@ -1,0 +1,16 @@
+[Script Info]
+Title: Old SSA file
+ScriptType: v4.00
+PlayResX: 640
+PlayResY: 480
+
+[V4 Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, TertiaryColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, AlphaLevel, Encoding
+Style: Default,Tahoma,24,16777215,65535,0,0,-1,0,1,2,1,2,30,30,20,0,0
+Style: Caption,Tahoma,20,&H00FFFF,65535,0,0,0,-1,1,2,1,6,30,30,20,0,0
+
+[Events]
+Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: Marked=0,0:00:01.00,0:00:02.00,Default,,0000,0000,0000,,Bold by style
+Dialogue: Marked=0,0:00:02.50,0:00:04.00,Caption,,0000,0000,0000,,Italic caption at the top
+Dialogue: Marked=0,0:00:04.50,0:00:06.00,Default,,0000,0000,0000,,{\a6}Moved to the top\NSecond line

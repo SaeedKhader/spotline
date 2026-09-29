@@ -34,7 +34,8 @@ public enum SubtitleText {
         }
     }
 
-    private static func decodeEntities(_ text: String) -> String {
+    /// Decodes the entities SRT and WebVTT text uses (`&amp;`, `&lt;`, `&gt;`, `&nbsp;`, `&lrm;`, `&rlm;`).
+    public static func decodeEntities(_ text: String) -> String {
         guard text.contains("&") else { return text }
         return text
             .replacing("&lt;", with: "<")

@@ -344,9 +344,12 @@ public final class EditorState {
     /// Replaces the cues with the file's. Undoable; reports errors through `reportError`.
     public func importSubtitles(from url: URL) {
         do {
-            let (format, cues) = try SubtitleFile.read(from: url)
+            let (format, imported) = try SubtitleFile.read(from: url)
             edit("Import Subtitles") { track in
-                track.cues = cues
+                track.cues = imported.cues
+                track.styles = imported.styles
+                track.properties = imported.properties
+                track.languageCode = imported.languageCode
             }
             selectedCueID = nil
             subtitleFile = SubtitleFileReference(url: url, format: format)
@@ -358,7 +361,7 @@ public final class EditorState {
 
     public func exportSubtitles(to destination: SubtitleFileReference) {
         do {
-            try SubtitleFile.write(track.cues, as: destination.format, to: destination.url)
+            try SubtitleFile.write(track, as: destination.format, to: destination.url)
             subtitleFile = destination
             hasUnsavedChanges = false
         } catch {

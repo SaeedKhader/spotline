@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xmlns:tts="http://www.w3.org/ns/ttml#styling" ttp:timeBase="media" ttp:contentProfiles="http://www.w3.org/ns/ttml/profile/imsc1.1/text" xml:lang="ar">
+  <head>
+    <styling>
+      <style xml:id="default" tts:fontFamily="proportionalSansSerif" tts:textAlign="center" tts:color="white"/>
+    </styling>
+    <layout>
+      <region xml:id="bottom" tts:origin="5% 5%" tts:extent="90% 90%" tts:displayAlign="after"/>
+      <region xml:id="top" tts:origin="5% 5%" tts:extent="90% 90%" tts:displayAlign="before"/>
+    </layout>
+  </head>
+  <body style="default">
+    <div>
+      <p begin="00:00:11.000" end="00:00:12.500" region="bottom">هل أنت مشغول؟</p>
+      <p begin="00:00:13.000" end="00:00:14.500" region="top">Two<br/>lines</p>
+      <p begin="00:00:15.000" end="00:00:17.500" region="bottom">Timed by spans</p>
+    </div>
+  </body>
+</tt>

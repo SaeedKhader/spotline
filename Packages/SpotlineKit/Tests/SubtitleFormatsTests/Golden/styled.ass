@@ -1,0 +1,24 @@
+[Script Info]
+Title: Spotline golden file
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+PlayResX: 1920
+PlayResY: 1080
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,64,&H00FFFFFF,&H000000FF,&H00000000,&H7F000000,0,0,0,0,100,100,0,0,1,3,0,2,96,96,54,1
+Style: Flashback,Georgia,60,&H00E0E0E0,&H000000FF,&H00202020,&H7F000000,0,-1,0,0,100,100,0.5,0,1,2.5,1,2,96,96,54,1
+Style: Sign,Arial,52,&H0000FFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,2,0,8,96,96,40,178
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:59:58.00,1:00:01.04,Flashback,Narrator,0,0,0,,Previously on the show…
+Dialogue: 0,1:00:01.08,1:00:03.50,Default,Anna,0,0,0,,- Is that you, Tom & Jerry?\N- {\b1}Who else?{\b0}
+Dialogue: 0,1:00:04.00,1:00:05.00,Default,,0,0,0,,
+Dialogue: 0,1:00:05.00,1:00:07.00,Sign,,0,0,0,,هل أنت مشغول؟
+Dialogue: 0,1:00:07.50,1:00:09.00,Default,,0,0,0,,{\an8}Up here{\fs48\c&H00FFFF&}, smaller{\r}
+Dialogue: 0,1:00:09.50,1:00:11.00,Sign,,0,0,0,,{\an2}Sign style, at the bottom
+Dialogue: 0,10:00:00.00,10:00:02.00,Default,,0,0,0,,Café, naïve,\h日本語 ♪ {\i1}<not a tag>{\i0}
