@@ -19,6 +19,7 @@ I read it as **"ready for UI automation and testing tools from day one"**: the a
 Confirmed by Saeed (2026-09-28): yes, AI automation, plus AI tools that work on the subtitles themselves (see section 7a).
 
 - **Agent control surface:** the same `EditorCommand` catalog is exposed to AI agents through an optional local MCP server built into the app (off by default, localhost only). Tools like `get_cues`, `seek`, `set_cue_text`, `run_qc` map one-to-one onto commands, so an agent edits through the same undoable path as a person.
+  As built in M7 (docs/AGENTS.md): agents launch `spotline-mcp`, a stdio helper in the app bundle, which relays tool calls to the app over a Unix domain socket in Application Support (user-only permissions, no network listener). Off by default, turned on in Settings › Agents. Agent edits are ordinary undo steps; cleanup proposals still wait for the person to accept or reject them.
 
 ## 2. Tech baseline
 
@@ -52,7 +53,8 @@ spotline/
 │  ├─ MediaAnalysis           waveform peaks, shot-change detection (libav*)
 │  ├─ SubtitleTranslation     source/target alignment, glossary, translation memory (not "Translation": that name hides Apple's framework)
 │  ├─ AITools                 transcription, translation, text-transform providers + job runner
-│  └─ AgentBridge             local MCP server exposing EditorCommands to AI agents
+│  ├─ AgentBridge             MCP tool catalog, JSON-RPC and the local socket to the app (M7)
+│  └─ SpotlineMCP             the `spotline-mcp` stdio helper agents launch
 └─ Fixtures/                  short test clips (M1: 23.976 fps MP4 and MKV), later 25 / 29.97 DF and subtitle files
 ```
 
@@ -112,7 +114,7 @@ As built in M2:
 - `SubtitleFormats` reads and writes SRT and WebVTT. Cue text is kept as written (inline tags and entities included), times are exact rationals (an SRT `00:00:01,5` is 3/2 s), so import then export changes only layout. Reading is lenient (missing cue numbers, `.` separators, CRLF, BOM, UTF-16, Windows-1252); writing is canonical UTF-8. WebVTT cue identifiers and settings are dropped until cues gain positioning (M4).
 - Undo: `EditorState` owns an `UndoManager` and snapshots the track per edit (import, add, delete, set in/out, text). Keystrokes in one typing session on one cue undo as one step. The editor's Undo/Redo commands replace the text system's, so there is one undo stack.
 - Shortcuts that are typing keys (I, O, Space, arrows, ⌘⌫) are disabled in the menus while the cue text editor has focus (`KeyShortcut.conflictsWithTextEditing`), so typing never triggers them. Escape leaves the text editor.
-- Parameterized edits (`select`, `setText`) are `EditorState` methods that share the same undo path; they become command arguments with the agent bridge (M7).
+- Parameterized edits (`select`, `setText`) are `EditorState` methods that share the same undo path; the agent bridge (M7) passes them as tool arguments.
 - Cue in/out are shown as the first frame showing the cue and the first frame without it (`MediaTime.firstFrame(at:)`); selecting a cue seeks to its first frame.
 - There is no project file yet: the app keeps a single AppKit-owned window, shows the subtitle file's name and an edited dot, and asks to export unsaved changes on quit. NSDocument arrives with the `.mtproj` project format.
 

@@ -13,10 +13,17 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let editor = EditorState()
+    /// Settings › Agents: the local MCP bridge, off unless the user turned it on.
+    lazy var agentAccess = AgentAccess(editor: editor)
     private var mainWindowController: NSWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         showMainWindow()
+        _ = agentAccess
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        agentAccess.stop()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

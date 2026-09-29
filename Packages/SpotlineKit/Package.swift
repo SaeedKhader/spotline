@@ -15,7 +15,9 @@ let package = Package(
         .library(name: "PlaybackCore", targets: ["PlaybackCore"]),
         .library(name: "MPVPlayer", targets: ["MPVPlayer"]),
         .library(name: "MediaAnalysis", targets: ["MediaAnalysis"]),
+        .library(name: "AgentBridge", targets: ["AgentBridge"]),
         .library(name: "EditorUI", targets: ["EditorUI"]),
+        .executable(name: "spotline-mcp", targets: ["SpotlineMCP"]),
     ],
     targets: [
         // Pure model: time, frame rates, timecode, cues. No AppKit, no mpv.
@@ -49,11 +51,15 @@ let package = Package(
         // AI tools: transcription, translation, cleanup and speaker/addressee detection, on-device
         // (Apple Speech, Translation, sound analysis) or cloud (OpenAI transcription, Claude): fills cues directly, proposes rewrites for review.
         .target(name: "AITools", dependencies: ["SubtitleCore", "SubtitleTranslation", "MediaAnalysis", "QualityControl"]),
+        // The MCP server agents use to drive the app: tool catalog, JSON-RPC, and the local socket to the app.
+        .target(name: "AgentBridge"),
+        // The stdio helper agents launch (bundled in the app as Contents/MacOS/spotline-mcp).
+        .executableTarget(name: "SpotlineMCP", dependencies: ["AgentBridge"]),
         .target(
             name: "EditorUI",
             dependencies: [
                 "SubtitleCore", "SubtitleFormats", "SpotlineAccessibility", "EditorCommands", "PlaybackCore", "MPVPlayer",
-                "MediaAnalysis", "QualityControl", "SubtitleTranslation", "AITools",
+                "MediaAnalysis", "QualityControl", "SubtitleTranslation", "AITools", "AgentBridge",
             ]
         ),
         .testTarget(name: "SubtitleCoreTests", dependencies: ["SubtitleCore"]),
@@ -69,6 +75,10 @@ let package = Package(
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore"]),
         .testTarget(name: "MPVPlayerTests", dependencies: ["MPVPlayer"]),
         .testTarget(name: "MediaAnalysisTests", dependencies: ["MediaAnalysis"]),
-        .testTarget(name: "EditorStateTests", dependencies: ["EditorUI", "SubtitleFormats", "QualityControl", "SubtitleTranslation", "AITools"]),
+        .testTarget(name: "AgentBridgeTests", dependencies: ["AgentBridge"]),
+        .testTarget(
+            name: "EditorStateTests",
+            dependencies: ["EditorUI", "SubtitleFormats", "QualityControl", "SubtitleTranslation", "AITools", "AgentBridge"]
+        ),
     ]
 )
