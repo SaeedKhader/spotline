@@ -24,6 +24,10 @@ public enum AccessibilityID {
         public static let frameRate = "transport.frameRate"
         /// Media analysis state: "Analyzing 40%", or the number of shot changes found.
         public static let analysis = "transport.analysis"
+        /// The running AI tool; its value is e.g. "Transcribing 40%".
+        public static let aiTask = "transport.aiTask"
+        /// Proposed AI changes waiting for review; its value is e.g. "Transcription: 12 changes".
+        public static let review = "transport.review"
     }
 
     public enum Timeline {
@@ -54,6 +58,14 @@ public enum AccessibilityID {
         public static func glossaryTerm(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).glossary.\(index)" }
         /// The n-th translation memory suggestion under the selected cue (0-based); its value is the suggested text.
         public static func memoryMatch(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).memory.\(index)" }
+        /// A cue an AI tool proposes to add, shown between the real rows until accepted or rejected.
+        public static func proposedRow(_ cueID: UUID) -> String { "cueList.proposed.\(cueID.uuidString)" }
+        /// A proposed cue's field, e.g. `cueList.proposed.<id>.text`.
+        public static func proposedCell(_ cueID: UUID, _ column: Column) -> String { "\(proposedRow(cueID)).\(column.rawValue)" }
+        /// The accept or reject button of a proposed change, keyed by `ai.acceptChange` or `ai.rejectChange`.
+        public static func reviewAction(_ cueID: UUID, _ commandID: String) -> String { "cueList.review.\(cueID.uuidString).\(command(commandID))" }
+        /// The addressee menu's item for one addressee (e.g. "female"), on a cue with a chip.
+        public static func addresseeChoice(_ cueID: UUID, _ addressee: String) -> String { "\(cell(cueID, .addressee)).\(addressee)" }
 
         public enum Column: String, CaseIterable, Sendable {
             case number
@@ -69,6 +81,10 @@ public enum AccessibilityID {
             case source
             /// Who the line addresses (♂, ♀, group), once a tool has tagged it.
             case addressee
+            /// Who speaks the line ("A ♀"), once a tool has found it.
+            case speaker
+            /// An AI tool's proposed change to the cue, shown as a diff; its value is the proposed text.
+            case proposal
         }
     }
 
@@ -92,6 +108,15 @@ public enum AccessibilityID {
         public static let preset = "issues.preset"
         /// One issue; its label is the cue number and its value the message.
         public static func item(_ cueID: UUID, _ offset: Int) -> String { "issues.item.\(cueID.uuidString).\(offset)" }
+    }
+
+    /// Settings › AI.
+    public enum AISettings {
+        public static let transcriptionProvider = "settings.ai.transcription"
+        public static let transcriptionLanguage = "settings.ai.language"
+        public static let translationProvider = "settings.ai.translation"
+        public static let allowsCloud = "settings.ai.allowsCloud"
+        public static func apiKey(_ provider: String) -> String { "settings.ai.key.\(provider)" }
     }
 
     /// The overview strip of the whole media between the actions bar and the timeline.

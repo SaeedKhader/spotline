@@ -4,7 +4,7 @@ import NaturalLanguage
 import QualityControl
 import SubtitleCore
 import SubtitleFormats
-import Translation
+import SubtitleTranslation
 
 /// Translation mode: a read-only source track beside the editable target
 /// (`track`), with a glossary and a translation memory for the language pair.

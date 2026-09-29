@@ -1,3 +1,4 @@
+import AITools
 import AppKit
 import EditorCommands
 import MPVPlayer
@@ -7,7 +8,7 @@ import QualityControl
 import SubtitleCore
 import MediaAnalysis
 import SubtitleFormats
-import Translation
+import SubtitleTranslation
 
 /// The editor's observable state and the single place commands are executed.
 ///
@@ -91,6 +92,24 @@ public final class EditorState {
     @ObservationIgnored public var showGlossaryPanel: @MainActor (EditorState) -> Void = EditorPanels.showGlossary(editor:)
     /// Asks for a glossary file to import. Tests replace it.
     @ObservationIgnored public var chooseGlossaryToImport: @MainActor () -> URL? = EditorPanels.chooseGlossary
+    // MARK: AI state
+
+    /// What the last AI tool proposed, shown as a diff in the cue list until each change is accepted or rejected.
+    public internal(set) var pendingReview: ProposedChangeSet?
+    /// The AI tool running now, with its progress; nil when none.
+    public internal(set) var aiTask: AITaskStatus?
+    @ObservationIgnored var aiTaskHandle: Task<Void, Never>?
+    /// Providers and cloud consent (Settings › AI).
+    public var aiSettings: AISettings {
+        didSet { if aiSettings != oldValue { aiSettings.save(to: settings) } }
+    }
+    /// Makes the transcriber and translator the settings ask for. Tests and UI tests use scripted ones.
+    @ObservationIgnored public var aiProviders: AIProviderFactory
+    /// Reads and chunks the dialogue audio for speech models (cached). Tests replace it.
+    @ObservationIgnored public var prepareAudio:
+        @Sendable (URL, Int?, @escaping @Sendable (Double) -> Void) async throws -> PreparedAudio =
+        EditorState.audioPreparer(cache: .standard)
+
     /// The cue on screen at the playhead. Kept apart from `position` so the
     /// cue list redraws only when it changes, not every frame.
     public private(set) var currentCueID: Cue.ID?
@@ -112,7 +131,7 @@ public final class EditorState {
     static let qcPresetKey = "QCPreset"
     /// Show times as HH:MM:SS,mmm instead of SMPTE frames.
     public private(set) var showsMilliseconds = false
-    public private(set) var selectedCueID: Cue.ID?
+    public internal(set) var selectedCueID: Cue.ID?
     /// The file the subtitles were last imported from or exported to.
     public private(set) var subtitleFile: SubtitleFileReference?
     /// True when the subtitles changed since they were last imported or exported.
@@ -203,6 +222,8 @@ public final class EditorState {
         self.settings = settings
         self.translationStore = translationStore
         self.qcPreset = settings?.string(forKey: Self.qcPresetKey).flatMap(QCPreset.named) ?? .standard
+        self.aiSettings = AISettings.load(from: settings)
+        self.aiProviders = launchOptions.isUITestMode ? .scripted : .live()
         self.undoManager = UndoManager()
         updateIssues()
         // One undo step per edit, also where no run loop groups events (unit tests).
@@ -212,6 +233,7 @@ public final class EditorState {
             analyzeWaveform = Self.waveformAnalyzer(cache: nil)
             analyzeSpeech = Self.speechAnalyzer(cache: nil)
             analyzeShotChanges = Self.shotChangeAnalyzer(cache: nil)
+            prepareAudio = Self.audioPreparer(cache: nil)
         }
         if let url = launchOptions.mediaURL { open(url) }
         if let url = launchOptions.subtitlesURL {
@@ -307,6 +329,11 @@ public final class EditorState {
             selectedCue.map { !memoryMatches(for: $0.id).isEmpty } ?? false
         case EditorCommand.fillExactMatches.id:
             isTranslating && !memory.entries.isEmpty
+        case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.detectSpeakers.id,
+             EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
+             EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
+             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
+            canPerformAI(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
         // anything, so their menu items do not redraw on every frame.
@@ -412,6 +439,11 @@ public final class EditorState {
             showGlossaryPanel(self)
         case EditorCommand.importGlossary.id:
             if let url = chooseGlossaryToImport() { importGlossary(from: url) }
+        case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.detectSpeakers.id,
+             EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
+             EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
+             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
+            return performAI(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
         case EditorCommand.shuttleBackward.id:
@@ -480,6 +512,8 @@ public final class EditorState {
                 track.languageCode = imported.languageCode
             }
             selectedCueID = nil
+            // Proposals were made for the cues that were replaced.
+            pendingReview = nil
             subtitleFile = SubtitleFileReference(url: url, format: format)
             hasUnsavedChanges = false
         } catch {
@@ -508,7 +542,8 @@ public final class EditorState {
         // Leaving a translated cue stores it, so the rest of the file can reuse it.
         if let previous = selectedCueID { recordTranslation(of: previous) }
         selectedCueID = id
-        if let cue = selectedCue, hasMedia {
+        // A proposed new cue is not in the track yet, but can be selected to review it.
+        if let cue = selectedCue ?? id.flatMap({ pendingReview?.change(forCue: $0)?.cue }), hasMedia {
             playback.seek(toFrame: cue.start.firstFrame(at: frameRate), rate: frameRate)
         }
     }
@@ -755,6 +790,8 @@ public final class EditorState {
         var first = cue
         first.end = at
         first.text = firstText
+        // Variants are whole lines; they no longer fit either half.
+        first.variants = nil
         // Both halves still translate the same source cue and share its speaker.
         let second = Cue(
             start: at, end: cue.end, text: secondText, position: cue.position, style: cue.style, speaker: cue.speaker,
@@ -788,6 +825,7 @@ public final class EditorState {
             var merged = track.cues[index]
             merged.end = max(merged.end, next.end)
             merged.text = [merged.text, next.text].filter { !$0.isEmpty }.joined(separator: "\n")
+            merged.variants = nil
             track.cues[index] = merged
             track.cues.remove(at: index + 1)
         }
@@ -1097,7 +1135,7 @@ public final class EditorState {
     }
 
     /// Runs blocking work on a background thread, cancelling it with the caller.
-    private nonisolated static func runDetached<Result: Sendable>(
+    nonisolated static func runDetached<Result: Sendable>(
         _ work: @escaping @Sendable () throws -> Result
     ) async throws -> Result {
         let task = Task.detached(priority: .utility, operation: work)

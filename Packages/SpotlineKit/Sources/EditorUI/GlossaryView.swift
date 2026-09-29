@@ -1,7 +1,7 @@
 import EditorCommands
 import SpotlineAccessibility
 import SwiftUI
-import Translation
+import SubtitleTranslation
 
 /// The glossary of the language pair being translated: one editable row per
 /// term (source, translation, note). Terms are checked against every cue as

@@ -239,6 +239,7 @@ final class StreamDecoder {
 
 /// Decodes one audio stream to mono float samples: the center channel of
 /// surround mixes (where dialogue lives), else a mix of all channels.
+/// Optionally resampled, e.g. to the 16 kHz speech models take.
 final class MonoAudio {
     private let decoder: StreamDecoder
     private var resampler: OpaquePointer?
@@ -249,15 +250,17 @@ final class MonoAudio {
     let source: Waveform.Source
     let sampleRate: Double
 
-    init(stream: UnsafeMutablePointer<AVStream>) throws {
+    /// `outputSampleRate` nil keeps the stream's rate.
+    init(stream: UnsafeMutablePointer<AVStream>, outputSampleRate: Int? = nil) throws {
         decoder = try StreamDecoder(stream: stream)
         var mono = AVChannelLayout()
         av_channel_layout_default(&mono, 1)
         let context = decoder.context
         let rate = context.pointee.sample_rate
-        sampleRate = Double(rate)
+        let outputRate = outputSampleRate.map(Int32.init) ?? rate
+        sampleRate = Double(outputRate)
         guard swr_alloc_set_opts2(
-            &resampler, &mono, AV_SAMPLE_FMT_FLT, rate,
+            &resampler, &mono, AV_SAMPLE_FMT_FLT, outputRate,
             &context.pointee.ch_layout, context.pointee.sample_fmt, rate, 0, nil
         ) >= 0 else {
             throw MediaAnalyzer.Error.cannotOpen("audio resampler failed")
@@ -293,14 +296,26 @@ final class MonoAudio {
             nextSampleTime = start + Double(samples.count) / sampleRate
             onSamples(samples, start)
         }
+        // A resampler holds back a few samples; the last ones come out when flushed.
+        if packet == nil {
+            let rest = convert(nil)
+            if !rest.isEmpty {
+                onSamples(rest, nextSampleTime)
+                nextSampleTime += Double(rest.count) / sampleRate
+            }
+        }
     }
 
-    private func convert(_ frame: UnsafeMutablePointer<AVFrame>) -> [Float] {
-        let count = Int(frame.pointee.nb_samples)
-        if buffer.count < count + 64 { buffer = [Float](repeating: 0, count: count + 64) }
+    /// Converts a frame's samples, or flushes the resampler when `frame` is nil.
+    private func convert(_ frame: UnsafeMutablePointer<AVFrame>?) -> [Float] {
+        let count = frame.map { Int($0.pointee.nb_samples) } ?? 0
+        // Resampling can emit more samples than it takes in (up to the output/input rate ratio).
+        let needed = Int(Double(count) * max(sampleRate / Double(decoder.context.pointee.sample_rate), 1)) + 256
+        if buffer.count < needed { buffer = [Float](repeating: 0, count: needed) }
         let capacity = Int32(buffer.count)
         let converted = buffer.withUnsafeMutableBytes { bytes -> Int32 in
             var output: UnsafeMutablePointer<UInt8>? = bytes.baseAddress!.assumingMemoryBound(to: UInt8.self)
+            guard let frame else { return swr_convert(resampler, &output, capacity, nil, 0) }
             let input = UnsafeRawPointer(frame.pointee.extended_data)!.assumingMemoryBound(to: UnsafePointer<UInt8>?.self)
             return swr_convert(resampler, &output, capacity, input, Int32(count))
         }

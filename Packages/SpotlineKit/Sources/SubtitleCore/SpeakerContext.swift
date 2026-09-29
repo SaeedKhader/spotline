@@ -103,3 +103,14 @@ public struct AddresseeTag: Hashable, Sendable, Codable {
         source == .inferred && (confidence < Self.reviewThreshold || addressee == .unknown)
     }
 }
+
+/// A line as it reads for one addressee, e.g. انتِ مشغولة for a woman.
+public struct TextVariant: Hashable, Sendable, Codable {
+    public var addressee: Addressee
+    public var text: String
+
+    public init(addressee: Addressee, text: String) {
+        self.addressee = addressee
+        self.text = text
+    }
+}

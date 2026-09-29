@@ -17,11 +17,14 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     public var speakerID: Speaker.ID?
     /// Who the line is spoken to, for languages whose grammar depends on it (docs/ARCHITECTURE.md, 7b).
     public var addressee: AddresseeTag?
+    /// The line for each addressee it could be spoken to, when a translator was
+    /// unsure: one click swaps the text (docs/ARCHITECTURE.md, 7b). Nil otherwise.
+    public var variants: [TextVariant]?
 
     public init(
         id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom,
         style: String? = nil, speaker: String? = nil, sourceCueID: UUID? = nil, speakerID: Speaker.ID? = nil,
-        addressee: AddresseeTag? = nil
+        addressee: AddresseeTag? = nil, variants: [TextVariant]? = nil
     ) {
         self.id = id
         self.start = start
@@ -33,6 +36,7 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
         self.sourceCueID = sourceCueID
         self.speakerID = speakerID
         self.addressee = addressee
+        self.variants = variants
     }
 
     public var duration: MediaTime { end - start }
