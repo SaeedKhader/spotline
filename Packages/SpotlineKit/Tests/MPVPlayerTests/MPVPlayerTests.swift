@@ -57,6 +57,20 @@ struct MPVPlayerTests {
         #expect(player.status.audioStreamIndex == 1)
     }
 
+    @Test func playsAudioThroughAnOutputDevice() async throws {
+        let player = try MPVPlayer(configuration: .init(showsVideo: false, usesHardwareDecoding: false))
+        player.load(Self.fixtures.appending(path: "dialogue-5.1.mp4"))
+        try await waitUntil(player) { $0.hasMedia }
+        player.play(rate: 1)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while player.handle.string("current-ao") == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        player.setPaused(true)
+        #expect(player.handle.string("current-ao") == "avfoundation")
+        #expect(player.status.selectedAudioTrackID == 1)
+    }
+
     @Test func listsAndSwitchesAudioTracks() async throws {
         let player = try await makeLoadedPlayer(Self.fixtures.appending(path: "two-tracks.mkv"))
         try await waitUntil(player) { $0.audioTracks.count == 2 && $0.selectedAudioTrackID != nil }
