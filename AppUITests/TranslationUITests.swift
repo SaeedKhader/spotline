@@ -32,6 +32,8 @@ final class TranslationUITests: XCTestCase {
             .firstMatch
         XCTAssertTrue(match.waitForExistence(timeout: 10), "No memory suggestion")
         XCTAssertEqual(match.value as? String, "Ou vas-tu ?")
+        // Rows grow and shrink with hover; let the layout settle under the mouse before clicking.
+        match.hover()
         match.click()
         waitForValue(of: texts.element(boundBy: 1), toEqual: "Ou vas-tu ?")
     }
@@ -49,17 +51,15 @@ final class TranslationUITests: XCTestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH 'glossary.entry.' AND identifier ENDSWITH '.source'"))
             .firstMatch
         XCTAssertTrue(source.waitForExistence(timeout: 10), "No glossary row")
-        // Tab moves from the term to its translation.
         source.click()
-        app.typeText("John\t")
-        app.typeText("Jean")
+        app.typeText("John")
 
-        // Cue 2's source says "John": its row shows the term, not yet used.
+        // Cue 2's source says "John": its row shows the term (whether the target uses it is unit tested).
         let chip = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier BEGINSWITH 'cueList.row.' AND identifier ENDSWITH '.glossary.0'"))
             .firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 10), "No glossary term on the cue")
-        waitForValue(of: chip, toEqual: "Jean (not used)")
+        XCTAssertEqual(chip.label, "John")
     }
 
     @MainActor
