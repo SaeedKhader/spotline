@@ -7,7 +7,7 @@ A native macOS subtitle editor for professional movie and TV workflows: timing (
 - Built for automation from day one: stable accessibility IDs, one command layer shared by menus, shortcuts, UI tests and AI agents
 - AI tools (planned): transcription with timestamps, translation, profanity removal and line shortening, always reviewed as a diff before applying
 
-Status: early development (milestone M3.5, UI design pass). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
+Status: early development (milestone M4, pro formats and QC). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
 ## Requirements
 
@@ -30,7 +30,9 @@ swift test --package-path Packages/SpotlineKit
 
 Open a file with File > Open Media… (Command-O) or by dropping it on the video. `-OpenMedia <path>` opens one at launch.
 
-Import SRT or WebVTT subtitles with File > Import Subtitles… (Shift-Command-O) or `-OpenSubtitles <path>` at launch, and export with File > Export Subtitles… (Shift-Command-E). In the Cue menu: Add Cue at Playhead (Shift-Command-N), Set In/Out at Playhead (I / O), Delete Cue (Command-Delete), previous/next cue (Command-Up/Down).
+Import SRT, WebVTT, ASS/SSA or TTML (IMSC, DFXP) subtitles with File > Import Subtitles… (Shift-Command-O) or `-OpenSubtitles <path>` at launch, and export with File > Export Subtitles… (Shift-Command-E). In the Cue menu: Add Cue at Playhead (Shift-Command-N), Set In/Out at Playhead (I / O), Delete Cue (Command-Delete), previous/next cue (Command-Up/Down).
+
+The Review menu checks every cue live against a QC preset (Netflix adult or children, Broadcast or Basic): reading speed, line length and count, duration, gaps and distance from shot changes. Review › Show Issues (Option-Command-I) lists the issues under the cue list; Option-Command-Up/Down step through the cues that have them, and Fix Overlaps and Short Gaps trims cues that run too close.
 
 The timeline shows the waveform, shot changes (found automatically when media opens) and cue blocks: drag a block to move it, drag its edges to trim, with snapping to shot changes, the playhead and other cues. Option-Left/Right jump between shot changes; Command-= and Command-- zoom. Choose the audio track in Playback › Audio Track (Option-Command-A cycles); the waveform shows the center (dialogue) channel of surround tracks. The waveform is filtered to the voice band, and speech (detected on-device) is highlighted while music and effects are dimmed.
 
@@ -47,7 +49,8 @@ xcodebuild test -project Spotline.xcodeproj -scheme Spotline -destination 'platf
 | `App/` | App entry point, scenes and menus |
 | `AppUITests/` | XCUITest suite, launched with `-UITestMode` |
 | `Packages/SpotlineKit/Sources/SubtitleCore` | Time, frame rates, SMPTE timecode, cues. No UI. |
-| `Packages/SpotlineKit/Sources/SubtitleFormats` | SRT and WebVTT import/export, with golden-file tests |
+| `Packages/SpotlineKit/Sources/SubtitleFormats` | SRT, WebVTT, ASS/SSA and TTML/IMSC import/export, with golden-file tests |
+| `Packages/SpotlineKit/Sources/QualityControl` | QC rules and client presets |
 | `Packages/SpotlineKit/Sources/MediaAnalysis` | Waveform peaks and shot changes via FFmpeg, cached |
 | `Packages/SpotlineKit/Sources/EditorCommands` | Every user action as a named command |
 | `Packages/SpotlineKit/Sources/SpotlineAccessibility` | Accessibility identifier catalog |

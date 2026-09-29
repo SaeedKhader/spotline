@@ -26,6 +26,11 @@ public struct EditorMenuCommands: Commands {
             Divider()
             buttons(for: .navigation)
         }
+        CommandMenu("Review") {
+            buttons(for: .review)
+            Divider()
+            QCPresetPicker(editor: editor)
+        }
         CommandMenu("Timeline") {
             buttons(for: .timeline)
         }

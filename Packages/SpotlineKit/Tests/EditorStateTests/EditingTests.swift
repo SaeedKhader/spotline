@@ -1,6 +1,7 @@
 import EditorCommands
 import Foundation
 import PlaybackCore
+import QualityControl
 import SubtitleCore
 import SubtitleFormats
 import Testing
@@ -208,7 +209,8 @@ struct EditingTests {
         editor.select(one)
         step(editor, to: 120)
         #expect(!editor.perform(.setOut))
-        #expect(editor.issues.isEmpty)
+        let conflicts = editor.issues.values.joined().filter(\.kind.isTimingConflict)
+        #expect(conflicts.isEmpty, "No overlaps or short gaps (the shortened cue may be too short to read)")
     }
 
     @Test func topCuesMayOverlapBottomOnes() throws {
@@ -421,7 +423,7 @@ struct EditingTests {
         #expect(!editor.canPerform(.nextIssue))
         let id = editor.track.cues[2].id
         editor.setText("", forCue: id)
-        #expect(editor.issues[id] == [.empty])
+        #expect(editor.issues[id]?.map(\.kind) == [.empty])
         #expect(editor.perform(.nextIssue))
         #expect(editor.selectedCueID == id)
         #expect(!editor.perform(.nextIssue), "No more after it")

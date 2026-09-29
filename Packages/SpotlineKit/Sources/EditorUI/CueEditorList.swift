@@ -1,4 +1,5 @@
 import EditorCommands
+import QualityControl
 import SpotlineAccessibility
 import SubtitleCore
 import SwiftUI
@@ -27,6 +28,11 @@ struct CueEditorList: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if editor.isIssuesPanelShown {
+                VSplitView {
+                    rows.frame(minHeight: 120)
+                    IssuesPanel(editor: editor).frame(minHeight: 80, idealHeight: 180)
+                }
             } else {
                 rows
             }
@@ -151,7 +157,7 @@ private struct CueRow: View {
 
     private var speedAndIssues: some View {
         let speed = Int(cue.readingSpeed.rounded())
-        let tooFast = cue.readingSpeed > SubtitleGuidelines.maxCharactersPerSecond
+        let tooFast = editor.qcPreset.maxCharactersPerSecond.map { cue.readingSpeed > $0 } ?? false
         let issues = editor.issues[cue.id] ?? []
         return HStack(spacing: 6) {
             Text("\(speed)c/s")
@@ -162,9 +168,9 @@ private struct CueRow: View {
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .readingSpeed))
             if !issues.isEmpty {
                 let messages = issues.map(\.message).joined(separator: "\n")
-                Image(systemName: "exclamationmark.triangle.fill")
+                let severity = issues.map(\.severity).max() ?? .warning
+                IssueIcon(severity: severity)
                     .font(.caption)
-                    .foregroundStyle(.orange)
                     .help(messages)
                     .accessibilityLabel("Needs review")
                     .accessibilityValue(messages)
@@ -275,7 +281,8 @@ private struct TimeField: View {
     }
 }
 
-/// "N cues need review", with buttons to step through them.
+/// "N cues need review" and the QC preset, with buttons to open the issues
+/// panel and step through the cues with issues.
 private struct ReviewFooter: View {
     let editor: EditorState
 
@@ -283,16 +290,103 @@ private struct ReviewFooter: View {
         let count = editor.issues.count
         let summary = count == 0 ? "No cues need review" : count == 1 ? "1 cue needs review" : "\(count) cues need review"
         HStack {
+            CommandButton(
+                command: .toggleIssuesPanel, systemImage: editor.isIssuesPanelShown ? "chevron.down" : "chevron.up", editor: editor
+            )
             Label(summary, systemImage: count == 0 ? "checkmark.circle" : "exclamationmark.circle")
                 .foregroundStyle(count == 0 ? Color.secondary : Color.orange)
                 .accessibilityValue(summary)
                 .accessibilityIdentifier(AccessibilityID.CueList.reviewSummary)
+            Text(editor.qcPreset.name)
+                .foregroundStyle(.secondary)
+                .help(editor.qcPreset.summary)
+                .accessibilityLabel("QC preset")
+                .accessibilityValue(editor.qcPreset.name)
+                .accessibilityIdentifier(AccessibilityID.Issues.preset)
             Spacer()
-            CommandButton(command: .previousIssue, systemImage: "chevron.up", editor: editor)
-            CommandButton(command: .nextIssue, systemImage: "chevron.down", editor: editor)
+            CommandButton(command: .previousIssue, systemImage: "chevron.up.circle", editor: editor)
+            CommandButton(command: .nextIssue, systemImage: "chevron.down.circle", editor: editor)
         }
         .font(.callout)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+}
+
+/// Every issue under the QC preset, in cue order. Click one to select its cue.
+private struct IssuesPanel: View {
+    let editor: EditorState
+
+    var body: some View {
+        let items = editor.issueList
+        Group {
+            if items.isEmpty {
+                Text("No issues under \(editor.qcPreset.name)")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(items) { item in
+                                IssueRow(editor: editor, item: item)
+                                    .id(item.id)
+                            }
+                        }
+                    }
+                    .onChange(of: editor.selectedCueID) { _, id in
+                        guard let first = items.first(where: { $0.cueID == id }) else { return }
+                        proxy.scrollTo(first.id)
+                    }
+                }
+            }
+        }
+        .background(.background.opacity(0.4))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AccessibilityID.Issues.root)
+    }
+}
+
+private struct IssueRow: View {
+    let editor: EditorState
+    let item: IssueListItem
+
+    var body: some View {
+        let isSelected = editor.selectedCueID == item.cueID
+        HStack(spacing: 8) {
+            IssueIcon(severity: item.issue.severity)
+            Text("\(item.cueNumber)")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+            Text(editor.label(for: item.start))
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Text(item.issue.message)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { editor.select(item.cueID) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Cue \(item.cueNumber)")
+        .accessibilityValue(item.issue.message)
+        .accessibilityIdentifier(AccessibilityID.Issues.item(item.cueID, item.offset))
+        .accessibilityAction { editor.select(item.cueID) }
+    }
+}
+
+/// Red for errors (no text, overlaps), orange for warnings.
+private struct IssueIcon: View {
+    let severity: QCIssue.Severity
+
+    var body: some View {
+        Image(systemName: severity == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+            .foregroundStyle(severity == .error ? Color.red : Color.orange)
     }
 }

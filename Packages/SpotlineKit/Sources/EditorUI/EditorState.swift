@@ -3,6 +3,7 @@ import EditorCommands
 import MPVPlayer
 import Observation
 import PlaybackCore
+import QualityControl
 import SubtitleCore
 import MediaAnalysis
 import SubtitleFormats
@@ -29,19 +30,35 @@ public final class EditorState {
     /// True on the first frame (and with no media). Kept apart from `position`
     /// so menus depending on it redraw only when it flips.
     public private(set) var isAtStart = true
-    public var frameRate: FrameRate
+    public var frameRate: FrameRate {
+        didSet { if frameRate != oldValue { updateIssues() } }
+    }
     public private(set) var track: SubtitleTrack {
         didSet {
             guard track.cues != oldValue.cues else { return }
-            issues = Review.issues(in: track.cues)
+            updateIssues()
             updateCurrentCue()
         }
     }
     /// The cue on screen at the playhead. Kept apart from `position` so the
     /// cue list redraws only when it changes, not every frame.
     public private(set) var currentCueID: Cue.ID?
-    /// Cues that need another look, with why. Kept in step with `track`.
-    public private(set) var issues: [Cue.ID: [ReviewIssue]] = [:]
+    /// Cues that break the QC preset's rules, with why. Kept in step with the
+    /// cues, the preset, the frame rate and the shot changes.
+    public private(set) var issues: [Cue.ID: [QCIssue]] = [:]
+    /// The rules cues are checked against.
+    public private(set) var qcPreset: QCPreset {
+        didSet {
+            guard qcPreset != oldValue else { return }
+            updateIssues()
+            settings?.set(qcPreset.id, forKey: Self.qcPresetKey)
+        }
+    }
+    /// Whether the issues panel under the cue list is open.
+    public private(set) var isIssuesPanelShown = false
+    /// Where the chosen QC preset is remembered; nil in tests.
+    @ObservationIgnored private let settings: UserDefaults?
+    static let qcPresetKey = "QCPreset"
     /// Show times as HH:MM:SS,mmm instead of SMPTE frames.
     public private(set) var showsMilliseconds = false
     public private(set) var selectedCueID: Cue.ID?
@@ -62,7 +79,9 @@ public final class EditorState {
     /// Where people speak in the waveform's audio, filled in while detected.
     public private(set) var speech: [SpeechRegion]?
     /// The open media's shot changes, filled in while they are being found.
-    public private(set) var shotChanges: [MediaTime]?
+    public private(set) var shotChanges: [MediaTime]? {
+        didSet { if shotChanges != oldValue, qcPreset.shotChangeFrames != nil { updateIssues() } }
+    }
     /// The two analysis jobs while they run, nil once done. They run side by
     /// side: the waveform takes seconds, shot changes take minutes on a feature.
     public private(set) var waveformJob: AnalysisJob?
@@ -120,7 +139,8 @@ public final class EditorState {
         launchOptions: LaunchOptions = .current,
         playback: any PlaybackEngine,
         frameRate: FrameRate = .fps23_976,
-        track: SubtitleTrack = SubtitleTrack()
+        track: SubtitleTrack = SubtitleTrack(),
+        settings: UserDefaults? = nil
     ) {
         self.launchOptions = launchOptions
         self.playback = playback
@@ -128,8 +148,10 @@ public final class EditorState {
         self.position = playback.status.position
         self.frameRate = frameRate
         self.track = track
-        self.issues = Review.issues(in: track.cues)
+        self.settings = settings
+        self.qcPreset = settings?.string(forKey: Self.qcPresetKey).flatMap(QCPreset.named) ?? .standard
         self.undoManager = UndoManager()
+        updateIssues()
         // One undo step per edit, also where no run loop groups events (unit tests).
         undoManager.groupsByEvent = false
         playback.onStatusChange = { [weak self] status in self?.playbackDidChange(status) }
@@ -155,7 +177,8 @@ public final class EditorState {
         } catch {
             fatalError("libmpv failed to start: \(error)")
         }
-        self.init(launchOptions: launchOptions, playback: player)
+        // UI tests start from the default preset every time.
+        self.init(launchOptions: launchOptions, playback: player, settings: testMode ? nil : .standard)
     }
 
     // MARK: - Derived state
@@ -180,6 +203,16 @@ public final class EditorState {
         return track.cues.last { $0.start <= time && time < $0.end }
     }
 
+    /// The cues shown on the frame under the playhead: at most one at the
+    /// bottom and one at the top (a sign over dialogue).
+    public var cuesAtPlayhead: [Cue] {
+        guard hasMedia else { return [] }
+        let time = currentTime
+        return CuePosition.allCases.compactMap { position in
+            track.cues.last { $0.position == position && $0.start <= time && time < $0.end }
+        }
+    }
+
     // MARK: - Commands
 
     public func canPerform(_ command: EditorCommand) -> Bool {
@@ -198,8 +231,8 @@ public final class EditorState {
         case EditorCommand.previousIssue.id, EditorCommand.nextIssue.id:
             !issues.isEmpty
         case EditorCommand.fixOverlaps.id:
-            issues.values.contains { $0.contains(.overlapsNext) }
-        case EditorCommand.toggleMilliseconds.id:
+            issues.values.contains { $0.contains { $0.kind.isTimingConflict } }
+        case EditorCommand.toggleMilliseconds.id, EditorCommand.toggleIssuesPanel.id:
             true
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
@@ -243,6 +276,7 @@ public final class EditorState {
         case EditorCommand.toggleSnapping.id: isSnappingEnabled
         case EditorCommand.toggleSpeechHighlight.id: isSpeechHighlighted
         case EditorCommand.toggleMilliseconds.id: showsMilliseconds
+        case EditorCommand.toggleIssuesPanel.id: isIssuesPanelShown
         case EditorCommand.togglePositionTop.id: selectedCue.map { $0.position == .top }
         default: nil
         }
@@ -285,6 +319,8 @@ public final class EditorState {
             return selectIssue(forward: true)
         case EditorCommand.toggleMilliseconds.id:
             showsMilliseconds.toggle()
+        case EditorCommand.toggleIssuesPanel.id:
+            isIssuesPanelShown.toggle()
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
         case EditorCommand.shuttleBackward.id:
@@ -409,6 +445,29 @@ public final class EditorState {
         playback.play(rate: shuttleRate)
     }
 
+    // MARK: - Quality control
+
+    /// Checks cues against another preset.
+    public func selectQCPreset(id: QCPreset.ID) {
+        if let preset = QCPreset.named(id) { qcPreset = preset }
+    }
+
+    /// Every issue in cue order, for the issues panel.
+    public var issueList: [IssueListItem] {
+        track.cues.enumerated().flatMap { index, cue in
+            (issues[cue.id] ?? []).enumerated().map { offset, issue in
+                IssueListItem(cueID: cue.id, cueNumber: index + 1, start: cue.start, offset: offset, issue: issue)
+            }
+        }
+    }
+
+    /// Recomputes `issues`; it changes (and redraws its observers) only when the result differs.
+    private func updateIssues() {
+        let context = QualityControl.Context(frameRate: frameRate, shotChanges: shotChangeFrames)
+        let found = QualityControl.check(track.cues, preset: qcPreset, context: context)
+        if found != issues { issues = found }
+    }
+
     // MARK: - Time labels
 
     /// A cue edge as the editor shows it: the first frame showing (or no longer
@@ -502,8 +561,8 @@ public final class EditorState {
         return targets
     }
 
-    /// `SubtitleGuidelines.minimumGapFrames` at the current rate.
-    public var minimumGap: MediaTime { MediaTime(frame: SubtitleGuidelines.minimumGapFrames, rate: frameRate) }
+    /// The QC preset's minimum gap at the current rate.
+    public var minimumGap: MediaTime { MediaTime(frame: qcPreset.minimumGapFrames, rate: frameRate) }
 
     /// How far a cue can reach without overlapping its neighbours in the same
     /// position, keeping the minimum gap: from the previous one's end to the
@@ -564,13 +623,15 @@ public final class EditorState {
         return true
     }
 
-    /// Ends each cue that overlaps the next one in the same position the minimum gap before it.
+    /// Ends each cue that overlaps the next one in the same position, or ends
+    /// too close to it, the minimum gap before it.
     private func fixOverlaps() {
-        edit("Fix Overlaps") { track in
+        edit(EditorCommand.fixOverlaps.title) { track in
             for index in track.cues.indices {
                 let cue = track.cues[index]
                 guard let next = track.cues[(index + 1)...].first(where: { $0.position == cue.position }),
                       next.start < cue.end
+                        || next.start.firstFrame(at: frameRate) - cue.end.firstFrame(at: frameRate) < qcPreset.minimumGapFrames
                 else { continue }
                 let withGap = next.start - minimumGap
                 track.cues[index].end = withGap > cue.start ? withGap : next.start
@@ -943,6 +1004,29 @@ public final class EditorState {
             try await task.value
         } onCancel: {
             task.cancel()
+        }
+    }
+}
+
+/// One row of the issues panel.
+public struct IssueListItem: Identifiable, Hashable, Sendable {
+    public var cueID: Cue.ID
+    /// 1-based, as the cue list shows it.
+    public var cueNumber: Int
+    public var start: MediaTime
+    /// The issue's place among its cue's issues.
+    public var offset: Int
+    public var issue: QCIssue
+
+    public var id: String { "\(cueID.uuidString).\(offset)" }
+}
+
+extension QCIssue.Kind {
+    /// Overlaps and short gaps, which Fix Overlaps and Gaps repairs.
+    var isTimingConflict: Bool {
+        switch self {
+        case .overlapsNext, .gapTooShort: true
+        default: false
         }
     }
 }

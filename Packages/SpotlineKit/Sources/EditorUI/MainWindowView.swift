@@ -1,4 +1,5 @@
 import EditorCommands
+import QualityControl
 import SpotlineAccessibility
 import SubtitleCore
 import SwiftUI
@@ -118,12 +119,12 @@ struct CommandButton: View {
     }
 }
 
-/// Shows the cue at the playhead, in its own view so only it redraws as the video plays.
+/// Shows the cues at the playhead, in its own view so only it redraws as the video plays.
 struct SubtitleOverlayHost: View {
     let editor: EditorState
 
     var body: some View {
-        if let cue = editor.cueAtPlayhead {
+        ForEach(editor.cuesAtPlayhead) { cue in
             SubtitleOverlay(cue: cue)
         }
     }
@@ -156,7 +157,7 @@ struct SubtitleOverlay: View {
                         .padding(cue.position == .bottom ? .bottom : .top, margin)
                         .accessibilityLabel("Subtitle")
                         .accessibilityValue(text)
-                        .accessibilityIdentifier(AccessibilityID.Video.subtitle)
+                        .accessibilityIdentifier(cue.position == .top ? AccessibilityID.Video.topSubtitle : AccessibilityID.Video.subtitle)
                 }
                 if cue.position == .top { Spacer() }
             }
@@ -177,6 +178,22 @@ struct AudioTrackPicker: View {
         )) {
             ForEach(editor.audioTracks) { track in
                 Text(track.displayName).tag(Optional(track.id))
+            }
+        }
+    }
+}
+
+/// Chooses the QC preset cues are checked against, in the Review menu.
+struct QCPresetPicker: View {
+    let editor: EditorState
+
+    var body: some View {
+        Picker("QC Preset", selection: Binding(
+            get: { editor.qcPreset.id },
+            set: { editor.selectQCPreset(id: $0) }
+        )) {
+            ForEach(QCPreset.all) { preset in
+                Text(preset.name).tag(preset.id)
             }
         }
     }

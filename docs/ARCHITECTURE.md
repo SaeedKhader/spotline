@@ -47,7 +47,7 @@ spotline/
 │  ├─ MPVPlayer               libmpv player, CAOpenGLLayer render layer, video NSView
 │  ├─ EditorUI                SwiftUI + AppKit views, EditorState (executes commands)
 │  │  --- added in later milestones ---
-│  ├─ SubtitleFormats         SRT, WebVTT, ASS/SSA, TTML/IMSC1, EBU STL, SCC
+│  ├─ SubtitleFormats         SRT, WebVTT, ASS/SSA, TTML/IMSC1 (M4), EBU STL, SCC
 │  ├─ QualityControl          CPS, CPL, line count, durations, gaps, overlaps, shot changes
 │  ├─ MediaAnalysis           waveform peaks, shot-change detection (libav*)
 │  ├─ Translation             source/target alignment, glossary, translation memory
@@ -118,8 +118,8 @@ As built in M2:
 
 ### Formats (priority order)
 1. SRT, WebVTT (import/export) — M2
-2. ASS/SSA (styles preserved) — M4
-3. TTML / IMSC1.1 text profile (Netflix, Apple, Amazon deliveries) — M4
+2. ASS/SSA (styles preserved) — M4, done
+3. TTML / IMSC1.1 text profile (Netflix, Apple, Amazon deliveries) — M4, done
 4. EBU STL (binary, broadcast) — M5
 5. SCC / 608 captions — later
 
@@ -183,6 +183,21 @@ Layout agreed with Saeed (2026-09-29), replacing section 6's sketch:
 - Per-frame state (`position`, `currentCueID`) is observed separately from everything else, so only the timecode, timeline, overlay and mini-map playhead redraw during playback.
 - No overlaps (Saeed, 2026-09-29): edits keep cues in the same position at least 2 frames apart (`EditorState.room(for:)` clamps drags, typed times, Set In/Out and new cues; snapping targets the gap). A top cue may run alongside bottom ones. Overlaps in imported files are kept, flagged for review, and Cue › Fix Overlaps trims them.
 - The window uses the dark appearance.
+
+### As built in M4 (pro formats and QC)
+- **Formats.** `SubtitleFormats` reads and writes ASS (v4.00+), SSA (v4.00) and TTML, alongside SRT and WebVTT.
+  - Cue text keeps one markup whatever the file (SRT's): `<i>`, `<b>`, `<u>`, `<s>`, entities for `<`, `>` and `&`, and ASS override blocks (`{\fs48}`) kept as written. ASS `{\i1}`…`{\i0}` and TTML `tts:fontStyle` spans convert to and from it (`Markup`); tags a format can't express are dropped on export (e.g. `<v Anna>` in ASS).
+  - `SubtitleTrack` gained `styles` (`SubtitleStyle`: font, colors with opacity, bold/italic/underline/strike-out, scale, spacing, angle, border style, outline, shadow, numpad alignment, margins, encoding) and `properties` (the ASS `[Script Info]` fields, e.g. `PlayResX`, kept for round trips). `Cue` gained `style` (the style's name) and `speaker` (ASS Name). Import is one undoable edit that replaces cues, styles, properties and language.
+  - ASS/SSA: columns are read by the `Format` lines; SSA's alignments (1–3, 5–7, 9–11) and decimal colors convert. A cue's position is its style's alignment, or the first `{\anN}`/`{\aN}` override; on export an override is written only when the position differs from the style's. Tracks from other formats export with one `Default` style on a 1920×1080 script (Arial 64, white with a black outline, title-safe margins). Times are centiseconds (the format's precision). Not kept yet: `Comment` lines, layers, per-line margins and effects, `[Fonts]`/`[Graphics]`.
+  - TTML: parsed with `XMLParser` into a small tree (Foundation's `XMLDocument` drops whitespace-only text, which in TTML is the space between spans). Reads clock, frame (`ttp:frameRate`, `ttp:frameRateMultiplier`), tick and offset times, `begin`/`end`/`dur` on `body`, `div`, `p` (and spans of untimed paragraphs), referenced and inherited styles, `xml:space`, `xml:lang`, and regions (%, px, c) for top/bottom. Writes an IMSC 1.1 Text Profile document: media-time `HH:MM:SS.mmm`, one default style, `top` and `bottom` regions inside the title-safe area. `.dfxp` and `.xml` files import as TTML.
+  - Golden files cover every format; lenient inputs (an Aegisub file, a legacy SSA file, a Netflix-style frame-timed TTML, a prefixed EBU-TT-style file with ticks) normalize to `Input/*.expected.*`.
+- **QC.** A new `QualityControl` module replaces `SubtitleCore.Review` (and `SubtitleGuidelines`). `QualityControl.check` takes the cues, a `QCPreset` and the frame rate and shot changes, and returns `QCIssue`s per cue: empty and overlapping cues are errors; reading speed, characters per line, line count, minimum and maximum duration, gaps shorter than the preset's (counted in frames, per position) and cue edges near a shot change are warnings.
+  - Shot-change rule: a start within `shotChangeFrames` (12) of a cut should be on it; an end should be on the cut or the minimum gap (2 frames) before it.
+  - Presets: Netflix (Adult) (42 characters, 2 lines, 20 c/s, 5/6 s to 7 s), Netflix (Children) (17 c/s), Broadcast (37 characters, 15 c/s, 1 s to 7 s; conservative values in the spirit of BBC/EBU practice, to be tuned per broadcaster) and Basic (what M3.5 checked). Netflix (Adult) is the default; the choice is remembered in user defaults (not in UI tests).
+  - The editor keeps edits the preset's minimum gap apart. Issues are recomputed whenever cues, the preset, the frame rate or the shot changes change, so they are live while shot detection streams in.
+- **Review menu:** Show Issues (⌥⌘I), Previous/Next Cue with Issues (⌥⌘↑/↓, moved from Cue), Fix Overlaps and Short Gaps (was Fix Overlaps; same command ID), and the QC Preset picker.
+- **Issues panel:** under the cue list (a split, closed by default), one row per issue in cue order with severity, cue number, start and message; clicking selects the cue. The footer gained the panel toggle and the preset's name (its tooltip explains the limits). Cue-row icons and the mini-map show errors in red and warnings in orange.
+- The video shows a top cue and a bottom cue at the same time (a sign over dialogue); the top one's accessibility ID is `video.subtitle.top`.
 
 ## 7. Pro workflow features (backlog, roughly in order)
 
