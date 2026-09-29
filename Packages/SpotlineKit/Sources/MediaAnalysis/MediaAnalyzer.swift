@@ -41,12 +41,14 @@ public enum MediaAnalyzer {
     public enum Error: Swift.Error, CustomStringConvertible {
         case cannotOpen(String)
         case noStream
+        case imageSubtitles
         case cancelled
 
         public var description: String {
             switch self {
             case .cannotOpen(let reason): "Cannot read the media: \(reason)"
             case .noStream: "The media has no stream of that kind"
+            case .imageSubtitles: "Image-based subtitles (such as PGS or VobSub) cannot be read as text"
             case .cancelled: "Cancelled"
             }
         }

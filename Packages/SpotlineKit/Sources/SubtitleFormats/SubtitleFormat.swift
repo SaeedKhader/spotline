@@ -99,6 +99,19 @@ public enum SubtitleFormat: String, CaseIterable, Sendable {
     }
 }
 
+extension SubtitleTrack {
+    /// A track from an ASS subtitle stream muxed in a video file: its header
+    /// (`[Script Info]` and styles, the stream's codec private data) and its
+    /// events, each a Dialogue line's fields without its times
+    /// (`ReadOrder, Layer, Style, Name, MarginL, MarginR, MarginV, Effect, Text`),
+    /// the form Matroska stores and FFmpeg's text subtitle decoders return.
+    public init(
+        assHeader: String, events: [(start: MediaTime, end: MediaTime, fields: String)]
+    ) throws(SubtitleParseError) {
+        self = try ASS.parse(header: assHeader, events: events)
+    }
+}
+
 /// Why a subtitle file could not be read, with the 1-based line where it went wrong.
 public struct SubtitleParseError: Error, Equatable, Sendable, CustomStringConvertible {
     public let line: Int

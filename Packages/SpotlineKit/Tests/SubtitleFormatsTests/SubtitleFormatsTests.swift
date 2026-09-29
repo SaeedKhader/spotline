@@ -222,6 +222,14 @@ struct ASSTests {
         #expect(SubtitleText.visibleLines(of: cues[6].text) == ["Café, naïve,\u{00A0}日本語 ♪ <not a tag>"])
     }
 
+    @Test func resetClosesOpenStyles() throws {
+        let track = try SubtitleTrack(
+            assHeader: "[Script Info]\n",
+            events: [(.zero, MediaTime(value: 1, timescale: 1), "0,0,Default,,0,0,0,,{\\b1\\i1}Hello{\\r} there")]
+        )
+        #expect(track.cues[0].text == "<b><i>Hello</i></b> there")
+    }
+
     @Test func srtMarkupBecomesOverrideTags() throws {
         let cue = Cue(start: .zero, end: MediaTime(value: 1, timescale: 1), text: "<i>Hi</i> &amp; <font color=\"red\">bye</font>\nnow", position: .top)
         let written = SubtitleFormat.ass.serialize([cue])

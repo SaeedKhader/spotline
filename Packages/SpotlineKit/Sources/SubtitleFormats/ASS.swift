@@ -25,6 +25,48 @@ enum ASS {
     // MARK: Reading
 
     static func parse(_ text: String) throws(SubtitleParseError) -> SubtitleTrack {
+        var (track, events) = try readSections(text)
+        for (fields, line) in events {
+            guard let start = fields["start"].flatMap(Timestamp.parse) else {
+                throw SubtitleParseError(line: line, reason: "Invalid start time \"\(fields["start"] ?? "")\"")
+            }
+            guard let end = fields["end"].flatMap(Timestamp.parse) else {
+                throw SubtitleParseError(line: line, reason: "Invalid end time \"\(fields["end"] ?? "")\"")
+            }
+            track.cues.append(cue(from: fields, start: start, end: end, in: track))
+        }
+        track.cues.sort { $0.start < $1.start }
+        return track
+    }
+
+    /// The fields of an event as Matroska stores it and FFmpeg's subtitle
+    /// decoders return it: a Dialogue line without its times, led by its read order.
+    static let embeddedEventFormat = ["readorder", "layer", "style", "name", "marginl", "marginr", "marginv", "effect", "text"]
+
+    /// A track from a header (`[Script Info]` and styles) and events in `embeddedEventFormat`, timed apart.
+    static func parse(
+        header: String, events: [(start: MediaTime, end: MediaTime, fields: String)]
+    ) throws(SubtitleParseError) -> SubtitleTrack {
+        var (track, _) = try readSections(header)
+        for event in events {
+            track.cues.append(cue(from: fields(event.fields, format: embeddedEventFormat), start: event.start, end: event.end, in: track))
+        }
+        track.cues.sort { $0.start < $1.start }
+        return track
+    }
+
+    private static func cue(from fields: [String: String], start: MediaTime, end: MediaTime, in track: SubtitleTrack) -> Cue {
+        let styleName = fields["style"].map { $0.hasPrefix("*") ? String($0.dropFirst()) : $0 }.flatMap { $0.isEmpty ? nil : $0 }
+        let (text, override) = cueText(fromASS: fields["text"] ?? "")
+        let position = override ?? track.style(named: styleName)?.position ?? .bottom
+        let speaker = fields["name"].flatMap { $0.isEmpty ? nil : $0 }
+        return Cue(start: start, end: end, text: text, position: position, style: styleName, speaker: speaker)
+    }
+
+    /// The header, styles and the fields of every Dialogue line with its line number.
+    private static func readSections(
+        _ text: String
+    ) throws(SubtitleParseError) -> (SubtitleTrack, [(fields: [String: String], line: Int)]) {
         var track = SubtitleTrack()
         var section = ""
         var isLegacy = false
@@ -74,21 +116,7 @@ enum ASS {
             }
         }
 
-        for (fields, line) in events {
-            guard let start = fields["start"].flatMap(Timestamp.parse) else {
-                throw SubtitleParseError(line: line, reason: "Invalid start time \"\(fields["start"] ?? "")\"")
-            }
-            guard let end = fields["end"].flatMap(Timestamp.parse) else {
-                throw SubtitleParseError(line: line, reason: "Invalid end time \"\(fields["end"] ?? "")\"")
-            }
-            let styleName = fields["style"].map { $0.hasPrefix("*") ? String($0.dropFirst()) : $0 }.flatMap { $0.isEmpty ? nil : $0 }
-            let (text, override) = cueText(fromASS: fields["text"] ?? "")
-            let position = override ?? track.style(named: styleName)?.position ?? .bottom
-            let speaker = fields["name"].flatMap { $0.isEmpty ? nil : $0 }
-            track.cues.append(Cue(start: start, end: end, text: text, position: position, style: styleName, speaker: speaker))
-        }
-        track.cues.sort { $0.start < $1.start }
-        return track
+        return (track, events)
     }
 
     private static func formatNames(_ value: String) -> [String] {
@@ -172,9 +200,11 @@ enum ASS {
     }
 
     /// Converts a Dialogue line's text to cue text, and reads the first alignment override.
+    /// A bare `\r` (reset to the line's style) after `\i1` and the like closes them.
     static func cueText(fromASS raw: String) -> (String, CuePosition?) {
         var output = ""
         var position: CuePosition?
+        var openStyles: [String] = []
         var index = raw.startIndex
         while index < raw.endIndex {
             let character = raw[index]
@@ -185,7 +215,12 @@ enum ASS {
                     var residual = String(inner[..<firstSlash])
                     for tag in overrideTags(inner[firstSlash...]) {
                         if let converted = styleTag(tag) {
+                            let name = String(tag.prefix(1))
+                            if converted.hasPrefix("</") { openStyles.removeAll { $0 == name } } else { openStyles.append(name) }
                             styleTags += converted
+                        } else if tag == "r", !openStyles.isEmpty {
+                            styleTags += openStyles.reversed().map { "</\($0)>" }.joined()
+                            openStyles = []
                         } else if position == nil, let alignment = alignment(tag) {
                             position = (7...9).contains(alignment) ? .top : .bottom
                         } else {
