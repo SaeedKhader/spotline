@@ -72,6 +72,16 @@ struct MPVPlayerTests {
         try await waitUntil(player) { $0.selectedAudioTrackID == tracks[1].id && $0.audioStreamIndex == 2 }
     }
 
+    @Test func neverShowsTheMediasOwnSubtitles() async throws {
+        let player = try await makeLoadedPlayer(Self.fixtures.appending(path: "embedded-subs.mkv"))
+        let subtitleTracks = (0..<(player.handle.string("track-list/count").flatMap(Int.init) ?? 0)).filter {
+            player.handle.string("track-list/\($0)/type") == "sub"
+        }
+        #expect(subtitleTracks.count == 4)
+        #expect(player.handle.string("sid") == "no")
+        #expect(player.handle.string("current-tracks/sub/id") == nil)
+    }
+
     @Test func playsBackward() async throws {
         let player = try await makeLoadedPlayer()
         player.seek(toFrame: 100, rate: .fps23_976)

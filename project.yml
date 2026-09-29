@@ -56,6 +56,8 @@ targets:
         buildPhase: resources
       - path: Fixtures/arabic-25.stl
         buildPhase: resources
+      - path: Fixtures/embedded-subs.mkv
+        buildPhase: resources
     dependencies:
       - target: Spotline
       - package: SpotlineKit

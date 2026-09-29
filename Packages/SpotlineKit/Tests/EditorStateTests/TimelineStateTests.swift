@@ -260,3 +260,19 @@ private actor Requests {
     private(set) var all: [Int?] = []
     func append(_ stream: Int?) { all.append(stream) }
 }
+
+@MainActor
+struct TimelineStackingTests {
+    func cue(_ start: Int64, _ end: Int64, _ position: CuePosition = .bottom) -> Cue {
+        Cue(start: MediaTime(value: start, timescale: 1), end: MediaTime(value: end, timescale: 1), text: "", position: position)
+    }
+
+    @Test func onlyTopAndBottomCuesOnScreenTogetherShareTheBlock() {
+        let dialogue = cue(0, 3)
+        let sign = cue(2, 5, .top)
+        let later = cue(6, 8)
+        let laterSign = cue(8, 9, .top)
+        let stacked = TimelineView.stackedCueIDs(in: [later, sign, dialogue, laterSign])
+        #expect(stacked == [dialogue.id, sign.id], "Touching cues (one ends as the other starts) are not on screen together")
+    }
+}

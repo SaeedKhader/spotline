@@ -44,10 +44,10 @@ let package = Package(
         ),
         // FFmpeg headers and link flags (Homebrew's ffmpeg, a dependency of mpv).
         .systemLibrary(name: "CFFmpeg", pkgConfig: "libavformat", providers: [.brew(["ffmpeg"])]),
-        // Waveform peaks and shot changes, read from media once and cached.
-        .target(name: "MediaAnalysis", dependencies: ["CFFmpeg", "SubtitleCore"]),
+        // Waveform peaks and shot changes, read from media once and cached, and embedded subtitle tracks.
+        .target(name: "MediaAnalysis", dependencies: ["CFFmpeg", "SubtitleCore", "SubtitleFormats"]),
         // AI tools: transcription, translation, cleanup and speaker/addressee detection, on-device
-        // (Apple Speech, Translation, sound analysis) or cloud (OpenAI transcription, Claude), proposing reviewable changes.
+        // (Apple Speech, Translation, sound analysis) or cloud (OpenAI transcription, Claude): fills cues directly, proposes rewrites for review.
         .target(name: "AITools", dependencies: ["SubtitleCore", "SubtitleTranslation", "MediaAnalysis", "QualityControl"]),
         .target(
             name: "EditorUI",

@@ -29,7 +29,7 @@ public final class MPVPlayer: PlaybackEngine {
     public var onStatusChange: (@MainActor (PlaybackStatus) -> Void)?
 
     private let configuration: Configuration
-    private var handle: MPVHandle!
+    private(set) var handle: MPVHandle!
     private var view: MPVVideoView?
     private var isRenderContextReady = false
     /// A load waiting for the video view's render context; mpv drops the video
@@ -48,6 +48,10 @@ public final class MPVPlayer: PlaybackEngine {
                 "hwdec": configuration.usesHardwareDecoding ? "videotoolbox" : "no",
                 "hr-seek": "yes",
                 "hr-seek-framedrop": "no",
+                // Spotline draws the cues being edited itself. mpv never shows
+                // subtitles: not the file's own tracks, nor files next to it.
+                "sid": "no",
+                "sub-auto": "no",
                 "keep-open": "always",
                 "idle": "yes",
                 "pause": "yes",

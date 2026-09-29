@@ -121,6 +121,18 @@ public enum AccessibilityID {
         public static func apiKey(_ provider: String) -> String { "settings.ai.key.\(provider)" }
     }
 
+    /// The sheet offering the subtitle tracks muxed into the media for import.
+    public enum EmbeddedSubtitles {
+        public static let sheet = "embeddedSubtitles"
+        /// One text track's row, by FFmpeg stream index; selected when chosen.
+        public static func track(_ streamIndex: Int) -> String { "embeddedSubtitles.track.\(streamIndex)" }
+        public static let saveCopy = "embeddedSubtitles.saveCopy"
+        public static let importButton = "embeddedSubtitles.import"
+        public static let cancelButton = "embeddedSubtitles.cancel"
+        /// Shown while the chosen track is read.
+        public static let progress = "embeddedSubtitles.progress"
+    }
+
     /// The overview strip of the whole media between the actions bar and the timeline.
     public enum MiniMap {
         public static let root = "miniMap"
