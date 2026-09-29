@@ -21,15 +21,18 @@ public enum AgentSocketError: Error, Equatable, Sendable, CustomStringConvertibl
     case system(String, Int32)
     /// Unix socket paths are limited to 103 bytes.
     case pathTooLong(String)
-    /// The app closed the connection or never answered.
+    /// The app closed the connection without answering.
     case noAnswer
+    /// The app took longer than the client's timeout, e.g. while it shows a dialog.
+    case timedOut
 
     public var description: String {
         switch self {
         case .inUse: "Another Spotline window is already connected to agents."
         case .system(let call, let code): "\(call) failed: \(String(cString: strerror(code)))"
         case .pathTooLong(let path): "The socket path is too long: \(path)"
-        case .noAnswer: "Spotline didn't answer."
+        case .noAnswer: "Spotline closed the connection."
+        case .timedOut: "Spotline didn't answer in time. It may be showing a dialog."
         }
     }
 }
@@ -167,16 +170,15 @@ public final class AgentSocketClient {
 
     deinit { disconnect() }
 
-    /// Sends one message and returns the reply line. Retries once on a fresh
-    /// connection, since the app may have restarted since the last call.
+    /// Sends one message and returns the reply line. When a connection from an
+    /// earlier call turns out closed (the app restarted), retries once on a new one.
     public func send(_ line: Data) throws -> Data {
+        let reused = fd >= 0
         do {
             return try exchange(line)
-        } catch AgentSocketError.noAnswer where fd >= 0 {
-            disconnect()
+        } catch AgentSocketError.noAnswer where reused {
             return try exchange(line)
-        } catch AgentSocketError.system(_, let code) where code == EPIPE || code == ECONNRESET {
-            disconnect()
+        } catch AgentSocketError.system(_, let code) where reused && (code == EPIPE || code == ECONNRESET) {
             return try exchange(line)
         }
     }
@@ -198,11 +200,13 @@ public final class AgentSocketClient {
                 }
                 var chunk = [UInt8](repeating: 0, count: 64 * 1024)
                 let count = read(fd, &chunk, chunk.count)
+                if count < 0, errno == EAGAIN { throw AgentSocketError.timedOut }
                 guard count > 0 else { throw AgentSocketError.noAnswer }
                 buffer.append(contentsOf: chunk[..<count])
             }
         } catch {
-            if case AgentSocketError.noAnswer = error {} else { disconnect() }
+            // A late reply must not be read as the answer to the next call.
+            disconnect()
             throw error
         }
     }

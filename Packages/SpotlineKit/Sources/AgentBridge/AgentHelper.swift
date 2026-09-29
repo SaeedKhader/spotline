@@ -20,8 +20,10 @@ public enum AgentHelper {
                 "params": ["name": .string(tool.rawValue), "arguments": .object(arguments)],
             ]
             let replyLine: Data
-            do { replyLine = try client.send(request.encoded()) } catch AgentSocketError.system(let call, _) where call == "connect" {
+            do { replyLine = try await client.send(request.encoded()) } catch AgentSocketError.system(let call, _) where call == "connect" {
                 throw AgentToolError(unavailableMessage)
+            } catch AgentSocketError.timedOut {
+                throw AgentToolError(AgentSocketError.timedOut.description)
             } catch {
                 throw AgentToolError("\(unavailableMessage) (\(error))")
             }
@@ -46,14 +48,18 @@ public enum AgentHelper {
     }
 }
 
-/// One connection, used by one call at a time.
+/// One connection, used by one call at a time. Its blocking reads run on a
+/// queue of their own, never on Swift's cooperative threads, which the app's
+/// side needs to answer when both run in one process (tests).
 private final class LockedClient: @unchecked Sendable {
-    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "io.github.saeedkhader.spotline.agent-client")
     private let client: AgentSocketClient
 
     init(_ client: AgentSocketClient) { self.client = client }
 
-    func send(_ line: Data) throws -> Data {
-        try lock.withLock { try client.send(line) }
+    func send(_ line: Data) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { continuation.resume(with: Result { try self.client.send(line) }) }
+        }
     }
 }

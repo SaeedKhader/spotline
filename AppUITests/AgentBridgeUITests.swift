@@ -5,8 +5,9 @@ import XCTest
 /// Agents drive the running app through the MCP bridge: their edits show in the
 /// cue list and undo like the person's own.
 final class AgentBridgeUITests: XCTestCase {
-    /// A short path in /tmp, shared by the test runner and the app (Unix socket paths are limited to 103 bytes).
-    let socketPath = "/tmp/spotline-uitest-\(UUID().uuidString.prefix(8)).sock"
+    /// In the test runner's own temporary folder: the runner is sandboxed and can only
+    /// reach sockets in its container. Kept short, as Unix socket paths are limited to 103 bytes.
+    let socketPath = FileManager.default.temporaryDirectory.appending(path: "a\(UUID().uuidString.prefix(4)).sock").path
 
     @MainActor
     func launchAppForAgents() -> XCUIApplication {
@@ -67,9 +68,11 @@ final class AgentBridgeUITests: XCTestCase {
         let command = app.staticTexts[AccessibilityID.AgentSettings.claudeCodeCommand]
         XCTAssertTrue((command.value as? String ?? command.label).contains("spotline-mcp"))
 
-        app.checkBoxes[AccessibilityID.AgentSettings.enabled].click()
+        // A switch in a grouped form.
+        let toggle = app.descendants(matching: .any)[AccessibilityID.AgentSettings.enabled]
+        toggle.click()
         waitForValue(of: status, toEqual: "listening")
-        app.checkBoxes[AccessibilityID.AgentSettings.enabled].click()
+        toggle.click()
         waitForValue(of: status, toEqual: "off")
     }
 }
