@@ -18,7 +18,15 @@ public struct ScriptedTranscriber: Transcriber {
         ("Fine,", 3.0, 3.4), ("thanks.", 3.45, 3.9),
     ].map { TranscribedWord(text: $0.0, start: MediaTime(seconds: $0.1, timescale: 1000), end: MediaTime(seconds: $0.2, timescale: 1000)) })
 
-    public func transcribe(_ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void) async throws -> [TranscribedWord] {
+    public func transcribe(
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([TranscribedWord]) -> Void
+    ) async throws -> [TranscribedWord] {
+        // In two parts, as a real transcriber finishes chunk by chunk.
+        let half = words.count / 2
+        found(Array(words[..<half]))
+        progress(0.5)
+        found(Array(words[half...]))
         progress(1)
         return words
     }
@@ -32,10 +40,12 @@ public struct ScriptedTranslator: CueTranslator {
 
     public init() {}
 
-    public func translate(_ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void) async throws -> [CueTranslation] {
-        progress(1)
+    public func translate(
+        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([CueTranslation]) -> Void
+    ) async throws -> [CueTranslation] {
         let prefix = "[\(Languages.base(request.targetLanguage))] "
-        return request.lines.map { line in
+        let all = request.lines.map { line in
             let text = prefix + line.source
             guard request.targetIsGendered, line.source.lowercased().contains("you") else {
                 return CueTranslation(cueID: line.cueID, text: text)
@@ -48,5 +58,8 @@ public struct ScriptedTranslator: CueTranslator {
                 ]
             )
         }
+        found(all)
+        progress(1)
+        return all
     }
 }

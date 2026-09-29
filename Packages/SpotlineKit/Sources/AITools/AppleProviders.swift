@@ -18,7 +18,8 @@ public struct AppleSpeechTranscriber: Transcriber {
     }
 
     public func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
         let requested = Locale(identifier: language ?? Locale.current.identifier)
         guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: requested) else {
@@ -36,7 +37,9 @@ public struct AppleSpeechTranscriber: Transcriber {
         let collector = Task {
             var words: [TranscribedWord] = []
             for try await result in transcriber.results where result.isFinal {
-                words += Self.words(in: result.text)
+                let new = Self.words(in: result.text)
+                words += new
+                if !new.isEmpty { found(new) }
             }
             return words
         }
@@ -116,7 +119,10 @@ public struct AppleTranslator: CueTranslator {
 
     public init() {}
 
-    public func translate(_ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void) async throws -> [CueTranslation] {
+    public func translate(
+        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([CueTranslation]) -> Void
+    ) async throws -> [CueTranslation] {
         let source = Locale.Language(identifier: Languages.base(request.sourceLanguage))
         let target = Locale.Language(identifier: Languages.base(request.targetLanguage))
         switch await LanguageAvailability().status(from: source, to: target) {
@@ -126,7 +132,8 @@ public struct AppleTranslator: CueTranslator {
         }
         let session = TranslationSession(installedSource: source, target: target)
         var results: [CueTranslation] = []
-        let batches = stride(from: 0, to: request.lines.count, by: 50).map { Array(request.lines[$0..<min($0 + 50, request.lines.count)]) }
+        // A small first batch shows results quickly.
+        let batches = Self.batches(of: request.lines.count, first: 10, size: 50).map { Array(request.lines[$0]) }
         for batch in batches {
             try Task.checkCancellation()
             // Line breaks are translated as sentence breaks; each line of a cue is kept apart.
@@ -137,14 +144,28 @@ public struct AppleTranslator: CueTranslator {
                 )
             }
             let responses = try await session.translations(from: requests)
+            let before = results.count
             for response in responses {
                 guard let id = response.clientIdentifier.flatMap(UUID.init(uuidString:)),
                       let line = batch.first(where: { $0.cueID == id })
                 else { continue }
                 results.append(CueTranslation(cueID: id, text: response.targetText, addressee: request.targetIsGendered ? line.addressee : nil))
             }
+            found(Array(results[before...]))
             progress(Double(results.count) / Double(max(request.lines.count, 1)))
         }
         return results
+    }
+
+    /// Ranges of `count` lines: a small first batch, then full ones.
+    static func batches(of count: Int, first: Int, size: Int) -> [Range<Int>] {
+        var ranges: [Range<Int>] = []
+        var start = 0
+        while start < count {
+            let end = min(start + (ranges.isEmpty ? first : size), count)
+            ranges.append(start..<end)
+            start = end
+        }
+        return ranges
     }
 }

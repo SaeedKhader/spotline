@@ -54,10 +54,11 @@ public struct OpenAITranscriber: Transcriber {
     }
 
     public func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
         let chunks = audio.chunks
-        let counter = ProgressCounter(total: chunks.count, report: progress)
+        let counter = ProgressCounter(total: chunks.count, report: progress, found: found)
         let words = try await withThrowingTaskGroup(of: [TranscribedWord].self) { group in
             var next = 0
             var all: [TranscribedWord] = []
@@ -65,9 +66,10 @@ public struct OpenAITranscriber: Transcriber {
                 guard next < chunks.count else { return }
                 let chunk = chunks[next]
                 next += 1
+                let index = next - 1
                 group.addTask {
                     let words = try await transcribe(chunk, language: language)
-                    await counter.advance()
+                    await counter.finished(index, words: words)
                     return words
                 }
             }
@@ -139,19 +141,29 @@ public struct OpenAITranscriber: Transcriber {
     }
 }
 
-/// Counts finished chunks and reports the fraction.
+/// Counts finished chunks, reports the fraction, and passes on their words in
+/// time order: chunks finish out of order, so each waits for the ones before it.
 private actor ProgressCounter {
     let total: Int
     let report: @Sendable (Double) -> Void
+    let found: @Sendable ([TranscribedWord]) -> Void
     var done = 0
+    var waiting: [Int: [TranscribedWord]] = [:]
+    var nextToPass = 0
 
-    init(total: Int, report: @escaping @Sendable (Double) -> Void) {
+    init(total: Int, report: @escaping @Sendable (Double) -> Void, found: @escaping @Sendable ([TranscribedWord]) -> Void) {
         self.total = total
         self.report = report
+        self.found = found
     }
 
-    func advance() {
+    func finished(_ index: Int, words: [TranscribedWord]) {
         done += 1
+        waiting[index] = words
+        while let words = waiting.removeValue(forKey: nextToPass) {
+            if !words.isEmpty { found(words.sorted { $0.start < $1.start }) }
+            nextToPass += 1
+        }
         report(Double(done) / Double(max(total, 1)))
     }
 }
@@ -201,17 +213,22 @@ public struct ClaudeTranslator: CueTranslator {
         http = HTTPClient(session: session)
     }
 
-    public func translate(_ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void) async throws -> [CueTranslation] {
+    public func translate(
+        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([CueTranslation]) -> Void
+    ) async throws -> [CueTranslation] {
         var results: [CueTranslation] = []
         var context = request.precedingContext
-        for start in stride(from: 0, to: request.lines.count, by: batchSize) {
+        // A small first batch shows results quickly.
+        for range in AppleTranslator.batches(of: request.lines.count, first: 10, size: batchSize) {
             try Task.checkCancellation()
-            let lines = Array(request.lines[start..<min(start + batchSize, request.lines.count)])
+            let lines = Array(request.lines[range])
             var batch = request
             batch.lines = lines
             batch.precedingContext = Array(context.suffix(contextLines))
             let translated = try await translateBatch(batch)
             results += translated
+            found(translated)
             for line in lines {
                 if let text = translated.first(where: { $0.cueID == line.cueID })?.text { context.append((line.source, text)) }
             }

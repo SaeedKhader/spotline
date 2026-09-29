@@ -99,6 +99,10 @@ public final class EditorState {
     /// The AI tool running now, with its progress; nil when none.
     public internal(set) var aiTask: AITaskStatus?
     @ObservationIgnored var aiTaskHandle: Task<Void, Never>?
+    /// Changes of the running tool already accepted or rejected, so later partial results leave them out.
+    @ObservationIgnored var decidedChanges: Set<Cue.ID> = []
+    /// Counts partial results of the running tool; older ones arriving late are dropped.
+    @ObservationIgnored var partialSerial = 0
     /// Providers and cloud consent (Settings › AI).
     public var aiSettings: AISettings {
         didSet { if aiSettings != oldValue { aiSettings.save(to: settings) } }

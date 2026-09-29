@@ -140,3 +140,45 @@ public struct CueSegmenter: Sendable {
         }
     }
 }
+
+/// Builds cues while words are still arriving, so a transcription can be
+/// reviewed as it goes. A cue is shown once the word after it has been heard
+/// (only then is it complete); each keeps its ID as more words arrive, so a
+/// cue accepted early is not proposed again. Safe to call from any thread.
+public final class TranscriptAccumulator: @unchecked Sendable {
+    private let segmenter: CueSegmenter
+    private let lock = NSLock()
+    private var words: [TranscribedWord] = []
+    /// IDs by start frame, kept between calls.
+    private var ids: [Int64: Cue.ID] = [:]
+
+    public init(segmenter: CueSegmenter) {
+        self.segmenter = segmenter
+    }
+
+    /// Adds words (in time order) and returns the cues complete so far.
+    public func add(_ new: [TranscribedWord]) -> [Cue] {
+        lock.withLock {
+            words += new
+            words.sort { $0.start < $1.start }
+            return identified(Array(segmenter.cues(from: words).dropLast()))
+        }
+    }
+
+    /// Every cue, once all words are in.
+    public func finish(with all: [TranscribedWord]? = nil) -> [Cue] {
+        lock.withLock {
+            if let all { words = all.sorted { $0.start < $1.start } }
+            return identified(segmenter.cues(from: words))
+        }
+    }
+
+    private func identified(_ cues: [Cue]) -> [Cue] {
+        cues.map { cue in
+            let frame = cue.start.firstFrame(at: segmenter.frameRate)
+            let id = ids[frame] ?? cue.id
+            ids[frame] = id
+            return Cue(id: id, start: cue.start, end: cue.end, text: cue.text)
+        }
+    }
+}

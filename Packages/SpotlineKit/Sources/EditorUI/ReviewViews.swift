@@ -277,12 +277,19 @@ extension Gender {
     }
 }
 
-/// The running AI tool with its progress and a cancel button, then the review
-/// waiting for a decision with Accept All and Reject All. In the actions bar.
+/// The running AI tool with its progress and a cancel button, and the review
+/// (what it has found so far) with Accept All and Reject All. In the actions bar.
 struct AIStatusView: View {
     let editor: EditorState
 
     var body: some View {
+        HStack(spacing: 12) {
+            task
+            review
+        }
+    }
+
+    @ViewBuilder private var task: some View {
         if let task = editor.aiTask {
             let text = "\(task.title) \(Int((task.fraction * 100).rounded()))%"
             HStack(spacing: 6) {
@@ -298,7 +305,11 @@ struct AIStatusView: View {
                     .accessibilityIdentifier(AccessibilityID.Transport.aiTask)
                 CommandButton(command: .cancelAITask, systemImage: "xmark.circle", editor: editor)
             }
-        } else if let review = editor.pendingReview {
+        }
+    }
+
+    @ViewBuilder private var review: some View {
+        if let review = editor.pendingReview {
             let count = review.changes.count
             let text = "\(review.title): \(count == 1 ? "1 change" : "\(count) changes")"
             HStack(spacing: 8) {

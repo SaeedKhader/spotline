@@ -7,13 +7,21 @@ public protocol Transcriber: Sendable {
     /// "Apple Speech (on this Mac)".
     var name: String { get }
     /// `language` is a BCP 47 code, nil to let the provider detect it. `progress` gets 0 to 1.
-    func transcribe(_ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void) async throws -> [TranscribedWord]
+    /// `found` gets words as they are heard, in time order, so cues can be shown before the end.
+    func transcribe(
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([TranscribedWord]) -> Void
+    ) async throws -> [TranscribedWord]
 }
 
 /// Translates cues with their context: neighbouring lines, glossary, memory and who speaks to whom.
 public protocol CueTranslator: Sendable {
     var name: String { get }
-    func translate(_ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void) async throws -> [CueTranslation]
+    /// `found` gets each batch of translations as it is done.
+    func translate(
+        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([CueTranslation]) -> Void
+    ) async throws -> [CueTranslation]
 }
 
 /// What a translator gets: the lines in order, and everything known about them.

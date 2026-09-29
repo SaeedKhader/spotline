@@ -137,6 +137,30 @@ struct AIStateTests {
         #expect(editor.track.cues.map(\.text) == ["[ar] Where are you going? ♀", "[ar] Home."])
     }
 
+    @Test func transcribedCuesCanBeAcceptedWhileTranscribing() async throws {
+        let editor = makeEditor()
+        let release = AsyncStream<Void>.makeStream()
+        let words = ScriptedTranscriber.fixture.words
+        editor.aiProviders = AIProviderFactory(
+            transcriber: { _ in PausingTranscriber(words: words, gate: release.stream) },
+            translator: { _ in ScriptedTranslator() }
+        )
+        editor.perform(.transcribe)
+        // The first sentence is complete once "Fine," is heard; it shows before the task ends.
+        for _ in 0..<200 where editor.pendingReview == nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(editor.aiTask != nil)
+        #expect(editor.pendingReview?.changes.map(\.cue.text) == ["Hello there. How are you?"])
+        let first = try #require(editor.pendingReview?.changes.first?.cueID)
+        editor.acceptChanges(to: [first])
+        #expect(editor.track.cues.map(\.text) == ["Hello there. How are you?"])
+
+        release.continuation.yield()
+        await finish(editor)
+        // The accepted cue is not proposed again; the rest is.
+        #expect(editor.pendingReview?.changes.map(\.cue.text) == ["Fine, thanks."])
+        #expect(editor.track.cues.first?.id == first)
+    }
+
     @Test func cancellingStopsWithoutProposing() async {
         let editor = makeEditor()
         editor.prepareAudio = { _, _, _ in
@@ -173,5 +197,22 @@ struct AIStateTests {
         editor.select(withVariants.id)
         editor.perform(.splitCue)
         #expect(editor.track.cues.allSatisfy { $0.variants == nil })
+    }
+}
+
+/// Hears the first five words, then waits for `gate` before the rest.
+private struct PausingTranscriber: Transcriber {
+    var name: String { "Pausing" }
+    let words: [TranscribedWord]
+    let gate: AsyncStream<Void>
+
+    func transcribe(
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        found: @escaping @Sendable ([TranscribedWord]) -> Void
+    ) async throws -> [TranscribedWord] {
+        found(Array(words.prefix(6)))
+        for await _ in gate { break }
+        found(Array(words.dropFirst(6)))
+        return words
     }
 }
