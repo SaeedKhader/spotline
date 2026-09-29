@@ -22,24 +22,23 @@ struct SpeechDetectionTests {
         return url
     }
 
-    /// Whether `say` makes audible speech here. Some CI images have no voice
-    /// installed and write silence, which would test nothing.
-    static let sayMakesSpeech: Bool = {
-        guard FileManager.default.isExecutableFile(atPath: say.path), let url = try? makeSpeechFile() else { return false }
-        defer { try? FileManager.default.removeItem(at: url) }
-        guard let data = try? Data(contentsOf: url), data.count > 44 else { return false }
-        let peak = data.dropFirst(44).withUnsafeBytes { bytes in
-            bytes.bindMemory(to: Int16.self).reduce(0) { max($0, abs(Int($1))) }
-        }
-        return peak > 1_000
-    }()
-
-    @Test(.enabled(if: sayMakesSpeech, "macOS text-to-speech makes no audible speech on this machine"))
+    @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: say.path)))
     func findsTheSpokenPart() throws {
         let url = try Self.makeSpeechFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        let regions = try MediaAnalyzer.speech(in: url)
-        let region = try #require(regions.first)
+        // The system classifier on CI runners now and then hears nothing in a
+        // run (or fails); a few tries tell that apart from a detector that never works.
+        var regions: [SpeechRegion] = []
+        var attempts: [String] = []
+        for _ in 0..<3 where regions.isEmpty {
+            do {
+                regions = try MediaAnalyzer.speech(in: url)
+                if regions.isEmpty { attempts.append("no speech") }
+            } catch {
+                attempts.append(String(describing: error))
+            }
+        }
+        let region = try #require(regions.first, "Tries: \(attempts)")
         #expect(regions.count == 1, "\(regions)")
         #expect((1.2...2.6).contains(region.start.seconds), "\(region)")
         #expect((7.4...9.2).contains(region.end.seconds), "\(region)")
