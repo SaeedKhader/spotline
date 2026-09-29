@@ -21,6 +21,8 @@ public struct EditorCommand: Identifiable, Hashable, Sendable {
         case timeline
         /// How things are displayed.
         case view
+        /// Quality control: stepping through issues and fixing them.
+        case review
     }
 
     public init(id: String, title: String, category: Category, defaultShortcut: KeyShortcut? = nil) {
@@ -89,16 +91,22 @@ extension EditorCommand {
         id: "cue.togglePositionTop", title: "Show Cue at Top", category: .cue,
         defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .option])
     )
+    /// Trims cues that overlap the next one in the same position, or end closer to it than the QC preset's gap.
     public static let fixOverlaps = EditorCommand(
-        id: "cue.fixOverlaps", title: "Fix Overlaps", category: .cue
+        id: "cue.fixOverlaps", title: "Fix Overlaps and Short Gaps", category: .review
     )
     public static let previousIssue = EditorCommand(
-        id: "navigation.previousIssue", title: "Previous Cue Needing Review", category: .navigation,
+        id: "navigation.previousIssue", title: "Previous Cue with Issues", category: .review,
         defaultShortcut: KeyShortcut(.upArrow, modifiers: [.command, .option])
     )
     public static let nextIssue = EditorCommand(
-        id: "navigation.nextIssue", title: "Next Cue Needing Review", category: .navigation,
+        id: "navigation.nextIssue", title: "Next Cue with Issues", category: .review,
         defaultShortcut: KeyShortcut(.downArrow, modifiers: [.command, .option])
+    )
+    /// A toggle: see `EditorState.isOn(_:)`.
+    public static let toggleIssuesPanel = EditorCommand(
+        id: "review.toggleIssuesPanel", title: "Show Issues", category: .review,
+        defaultShortcut: KeyShortcut(.character("i"), modifiers: [.command, .option])
     )
     public static let shuttleBackward = EditorCommand(
         id: "playback.shuttleBackward", title: "Play Backward (Faster Each Press)", category: .playback,
@@ -165,8 +173,9 @@ extension EditorCommand {
     public static let all: [EditorCommand] = [
         openMedia, importSubtitles, exportSubtitles,
         undo, redo,
-        addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop, fixOverlaps,
-        previousCue, nextCue, previousIssue, nextIssue, previousShotChange, nextShotChange,
+        addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
+        previousCue, nextCue, previousShotChange, nextShotChange,
+        toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, nextAudioTrack,
         toggleMilliseconds,

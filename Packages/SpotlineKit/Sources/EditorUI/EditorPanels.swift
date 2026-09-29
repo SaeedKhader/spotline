@@ -18,7 +18,7 @@ enum EditorPanels {
     static func chooseSubtitles() -> URL? {
         let panel = NSOpenPanel()
         panel.title = EditorCommand.importSubtitles.title
-        panel.allowedContentTypes = SubtitleFormat.allCases.compactMap(\.contentType)
+        panel.allowedContentTypes = SubtitleFormat.allCases.flatMap(\.contentTypes)
         panel.allowsMultipleSelection = false
         return panel.runModal() == .OK ? panel.url : nil
     }
@@ -81,5 +81,10 @@ enum EditorPanels {
 extension SubtitleFormat {
     var contentType: UTType? {
         UTType(filenameExtension: fileExtension, conformingTo: .text)
+    }
+
+    /// Every file type the format reads, including alternative extensions (.dfxp, .xml).
+    var contentTypes: [UTType] {
+        ([fileExtension] + alternativeExtensions).compactMap { UTType(filenameExtension: $0) }
     }
 }

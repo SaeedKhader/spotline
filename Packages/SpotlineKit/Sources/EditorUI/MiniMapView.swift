@@ -1,3 +1,4 @@
+import QualityControl
 import SpotlineAccessibility
 import SubtitleCore
 import SwiftUI
@@ -63,7 +64,12 @@ private struct MiniMapContent: View {
                     x: x(cue.start.seconds), y: size.height * 0.45,
                     width: max(x(cue.end.seconds) - x(cue.start.seconds), 1.5), height: size.height * 0.4
                 )
-                context.fill(Path(rect), with: .color(issues[cue.id] == nil ? .teal.opacity(0.8) : .orange))
+                let color: Color = switch issues[cue.id]?.map(\.severity).max() {
+                case .error: .red
+                case .warning: .orange
+                case nil: .teal.opacity(0.8)
+                }
+                context.fill(Path(rect), with: .color(color))
             }
         }
     }

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xmlns:tts="http://www.w3.org/ns/ttml#styling" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" ttp:frameRate="24" ttp:frameRateMultiplier="1000 1001" ttp:timeBase="media" tts:extent="1920px 1080px" xml:lang="en-US">
+  <head>
+    <metadata>
+      <ttm:title>Episode 1</ttm:title>
+    </metadata>
+    <styling>
+      <style xml:id="base" tts:color="white" tts:fontFamily="proportionalSansSerif"/>
+      <style xml:id="italic" style="base" tts:fontStyle="italic"/>
+      <style xml:id="bold" tts:fontWeight="bold"/>
+    </styling>
+    <layout>
+      <region xml:id="bottom" tts:displayAlign="after" tts:extent="1728px 972px" tts:origin="96px 54px"/>
+      <region xml:id="top" tts:displayAlign="before" tts:extent="1728px 972px" tts:origin="96px 54px"/>
+      <region xml:id="upperThird" tts:extent="1728px 200px" tts:origin="96px 100px"/>
+    </layout>
+  </head>
+  <body style="base" region="bottom">
+    <div>
+      <p begin="00:00:01:00" end="00:00:02:12">
+        Where are
+        we going?
+      </p>
+      <p begin="00:00:03:00" end="00:00:05:00" style="italic">Somewhere quieter,<br/>where nobody <span tts:fontStyle="normal">knows</span> us.</p>
+      <p begin="00:00:06:00" end="00:00:07:00" region="top"><span style="bold">SIGN:</span> <span style="italic bold">Keep out</span></p>
+      <p begin="00:00:08:00" dur="00:00:01:12" region="upperThird">Up top &amp; <span tts:textDecoration="underline">underlined</span> &lt;3</p>
+      <p begin="00:00:10:00" end="00:00:11:00"><metadata><ttm:desc>ignored</ttm:desc></metadata>After   metadata</p>
+    </div>
+  </body>
+</tt>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xmlns:tts="http://www.w3.org/ns/ttml#styling" ttp:timeBase="media" ttp:contentProfiles="http://www.w3.org/ns/ttml/profile/imsc1.1/text" xml:lang="">
+  <head>
+    <styling>
+      <style xml:id="default" tts:fontFamily="proportionalSansSerif" tts:textAlign="center" tts:color="white"/>
+    </styling>
+    <layout>
+      <region xml:id="bottom" tts:origin="5% 5%" tts:extent="90% 90%" tts:displayAlign="after"/>
+      <region xml:id="top" tts:origin="5% 5%" tts:extent="90% 90%" tts:displayAlign="before"/>
+    </layout>
+  </head>
+  <body style="default">
+    <div>
+      <p begin="00:59:58.000" end="01:00:01.040" region="bottom"><span tts:fontStyle="italic">Previously on the show…</span></p>
+      <p begin="01:00:01.080" end="01:00:03.500" region="bottom">- Is that you, Tom &amp; Jerry?<br/>- <span tts:fontWeight="bold">Who else?</span></p>
+      <p begin="01:00:04.000" end="01:00:05.000" region="bottom"></p>
+      <p begin="01:00:05.000" end="01:00:07.000" region="top">هل أنت مشغول؟</p>
+      <p begin="10:00:00.000" end="10:00:02.002" region="bottom">Café, naïve, 日本語 ♪</p>
+    </div>
+  </body>
+</tt>

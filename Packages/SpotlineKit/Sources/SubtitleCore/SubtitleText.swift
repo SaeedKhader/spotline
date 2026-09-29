@@ -1,17 +1,3 @@
-/// Reading-speed and layout guidance for subtitle text.
-///
-/// These are the common defaults of professional style guides (e.g. Netflix
-/// for most Latin-script languages). The editor shows them as guidance; QC
-/// rules with per-client presets enforce them in M4.
-public enum SubtitleGuidelines {
-    public static let maxLines = 2
-    public static let maxCharactersPerLine = 42
-    /// Reading speed, characters per second (Netflix allows 17 to 20 for adult programs).
-    public static let maxCharactersPerSecond = 20.0
-    /// Frames kept between one cue's end and the next cue's start in the same position.
-    public static let minimumGapFrames: Int64 = 2
-}
-
 public enum SubtitleText {
     /// The text as a viewer reads it: lines without inline markup such as
     /// `<i>`, `</b>`, `<v Anna>` or `{\an8}`, and with common entities decoded.
@@ -34,7 +20,8 @@ public enum SubtitleText {
         }
     }
 
-    private static func decodeEntities(_ text: String) -> String {
+    /// Decodes the entities SRT and WebVTT text uses (`&amp;`, `&lt;`, `&gt;`, `&nbsp;`, `&lrm;`, `&rlm;`).
+    public static func decodeEntities(_ text: String) -> String {
         guard text.contains("&") else { return text }
         return text
             .replacing("&lt;", with: "<")

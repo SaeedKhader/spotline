@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "SubtitleCore", targets: ["SubtitleCore"]),
         .library(name: "SubtitleFormats", targets: ["SubtitleFormats"]),
+        .library(name: "QualityControl", targets: ["QualityControl"]),
         .library(name: "SpotlineAccessibility", targets: ["SpotlineAccessibility"]),
         .library(name: "EditorCommands", targets: ["EditorCommands"]),
         .library(name: "PlaybackCore", targets: ["PlaybackCore"]),
@@ -17,8 +18,10 @@ let package = Package(
     targets: [
         // Pure model: time, frame rates, timecode, cues. No AppKit, no mpv.
         .target(name: "SubtitleCore"),
-        // Subtitle file formats (SRT, WebVTT), read and written losslessly.
+        // Subtitle file formats (SRT, WebVTT, ASS/SSA, TTML/IMSC), read and written losslessly where the format allows.
         .target(name: "SubtitleFormats", dependencies: ["SubtitleCore"]),
+        // QC rules and client presets (line length, reading speed, durations, gaps, shot changes).
+        .target(name: "QualityControl", dependencies: ["SubtitleCore"]),
         // Stable accessibility identifiers shared by the app and UI tests.
         .target(name: "SpotlineAccessibility"),
         // Every user action as a named command (menus, shortcuts, tests, agents).
@@ -42,7 +45,7 @@ let package = Package(
             name: "EditorUI",
             dependencies: [
                 "SubtitleCore", "SubtitleFormats", "SpotlineAccessibility", "EditorCommands", "PlaybackCore", "MPVPlayer",
-                "MediaAnalysis",
+                "MediaAnalysis", "QualityControl",
             ]
         ),
         .testTarget(name: "SubtitleCoreTests", dependencies: ["SubtitleCore"]),
@@ -51,10 +54,11 @@ let package = Package(
             dependencies: ["SubtitleFormats"],
             resources: [.copy("Golden"), .copy("Input")]
         ),
+        .testTarget(name: "QualityControlTests", dependencies: ["QualityControl"]),
         .testTarget(name: "EditorCommandsTests", dependencies: ["EditorCommands"]),
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore"]),
         .testTarget(name: "MPVPlayerTests", dependencies: ["MPVPlayer"]),
         .testTarget(name: "MediaAnalysisTests", dependencies: ["MediaAnalysis"]),
-        .testTarget(name: "EditorStateTests", dependencies: ["EditorUI", "SubtitleFormats"]),
+        .testTarget(name: "EditorStateTests", dependencies: ["EditorUI", "SubtitleFormats", "QualityControl"]),
     ]
 )

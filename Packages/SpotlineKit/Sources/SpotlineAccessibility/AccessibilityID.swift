@@ -11,8 +11,10 @@ public enum AccessibilityID {
 
     public enum Video {
         public static let surface = "video.surface"
-        /// The subtitle shown over the video; its value is the cue's visible text.
+        /// The subtitle shown over the video (at the bottom); its value is the cue's visible text.
         public static let subtitle = "video.subtitle"
+        /// A cue shown at the top of the picture, e.g. a sign over dialogue.
+        public static let topSubtitle = "video.subtitle.top"
     }
 
     /// The actions bar above the timeline (transport, editing buttons, timecode).
@@ -59,6 +61,15 @@ public enum AccessibilityID {
             case issues
             case text
         }
+    }
+
+    /// The issues panel under the cue list (Review › Show Issues).
+    public enum Issues {
+        public static let root = "issues"
+        /// The QC preset's name; its help explains the limits.
+        public static let preset = "issues.preset"
+        /// One issue; its label is the cue number and its value the message.
+        public static func item(_ cueID: UUID, _ offset: Int) -> String { "issues.item.\(cueID.uuidString).\(offset)" }
     }
 
     /// The overview strip of the whole media between the actions bar and the timeline.

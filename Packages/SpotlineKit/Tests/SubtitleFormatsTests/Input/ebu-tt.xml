@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tt:tt xmlns:tt="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xmlns:tts="http://www.w3.org/ns/ttml#styling" ttp:tickRate="10000000" ttp:cellResolution="50 30" xml:lang="ar">
+  <tt:head>
+    <tt:layout>
+      <tt:region xml:id="r1" tts:origin="0c 2c" tts:extent="50c 6c" tts:displayAlign="after"/>
+    </tt:layout>
+  </tt:head>
+  <tt:body>
+    <tt:div begin="10s">
+      <tt:p begin="10000000t" end="25000000t">هل أنت مشغول؟</tt:p>
+      <tt:p begin="3s" end="4.5s" region="r1" xml:space="preserve">Two
+lines</tt:p>
+      <tt:p><tt:span begin="5s" end="6s">Timed </tt:span><tt:span begin="6s" end="7500ms">by spans</tt:span></tt:p>
+    </tt:div>
+  </tt:body>
+</tt:tt>
