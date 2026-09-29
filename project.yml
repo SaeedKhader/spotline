@@ -25,6 +25,12 @@ targets:
         product: EditorUI
       - package: SpotlineKit
         product: EditorCommands
+      # The MCP helper agents launch, next to the app's executable (docs/AGENTS.md).
+      - target: spotline-mcp
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.saeedkhader.spotline
@@ -35,6 +41,18 @@ targets:
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Saeed Khader. GPL-3.0-or-later."
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
+  spotline-mcp:
+    type: tool
+    platform: macOS
+    sources: [Packages/SpotlineKit/Sources/SpotlineMCP]
+    dependencies:
+      - package: SpotlineKit
+        product: AgentBridge
+    settings:
+      base:
+        PRODUCT_NAME: spotline-mcp
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.saeedkhader.spotline.mcp
+        SKIP_INSTALL: YES
   SpotlineUITests:
     type: bundle.ui-testing
     platform: macOS
@@ -64,6 +82,8 @@ targets:
         product: SpotlineAccessibility
       - package: SpotlineKit
         product: EditorCommands
+      - package: SpotlineKit
+        product: AgentBridge
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.saeedkhader.spotline.uitests

@@ -9,7 +9,7 @@ struct SpotlineApp: App {
         // The editor window is owned by AppKit (see AppDelegate); SwiftUI supplies
         // the menus and the Settings window.
         Settings {
-            AISettingsView(editor: appDelegate.editor)
+            SettingsView(editor: appDelegate.editor, agentAccess: appDelegate.agentAccess)
         }
         .commands {
             EditorMenuCommands(editor: appDelegate.editor)

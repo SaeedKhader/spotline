@@ -5,6 +5,7 @@ A native macOS subtitle editor for professional movie and TV workflows: timing (
 - Frame-accurate playback of pro formats through [libmpv](https://mpv.io), hosted via AppKit inside SwiftUI
 - Exact timecode math: 23.976, 25, 29.97 drop-frame and more, with no floating-point drift
 - Built for automation from day one: stable accessibility IDs, one command layer shared by menus, shortcuts, UI tests and AI agents
+- An MCP server for AI agents such as Claude Code (off by default; see [docs/AGENTS.md](docs/AGENTS.md))
 - AI tools (planned): transcription with timestamps, translation, profanity removal and line shortening, always reviewed as a diff before applying
 
 Status: early development (milestone M4, pro formats and QC). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
@@ -56,6 +57,8 @@ xcodebuild test -project Spotline.xcodeproj -scheme Spotline -destination 'platf
 | `Packages/SpotlineKit/Sources/SpotlineAccessibility` | Accessibility identifier catalog |
 | `Packages/SpotlineKit/Sources/PlaybackCore` | The playback engine interface, plus a simulated engine for tests |
 | `Packages/SpotlineKit/Sources/MPVPlayer` | libmpv player, OpenGL render layer and video view |
+| `Packages/SpotlineKit/Sources/AgentBridge` | MCP tools and the local socket agents reach the app through |
+| `Packages/SpotlineKit/Sources/SpotlineMCP` | `spotline-mcp`, the stdio helper agents launch (bundled in the app) |
 | `Packages/SpotlineKit/Sources/EditorUI` | Editor views and state |
 | `Fixtures/` | Short test clips and subtitles used by the player and UI tests |
 

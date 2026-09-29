@@ -121,6 +121,17 @@ public enum AccessibilityID {
         public static func apiKey(_ provider: String) -> String { "settings.ai.key.\(provider)" }
     }
 
+    /// Settings › Agents.
+    public enum AgentSettings {
+        public static let enabled = "settings.agents.enabled"
+        /// Its value says whether agents can connect.
+        public static let status = "settings.agents.status"
+        public static let claudeCodeCommand = "settings.agents.claudeCode"
+        public static let copyClaudeCodeCommand = "settings.agents.claudeCode.copy"
+        public static let claudeDesktopConfig = "settings.agents.claudeDesktop"
+        public static let copyClaudeDesktopConfig = "settings.agents.claudeDesktop.copy"
+    }
+
     /// The sheet offering the subtitle tracks muxed into the media for import.
     public enum EmbeddedSubtitles {
         public static let sheet = "embeddedSubtitles"
