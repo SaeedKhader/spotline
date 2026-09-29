@@ -103,6 +103,11 @@ public final class EditorState {
     @ObservationIgnored var appliedAIChanges: Set<Cue.ID> = []
     /// Counts partial results of the running tool; older ones arriving late are dropped.
     @ObservationIgnored var partialSerial = 0
+    /// Cues whose text an agent wrote, for the AI tint's tooltip.
+    @ObservationIgnored var agentWrittenCues: Set<Cue.ID> = []
+    /// The last error shown to the person once agents have connected, for agents to read.
+    @ObservationIgnored var lastAgentVisibleError: String?
+    @ObservationIgnored var isRecordingErrorsForAgents = false
     /// Providers and cloud consent (Settings › AI).
     public var aiSettings: AISettings {
         didSet { if aiSettings != oldValue { aiSettings.save(to: settings) } }
@@ -858,13 +863,19 @@ public final class EditorState {
     static let newCueSeconds: Int64 = 2
 
     /// Splits the selected cue at the playhead when it is inside the cue, else in the middle.
-    /// Two or more lines split between lines; one line splits at the word nearest its middle.
     private func splitSelectedCue() -> Bool {
-        guard let index = selectedCueIndex else { return false }
+        guard let id = selectedCueID else { return false }
+        return splitCue(id, at: hasMedia ? currentTime : nil)
+    }
+
+    /// Splits a cue at `time` when it is at least a frame inside the cue, else in the middle.
+    /// Two or more lines split between lines; one line splits at the word nearest its middle.
+    func splitCue(_ id: Cue.ID, at time: MediaTime?) -> Bool {
+        guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return false }
         let cue = track.cues[index]
         let oneFrame = MediaTime(frame: 1, rate: frameRate)
-        var at = currentTime
-        if !(hasMedia && cue.start + oneFrame <= at && at + oneFrame <= cue.end) {
+        var at = time ?? cue.start
+        if !(cue.start + oneFrame <= at && at + oneFrame <= cue.end) {
             let middle = cue.start + MediaTime(value: (cue.duration.value), timescale: cue.duration.timescale * 2)
             at = middle.snapped(to: frameRate)
         }
@@ -902,7 +913,12 @@ public final class EditorState {
     }
 
     private func mergeSelectedWithNext() {
-        guard let index = selectedCueIndex, index + 1 < track.cues.count else { return }
+        if let id = selectedCueID { mergeWithNext(id) }
+    }
+
+    /// Joins a cue and the next one: their lines, until the later end.
+    func mergeWithNext(_ id: Cue.ID) {
+        guard let index = track.cues.firstIndex(where: { $0.id == id }), index + 1 < track.cues.count else { return }
         let next = track.cues[index + 1]
         edit("Merge Cues") { track in
             var merged = track.cues[index]
@@ -943,10 +959,16 @@ public final class EditorState {
     }
 
     private func deleteSelectedCue() {
-        guard let index = selectedCueIndex else { return }
+        if let id = selectedCueID { deleteCue(id) }
+    }
+
+    /// Deletes a cue. When it was selected, the cue that takes its place is.
+    func deleteCue(_ id: Cue.ID) {
+        guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
         edit("Delete Cue") { track in
             track.cues.remove(at: index)
         }
+        guard selectedCueID == id else { return }
         let cues = track.cues
         selectedCueID = cues.isEmpty ? nil : cues[min(index, cues.count - 1)].id
     }

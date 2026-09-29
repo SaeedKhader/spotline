@@ -9,9 +9,9 @@ extension XCTestCase {
         openSubtitles: Bool = false,
         media: String = "testsrc-23.976.mp4",
         subtitles: String = "testsrc-23.976.srt",
-        source: String? = nil
+        source: String? = nil,
+        prepared app: XCUIApplication = XCUIApplication()
     ) -> XCUIApplication {
-        let app = XCUIApplication()
         app.launchArguments += ["-UITestMode", "-ApplePersistenceIgnoreState", "YES"]
         if openFixture {
             let fixture = Bundle(for: MainWindowUITests.self).url(forResource: media, withExtension: nil)

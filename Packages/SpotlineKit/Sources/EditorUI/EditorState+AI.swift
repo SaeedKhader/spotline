@@ -163,9 +163,10 @@ extension EditorState {
         if let first { select(first.cueID) }
     }
 
-    /// "transcription" or "translation", for the tint's tooltip.
+    /// "transcription", "translation" or "an agent", for the tint's tooltip.
     func aiToolName(for cue: Cue) -> String {
-        sourceCues[cue.id] != nil ? "translation" : "transcription"
+        if agentWrittenCues.contains(cue.id) { return "an agent" }
+        return sourceCues[cue.id] != nil ? "translation" : "transcription"
     }
 
     // MARK: Addressee variants

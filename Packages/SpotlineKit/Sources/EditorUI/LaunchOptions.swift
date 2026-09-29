@@ -14,16 +14,19 @@ public struct LaunchOptions: Sendable {
     /// Reuse cached media analysis. Off in UI tests and with `-NoAnalysisCache`,
     /// so analysis always runs (and can be watched filling in the timeline).
     public var usesAnalysisCache: Bool
+    /// Turns on agent access at launch, from `-EnableAgentAccess` (UI tests).
+    public var enablesAgentAccess: Bool
 
     public init(
         isUITestMode: Bool = false, mediaURL: URL? = nil, subtitlesURL: URL? = nil, sourceSubtitlesURL: URL? = nil,
-        usesAnalysisCache: Bool? = nil
+        usesAnalysisCache: Bool? = nil, enablesAgentAccess: Bool = false
     ) {
         self.isUITestMode = isUITestMode
         self.mediaURL = mediaURL
         self.subtitlesURL = subtitlesURL
         self.sourceSubtitlesURL = sourceSubtitlesURL
         self.usesAnalysisCache = usesAnalysisCache ?? !isUITestMode
+        self.enablesAgentAccess = enablesAgentAccess
     }
 
     public static var current: LaunchOptions {
@@ -37,7 +40,8 @@ public struct LaunchOptions: Sendable {
             mediaURL: path(after: "-OpenMedia"),
             subtitlesURL: path(after: "-OpenSubtitles"),
             sourceSubtitlesURL: path(after: "-OpenSource"),
-            usesAnalysisCache: arguments.contains("-UITestMode") || arguments.contains("-NoAnalysisCache") ? false : true
+            usesAnalysisCache: arguments.contains("-UITestMode") || arguments.contains("-NoAnalysisCache") ? false : true,
+            enablesAgentAccess: arguments.contains("-EnableAgentAccess")
         )
     }
 }
