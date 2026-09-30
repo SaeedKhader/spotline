@@ -85,11 +85,14 @@ final class AIToolsUITests: XCTestCase {
         let summary = app.descendants(matching: .any)[AccessibilityID.CueList.choicesSummary]
         XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices summary")
         waitForValue(of: summary, toEqual: "2 lines to choose")
-        XCTAssertEqual(app.cueCells(.choices).count, 2)
+        // Outside the review, only the selected line shows its variants.
+        XCTAssertLessThanOrEqual(app.cueCells(.choices).count, 1)
 
-        // The review shows only those lines; one click on a variant uses it.
+        // The Choices scope shows only those lines, each with its variants; one click on a variant uses it.
         summary.click()
-        XCTAssertTrue(app.descendants(matching: .any)[AccessibilityID.CueList.choiceReview].waitForExistence(timeout: 10), "No review")
+        let reviewing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: summary)
+        XCTAssertEqual(XCTWaiter().wait(for: [reviewing], timeout: 10), .completed, "No review")
+        XCTAssertEqual(app.cueCells(.choices).count, 2)
         let male = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH 'cueList.row.' AND identifier ENDSWITH '.choices.1'")
         ).firstMatch

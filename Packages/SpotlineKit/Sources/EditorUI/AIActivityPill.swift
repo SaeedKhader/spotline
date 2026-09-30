@@ -1,0 +1,76 @@
+import EditorCommands
+import SpotlineAccessibility
+import SwiftUI
+
+/// In the middle of the title bar while an AI tool runs: what it is doing and
+/// how far it has got, with a button to stop it. Click it for every step. For a
+/// few seconds after the tool finishes, what it did ("640 lines translated · 12 flagged").
+struct AIActivityPill: View {
+    let editor: EditorState
+    @State private var isShowingSteps = false
+
+    var body: some View {
+        Group {
+            if let task = editor.aiTask {
+                HStack(spacing: 8) {
+                    Button {
+                        isShowingSteps.toggle()
+                    } label: {
+                        AITaskProgress(task: task)
+                            .frame(minWidth: 240, idealWidth: 360, maxWidth: 420)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $isShowingSteps, arrowEdge: .bottom) {
+                        AITaskSteps(editor: editor, task: task)
+                    }
+                    CommandButton(command: .cancelAITask, systemImage: "stop.circle", editor: editor)
+                }
+            } else if let summary = editor.aiSummary {
+                Label(summary.fullText, systemImage: "checkmark.circle")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .accessibilityLabel("AI summary")
+                    .accessibilityValue(summary.fullText)
+                    .accessibilityIdentifier(AccessibilityID.CueList.aiSummary)
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AccessibilityID.CueList.aiBar)
+    }
+}
+
+/// The popover under the AI activity: every step, the current one marked, and Cancel.
+private struct AITaskSteps: View {
+    let editor: EditorState
+    let task: AITaskStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(task.title).font(.headline)
+            ForEach(Array(task.stages.enumerated()), id: \.offset) { index, stage in
+                HStack(spacing: 8) {
+                    Image(systemName: index < task.stage ? "checkmark.circle.fill" : index == task.stage ? "circle.dotted" : "circle")
+                        .foregroundStyle(index <= task.stage ? Color.aiTint : Color.secondary)
+                    Text(stage)
+                        .fontWeight(index == task.stage ? .medium : .regular)
+                        .foregroundStyle(index > task.stage ? .secondary : .primary)
+                }
+            }
+            if !task.detail.isEmpty {
+                Text(task.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                CommandButton(command: .cancelAITask, editor: editor)
+            }
+        }
+        .padding(14)
+        .frame(minWidth: 280, alignment: .leading)
+    }
+}

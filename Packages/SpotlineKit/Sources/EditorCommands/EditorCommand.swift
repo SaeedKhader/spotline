@@ -105,6 +105,11 @@ extension EditorCommand {
         id: "cue.setOutAtPlayhead", title: "Set Out at Playhead", category: .cue,
         defaultShortcut: KeyShortcut(.character("o"))
     )
+    /// Esc outside the text: no cue selected (the first Esc leaves the text).
+    public static let deselectCue = EditorCommand(
+        id: "navigation.deselectCue", title: "Deselect Cue", category: .navigation,
+        defaultShortcut: KeyShortcut(.escape)
+    )
     public static let previousCue = EditorCommand(
         id: "navigation.previousCue", title: "Select Previous Cue", category: .navigation,
         defaultShortcut: KeyShortcut(.upArrow, modifiers: .command)
@@ -135,17 +140,22 @@ extension EditorCommand {
     public static let joinShortLines = EditorCommand(
         id: "cue.joinShortLines", title: "Join Short Lines", category: .review
     )
+    /// Steps through the cues the review scope lists (in All, every cue with something to review).
     public static let previousIssue = EditorCommand(
-        id: "navigation.previousIssue", title: "Previous Cue with Issues", category: .review,
+        id: "navigation.previousIssue", title: "Previous Cue to Review", category: .review,
         defaultShortcut: KeyShortcut(.upArrow, modifiers: [.command, .option])
     )
     public static let nextIssue = EditorCommand(
-        id: "navigation.nextIssue", title: "Next Cue with Issues", category: .review,
+        id: "navigation.nextIssue", title: "Next Cue to Review", category: .review,
         defaultShortcut: KeyShortcut(.downArrow, modifiers: [.command, .option])
     )
-    /// A toggle: see `EditorState.isOn(_:)`.
+    /// The cue list shows every cue again, leaving a review scope.
+    public static let showAllCues = EditorCommand(
+        id: "review.showAll", title: "Show All Cues", category: .review
+    )
+    /// A toggle: the cue list shows only the cues with QC issues, each with its issues. See `EditorState.isOn(_:)`.
     public static let toggleIssuesPanel = EditorCommand(
-        id: "review.toggleIssuesPanel", title: "Show Issues", category: .view,
+        id: "review.toggleIssuesPanel", title: "Review Issues", category: .review,
         defaultShortcut: KeyShortcut(.character("i"), modifiers: [.command, .option])
     )
     public static let shuttleBackward = EditorCommand(
@@ -318,6 +328,10 @@ extension EditorCommand {
         id: "ai.acceptAll", title: "Accept All Changes", category: .ai,
         defaultShortcut: KeyShortcut(.returnKey, modifiers: [.command, .option])
     )
+    /// A toggle: the cue list shows only the cues an AI tool proposes changes to.
+    public static let reviewChanges = EditorCommand(
+        id: "ai.reviewChanges", title: "Review AI Changes", category: .ai
+    )
     public static let rejectAllChanges = EditorCommand(
         id: "ai.rejectAll", title: "Reject All Changes", category: .ai,
         defaultShortcut: KeyShortcut(.delete, modifiers: [.command, .option, .shift])
@@ -329,15 +343,15 @@ extension EditorCommand {
         openMedia, importSubtitles, importEmbeddedSubtitles, exportSubtitles,
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
-        previousCue, nextCue, previousShotChange, nextShotChange,
-        toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps, joinShortLines,
+        previousCue, nextCue, deselectCue, previousShotChange, nextShotChange,
+        showAllCues, toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps, joinShortLines,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
         toggleMilliseconds,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
         transcribe, translateWithAI, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
-        acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
+        reviewChanges, acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 
     public static func named(_ id: String) -> EditorCommand? {

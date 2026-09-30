@@ -49,7 +49,11 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
     // MARK: Window
 
     override public func makeWindowControllers() {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: MainWindowView(editor: editor)))
+        let content = NSHostingController(rootView: MainWindowView(editor: editor))
+        // The window's toolbar comes from the view's (the AI activity in the middle of the title bar).
+        content.sceneBridgingOptions = [.toolbars]
+        let window = NSWindow(contentViewController: content)
+        window.toolbarStyle = .unifiedCompact
         window.identifier = NSUserInterfaceItemIdentifier("main")
         window.setContentSize(NSSize(width: 1280, height: 820))
         window.center()

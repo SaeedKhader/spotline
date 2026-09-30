@@ -93,4 +93,60 @@ final class EditingUITests: XCTestCase {
         waitForValue(of: app.timecode, toEqual: "00:00:03:12")
         waitForValue(of: app.staticTexts[AccessibilityID.Video.subtitle], toEqual: "Third cue")
     }
+
+    /// Delete Cue in the actions bar is enabled exactly while a cue is selected.
+    @MainActor
+    private func waitForSelection(_ isSelected: Bool, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let delete = app.buttons[AccessibilityID.command(EditorCommand.deleteCue.id)]
+        let state = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == %@", NSNumber(value: isSelected)), object: delete)
+        XCTAssertEqual(XCTWaiter().wait(for: [state], timeout: 10), .completed, isSelected ? "No cue selected" : "A cue is still selected", file: file, line: line)
+    }
+
+    @MainActor
+    func testEscapeLeavesTheTextThenDeselects() throws {
+        let app = launchApp(openSubtitles: true)
+        let text = app.cueCells(.text).element(boundBy: 0)
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        text.click()
+        app.typeText("!")
+        waitForSelection(true, in: app)
+
+        // The first Esc leaves the text: typing no longer changes it, and the cue stays selected.
+        app.typeKey(.escape, modifierFlags: [])
+        waitForSelection(true, in: app)
+        let typed = text.value as? String
+        app.typeKey(.escape, modifierFlags: [])
+        waitForSelection(false, in: app)
+        XCTAssertEqual(text.value as? String, typed)
+    }
+
+    @MainActor
+    func testClickingBelowTheRowsDeselects() throws {
+        let app = launchApp(openSubtitles: true)
+        let number = app.cueCells(.number).element(boundBy: 1)
+        XCTAssertTrue(number.waitForExistence(timeout: 10))
+        number.click()
+        waitForSelection(true, in: app)
+
+        let list = app.descendants(matching: .any)[AccessibilityID.CueList.root]
+        list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.97)).click()
+        waitForSelection(false, in: app)
+    }
+
+    @MainActor
+    func testClickingTheVideoLeavesTheTextButKeepsTheCue() throws {
+        let app = launchApp(openSubtitles: true)
+        let text = app.cueCells(.text).element(boundBy: 0)
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        text.click()
+        app.typeText("?")
+        waitForValue(of: text, toEqual: "First cue?")
+
+        app.descendants(matching: .any)[AccessibilityID.Video.surface].click()
+        // Space now plays instead of typing.
+        app.typeKey(" ", modifierFlags: [])
+        waitForSelection(true, in: app)
+        XCTAssertEqual(text.value as? String, "First cue?")
+        app.typeKey(" ", modifierFlags: [])
+    }
 }

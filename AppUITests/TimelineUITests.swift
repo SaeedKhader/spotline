@@ -71,6 +71,42 @@ final class TimelineUITests: XCTestCase {
         XCTAssertTrue(["00:00:03:00", "00:00:03:01", "00:00:03:02"].contains(outPoint ?? ""), "Out is \(outPoint ?? "nil")")
     }
 
+    @MainActor
+    func testDraggingEmptyTimelineScrubsUnderTheCenteredPlayhead() throws {
+        let app = launchCuts()
+        let timeline = app.descendants(matching: .any)[AccessibilityID.Timeline.root]
+        let playhead = app.descendants(matching: .any)[AccessibilityID.Timeline.playhead]
+        XCTAssertTrue(playhead.waitForExistence(timeout: 10))
+        XCTAssertEqual(playhead.frame.midX, timeline.frame.midX, accuracy: 3, "The playhead is not centered")
+
+        // Just under the ruler, above the cue blocks: empty space. 100 points is one second.
+        let start = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0)).withOffset(CGVector(dx: 0, dy: 26))
+        start.click(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: -100, dy: 0)))
+        let scrubbed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value IN %@", ["00:00:00:24", "00:00:01:00", "00:00:01:01"]), object: app.timecode
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [scrubbed], timeout: 10), .completed, "Timecode is \(app.timecode.value ?? "nil")")
+        XCTAssertEqual(playhead.frame.midX, timeline.frame.midX, accuracy: 3, "The playhead moved off center")
+    }
+
+    @MainActor
+    func testClickingACueGoesToItAndEmptySpaceDeselects() throws {
+        let app = launchCuts()
+        let cue = app.timelineCueBlocks.element(boundBy: 1)
+        XCTAssertTrue(cue.waitForExistence(timeout: 10))
+        cue.click()
+        // "After the cut" starts at 2 s.
+        waitForValue(of: app.timecode, toEqual: "00:00:02:00")
+        let delete = app.buttons[AccessibilityID.command(EditorCommand.deleteCue.id)]
+        XCTAssertTrue(delete.isEnabled)
+
+        let timeline = app.descendants(matching: .any)[AccessibilityID.Timeline.root]
+        timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0)).withOffset(CGVector(dx: 0, dy: 26)).click()
+        let deselected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: delete)
+        XCTAssertEqual(XCTWaiter().wait(for: [deselected], timeout: 10), .completed, "The cue is still selected")
+        waitForValue(of: app.timecode, toEqual: "00:00:02:00")
+    }
+
     /// two-tracks.mkv: an English stereo track (default) and an Arabic 5.1 track.
     @MainActor
     func testSwitchingAudioTracksRedrawsTheWaveform() throws {
