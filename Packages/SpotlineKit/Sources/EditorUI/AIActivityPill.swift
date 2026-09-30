@@ -7,6 +7,7 @@ import SwiftUI
 /// how far it has got, with a button to stop it. Click it for every step. For a
 /// few seconds after the tool finishes, what it did ("640 lines translated · 12 flagged").
 struct AIActivityPill: View {
+    static let size = CGSize(width: 460, height: 34)
     let editor: EditorState
     @State private var isShowingSteps = false
 
@@ -18,8 +19,7 @@ struct AIActivityPill: View {
                         isShowingSteps.toggle()
                     } label: {
                         AITaskProgress(task: task)
-                            // A fixed size, so the title bar does not re-centre it as the text changes.
-                            .frame(width: 380)
+                            .frame(maxWidth: .infinity)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -30,6 +30,8 @@ struct AIActivityPill: View {
                 }
             } else if let summary = editor.aiSummary {
                 Label(summary.fullText, systemImage: "checkmark.circle")
+                    // Toolbars show labels as icons only by default.
+                    .labelStyle(.titleAndIcon)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .accessibilityLabel("AI summary")
@@ -39,8 +41,8 @@ struct AIActivityPill: View {
         }
         .font(.callout)
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .frame(maxHeight: .infinity)
+        // A fixed size (the toolbar item does not follow its content's size), with the content centred in it.
+        .frame(width: Self.size.width, height: Self.size.height)
         // Toolbar items animate their layout; progress updates must not slide the activity around.
         .transaction { $0.animation = nil }
         .accessibilityElement(children: .contain)
@@ -99,7 +101,13 @@ final class AIActivityToolbar: NSObject, NSToolbarDelegate {
         guard itemIdentifier == Self.item else { return nil }
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         let view = NSHostingView(rootView: AIActivityPill(editor: editor))
-        view.sizingOptions = [.intrinsicContentSize]
+        view.sizingOptions = []
+        view.frame = NSRect(origin: .zero, size: AIActivityPill.size)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalToConstant: AIActivityPill.size.width),
+            view.heightAnchor.constraint(equalToConstant: AIActivityPill.size.height),
+        ])
         item.view = view
         item.label = "AI Activity"
         item.isBordered = false
