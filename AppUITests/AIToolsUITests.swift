@@ -123,7 +123,7 @@ final class AIToolsUITests: XCTestCase {
 
         chooseAIMenuItem(.clearTranscript, in: app)
         // It asks first: the next transcription is paid for again.
-        let confirm = app.buttons["Clear Transcript"]
+        let confirm = app.buttons["Clear Transcript"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 10), "No confirmation")
         confirm.click()
         let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 0"), object: texts)
