@@ -97,7 +97,7 @@ struct CloudProviderTests {
                "variants": [
                  {"text": "انت مشغول.", "speaker": "Morty", "speaker_gender": "male", "listeners": ["Jerry"], "listener_gender": "male", "listener_count": "one"},
                  {"text": "انتِ مشغولة.", "speaker": "Morty", "speaker_gender": "male", "listeners": ["Beth"], "listener_gender": "female", "listener_count": "one"},
-                 {"text": "انتم مشغولون.", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "mixed", "listener_count": "many"}]},
+                 {"text": "انتم مشغولون.", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "mixed", "listener_count": "many", "source": "You are busy."}]},
               {"id": "L2", "text": "وينترفيل باردة.", "reasons": [], "confidence": 1, "note": "", "variants": []}
             ],
             "cast": [{"name": "Beth", "gender": "female", "voices": []}, {"name": "Morty", "gender": "male", "voices": ["speaker_1"]}]}
@@ -115,6 +115,7 @@ struct CloudProviderTests {
         #expect(flag.chosen == 0 && first.text == "انتِ مشغولة.")
         #expect(flag.variants[0].speaker == "Morty" && flag.variants[2].speaker == nil)
         #expect(flag.variants[2].listenerGender == .mixed && flag.variants[2].listenerCount == .many)
+        #expect(flag.variants.allSatisfy { $0.assumedSource == nil }, "A listener flag's variants are not about the source")
         #expect(batch.translations[1].flag == nil, "No reasons, no flag")
         #expect(batch.cast.map(\.name) == ["Beth", "Morty"])
         #expect(batch.cast[1].voices == ["speaker_1"] && !batch.cast[1].isConfirmed)

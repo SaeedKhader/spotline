@@ -701,7 +701,9 @@ public struct ClaudeTranslator: CueTranslator {
                 listeners: (variant.listeners ?? []).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
                 listenerGender: variant.listener_gender.flatMap(Gender.init(rawValue:)) ?? .unknown,
                 listenerCount: variant.listener_count.flatMap(ListenerCount.init(rawValue:)) ?? .unknown,
-                assumedSource: variant.source.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0.replacing("\\n", with: "\n") }
+                // Only a possibly misheard line's variants are about the source; others repeat it.
+                assumedSource: reasons.contains(.source)
+                    ? variant.source.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0.replacing("\\n", with: "\n") } : nil
             ))
         }
         // The text is the recommendation: first, whatever order the variants came in.
