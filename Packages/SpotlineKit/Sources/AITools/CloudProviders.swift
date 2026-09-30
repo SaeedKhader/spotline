@@ -282,7 +282,10 @@ public struct ElevenLabsTranscriber: Transcriber {
         try JSONDecoder().decode(Response.self, from: data).words.compactMap { word in
             var text = word.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard word.type == "word" || word.type == "audio_event", !text.isEmpty, let start = word.start else { return nil }
-            if word.type == "audio_event", !text.hasPrefix("(") { text = "(\(text))" }
+            // "[door opens]" or "door opens" becomes "(door opens)", once.
+            if word.type == "audio_event" {
+                text = "(" + text.trimmingCharacters(in: CharacterSet(charactersIn: "()[] ")) + ")"
+            }
             let begin = MediaTime(value: Int64((start * 1000).rounded()), timescale: 1000)
             let end = MediaTime(value: Int64(((word.end ?? start) * 1000).rounded()), timescale: 1000)
             return TranscribedWord(
@@ -471,6 +474,8 @@ public struct ClaudeTranslator: BatchedCueTranslator {
     static let personGenderValues = [Gender.male, .female, .unknown].map(\.rawValue)
     static let countValues = ListenerCount.allCases.map(\.rawValue)
     static let reasonValues = TranslationFlag.Reason.allCases.map(\.rawValue)
+    /// A possibly misheard line whose likely reading the translator is at least this sure of is not flagged.
+    static let sureOfSource = 0.8
 
     private static func object(_ properties: [String: Any]) -> [String: Any] {
         ["type": "object", "properties": properties, "required": properties.keys.sorted(), "additionalProperties": false]
@@ -553,7 +558,9 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             a name nobody has), do not smooth it over: flag it with the reason "source", and give one variant for what you \
             think was said, with "source" set to that line in \(Languages.name(request.sourceLanguage)), and one for the line \
             as heard, with "source" set to the line as heard. Recommend the likelier one first, and say in "note" what you \
-            think was said.
+            think was said. A misheard name the script or the known people make clear ("Aryan" for Aerion, "Dawn" for \
+            Dorne) is not a doubt: translate the right name and do not flag the line. Flag "source" only when you cannot \
+            tell which reading is meant.
             - For a flagged line, "confidence" (0 to 1) is how sure you are of the recommendation, and "note" says why in \
             a few words. Leave "reasons", "note" and "variants" empty for lines that read one way only.
             - In "cast", list the people you can identify in these lines and the context: their name as the dialogue uses \
@@ -581,10 +588,16 @@ public struct ClaudeTranslator: BatchedCueTranslator {
                 who is who from names and context, not from the labels alone.
                 - Keep who is spoken to the same through a scene: once a listener's gender is clear (an animal called "girl" \
                 or "boy" too), keep it for later lines to them. One person talking to one person is singular unless the scene \
-                shows more listeners; use the dual when two people are named or addressed together.
-                - Flag every line whose \(target) wording depends on something the source leaves open: the listener's gender \
-                or number ("listener"), gendered verbs, adjectives or pronouns about someone ("genderedWords"), or who says it \
-                ("speaker"). Put the reasons in "reasons".
+                shows more listeners; use the dual when two people are named or addressed together. This decides which \
+                variant you recommend; it does not replace the flag. These listener and gender choices are what the user \
+                reviews, so flag them whenever the line itself leaves them open.
+                - Flag every line whose \(target) wording changes with who is spoken to, who speaks or who is spoken about, \
+                unless the line itself settles it (a name or form of address in it, "sir", "my lady", "boys"). That is not only \
+                "you": imperatives ("Leave the food and go"), verbs and adjectives about the listener ("Are you ready?", \
+                "Well done"), first-person agreement ("I'm tired"), and pronouns or adjectives about a third person. Flag \
+                these even when the scene makes you fairly sure: the user confirms them with one click. The reasons are the \
+                listener's gender or number ("listener"), gendered words about the speaker or someone else ("genderedWords"), \
+                or an unclear speaker ("speaker"); put them in "reasons".
                 - For a flagged line, write every valid variant in "variants", the one you recommend first; "text" is that first \
                 variant's text. Only list variants whose wording differs. For each, say who it assumes speaks ("speaker", a \
                 name or ""), their gender, who is spoken to ("listeners", names, empty when unknown) and their gender and number. \
@@ -740,6 +753,8 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             let text = item.text.replacing("\\n", with: "\n")
             var translation = CueTranslation(cueID: cueID, text: text)
             translation.flag = flag(from: item, text: text, cast: request.cast, gendered: request.targetIsGendered)
+            // A reading the translator is sure of (usually a misheard name) is used, not asked about.
+            if let flag = translation.flag, flag.reasons == [.source], flag.confidence >= Self.sureOfSource { translation.flag = nil }
             if let chosen = translation.flag?.chosenVariant { translation.text = chosen.text }
             return translation
         }

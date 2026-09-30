@@ -83,6 +83,9 @@ public struct AISettings: Sendable, Equatable {
     public var joinsLinesAfterTranslating = true
     /// House style for translations.
     public var translationStyle = TranslationStyle()
+    /// Sound descriptions ("(door opens)", "(laughs)") in transcriptions and translations,
+    /// for hearing-impaired subtitles. Off: they are left out of both.
+    public var includesSoundDescriptions = false
 
     public init() {}
 
@@ -92,6 +95,7 @@ public struct AISettings: Sendable, Equatable {
     static let languageKey = "AITranscriptionLanguage"
     static let joinsLinesKey = "AIJoinsLinesAfterTranslating"
     static let registerKey = "AITranslationRegister"
+    static let soundDescriptionsKey = "AIIncludesSoundDescriptions"
     static let dropsFinalPunctuationKey = "AIDropsFinalPunctuation"
     static let namesInParenthesesKey = "AINamesInParentheses"
 
@@ -106,6 +110,7 @@ public struct AISettings: Sendable, Equatable {
         settings.translationStyle.register = defaults.string(forKey: registerKey).flatMap(TranslationStyle.Register.init) ?? .faithful
         settings.translationStyle.dropsFinalPunctuation = defaults.object(forKey: dropsFinalPunctuationKey) as? Bool ?? true
         settings.translationStyle.namesInParentheses = defaults.bool(forKey: namesInParenthesesKey)
+        settings.includesSoundDescriptions = defaults.bool(forKey: soundDescriptionsKey)
         return settings
     }
 
@@ -119,6 +124,7 @@ public struct AISettings: Sendable, Equatable {
         defaults.set(translationStyle.register.rawValue, forKey: Self.registerKey)
         defaults.set(translationStyle.dropsFinalPunctuation, forKey: Self.dropsFinalPunctuationKey)
         defaults.set(translationStyle.namesInParentheses, forKey: Self.namesInParenthesesKey)
+        defaults.set(includesSoundDescriptions, forKey: Self.soundDescriptionsKey)
     }
 }
 

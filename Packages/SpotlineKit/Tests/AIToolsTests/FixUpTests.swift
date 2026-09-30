@@ -167,6 +167,32 @@ struct TranslationFixUpTests {
         #expect(parts.allSatisfy { !$0.isEmpty })
     }
 
+    @Test func aSentenceOverThreeCuesIsTranslatedWholeAndCutAtPhrases() {
+        // S01E04: "The Andals believed that if seven champions fought, the gods being thus" / "honored would be more
+        // like to intervene" / "and see the guilty party punished." Translated cue by cue, the Arabic ended on «ولرؤية».
+        func line(_ text: String, _ start: Double, _ end: Double) -> TranslationRequest.Line {
+            .init(cueID: UUID(), source: text, start: MediaTime(seconds: start, timescale: 1000), end: MediaTime(seconds: end, timescale: 1000))
+        }
+        let lines = [
+            line("What is a trial of seven?", 550.05, 553.09),
+            line("The Andals believed that if seven\nchampions fought, the gods being thus", 553.68, 556.85),
+            line("honored would be more like to intervene", 556.93, 559.02),
+            line("and see the guilty party punished.", 559.98, 561.94),
+        ]
+        let request = TranslationRequest(lines: lines, sourceLanguage: "en", targetLanguage: "ar")
+        let (grouped, groups) = SentenceSpans.grouping(request)
+        #expect(grouped.lines.count == 2)
+        #expect(grouped.lines[1].source == "The Andals believed that if seven champions fought, the gods being thus honored would be more like to intervene and see the guilty party punished.")
+        #expect(groups.map(\.cueIDs) == [lines[1...].map(\.cueID)])
+        let whole = "اعتقد الأندال أن قتال سبعة أبطال سيكرّم الآلهة، فتغدو أكثر ميلاً للتدخل ولرؤية الطرف المذنب يُعاقَب."
+        let parts = pipeline.spread([CueTranslation(cueID: lines[1].cueID, text: whole)], groups: groups, request: grouped)
+        #expect(parts.map(\.cueID) == lines[1...].map(\.cueID))
+        let texts = parts.map { $0.text.replacing("\n", with: " ") }
+        #expect(texts[0].hasSuffix("الآلهة"), "Cut after the comma, which goes")
+        #expect(texts.allSatisfy { !$0.hasSuffix("ولرؤية") && !$0.hasSuffix("أن") })
+        #expect(texts.last?.hasPrefix("و") == true || texts.last?.contains("ولرؤية") == true)
+    }
+
     @Test func glossaryTermsReplaceTheModelsOwnRendering() {
         let enforcer = GlossaryEnforcer(terms: [("Mega seeds", "بذور ضخمة", "بذور ميجا")])
         #expect(enforcer.apply(to: "أنا أتحدث عن بذور ميجا.", source: "I'm talking about Mega seeds.") == "أنا أتحدث عن بذور ضخمة.")

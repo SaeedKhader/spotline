@@ -72,7 +72,7 @@ struct CloudProviderTests {
 
     @Test func aPossiblyMisheardLineIsFlaggedInAnyLanguage() throws {
         let output = """
-            {"translations": [{"id": "L1", "text": "It's an elm.", "reasons": ["source"], "confidence": 0.8, "note": "Probably “It's an elm.”",
+            {"translations": [{"id": "L1", "text": "It's an elm.", "reasons": ["source"], "confidence": 0.6, "note": "Probably “It's an elm.”",
                "variants": [
                  {"text": "It's an elm.", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "unknown", "listener_count": "unknown", "source": "It's an elm."},
                  {"text": "The answer is no.", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "unknown", "listener_count": "unknown", "source": "It's a no."}]}],
@@ -83,6 +83,18 @@ struct CloudProviderTests {
         #expect(flag.reasons == [.source])
         #expect(flag.variants.map(\.assumedSource) == ["It's an elm.", "It's a no."])
         #expect(batch.cast[0].translatedName == "Dunk")
+    }
+
+    @Test func aReadingTheTranslatorIsSureOfIsNotAskedAbout() throws {
+        let output = """
+            {"translations": [{"id": "L1", "text": "Aerion", "reasons": ["source"], "confidence": 0.9, "note": "Aryan is Aerion",
+               "variants": [
+                 {"text": "Aerion", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "unknown", "listener_count": "unknown", "source": "Aerion"},
+                 {"text": "Aryan", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "unknown", "listener_count": "unknown", "source": "Aryan"}]}],
+             "cast": []}
+            """
+        let batch = try ClaudeTranslator.translations(from: Self.response(output), request: request(target: "en"))
+        #expect(batch.translations[0].text == "Aerion" && batch.translations[0].flag == nil)
     }
 
     static func response(_ output: String) throws -> Data {

@@ -30,6 +30,9 @@ public struct AISettingsView: View {
                     ForEach(Self.languages, id: \.self) { Text(Languages.name($0)).tag(Optional($0)) }
                 }
                 .accessibilityIdentifier(AccessibilityID.AISettings.transcriptionLanguage)
+                Toggle("Sound descriptions, for hearing-impaired subtitles", isOn: $editor.aiSettings.includesSoundDescriptions)
+                    .help("“(door opens)”, “(laughs)”: kept in transcriptions and translated when on; left out of both when off")
+                    .accessibilityIdentifier(AccessibilityID.AISettings.soundDescriptions)
                 Picker("Translation", selection: $editor.aiSettings.translation) {
                     ForEach(AISettings.TranslationProvider.allCases) { Text($0.title).tag($0) }
                 }

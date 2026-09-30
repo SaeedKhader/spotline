@@ -140,15 +140,34 @@ public struct CueSegmenter: Sendable {
                         .split(separator: "\n").contains { $0.count > maxLineLength }
                     sentenceEnded = Self.endsSentence(last.text) && endsCue(current, before: word)
                 }
-                if pause >= pauseSeconds || tooLong || sentenceEnded || unbreakable {
+                if pause >= pauseSeconds || sentenceEnded {
                     groups.append(current)
                     current = []
+                } else if tooLong || unbreakable {
+                    // Full mid-sentence: end the cue at the last comma, or at least not
+                    // after a word that belongs with the next ("the gods being thus / honored").
+                    let cut = Self.phraseBreak(in: current)
+                    groups.append(Array(current[..<cut]))
+                    current = Array(current[cut...])
                 }
             }
             current.append(word)
         }
         if !current.isEmpty { groups.append(current) }
         return groups
+    }
+
+    /// Where to end a cue that is full in the middle of a sentence: after the
+    /// last comma in its second half, else before any words at its end that
+    /// belong with the next word, else after all of it.
+    static func phraseBreak(in words: [TranscribedWord]) -> Int {
+        let half = max(words.count / 2, 1)
+        if let comma = words.indices.reversed().first(where: { $0 >= half - 1 && $0 < words.count - 1 && ",;:—".contains(words[$0].text.last ?? " ") }) {
+            return comma + 1
+        }
+        var cut = words.count
+        while cut > half, danglingWords.contains(words[cut - 1].text.lowercased().trimmingCharacters(in: .punctuationCharacters)) { cut -= 1 }
+        return cut
     }
 
     /// Whether a finished sentence makes a cue of its own: a long one always,
@@ -207,7 +226,7 @@ public struct CueSegmenter: Sendable {
     /// Words that belong with the word after them, in English and Arabic.
     static let danglingWords: Set<String> = [
         "a", "an", "the", "of", "to", "in", "on", "at", "for", "and", "or", "but", "with", "from", "by", "as", "if",
-        "my", "your", "his", "her", "its", "our", "their", "this", "that", "i", "you're", "i'm", "not",
+        "my", "your", "his", "her", "its", "our", "their", "this", "that", "i", "you're", "i'm", "not", "thus", "being", "so", "than",
         "و", "في", "من", "على", "إلى", "عن", "أن", "ألا", "لن", "لم", "لا", "ما", "يا", "مع", "ثم", "أو", "بل", "قد", "كي",
         "حتى", "الذي", "التي", "هذا", "هذه", "ذلك", "تلك", "إن", "لو", "كان", "كانت", "إذا", "لكن", "لكنه", "لكنها", "أي",
     ]

@@ -248,6 +248,31 @@ struct AIStateTests {
         #expect(!editor.canPerform(.reviewWords))
     }
 
+    @Test func fixingAWordKeepsItsCueInPlaceUntilTheUserLeavesIt() {
+        var aron = cue("Ser Aron taught me sword and shield.", at: 0)
+        aron.unsureWords = [UnsureWord(text: "Aron", confidence: 0.38)]
+        var egg = cue("Egg.", at: 3)
+        egg.unsureWords = [UnsureWord(text: "Egg", confidence: 0.45)]
+        let editor = makeEditor(cues: [aron, egg])
+        #expect(editor.perform(.reviewWords))
+        #expect(editor.selectedCueID == aron.id)
+        // Clicking the word asks the editor to select it.
+        editor.selectUnsureWord(0, forCue: aron.id)
+        #expect(editor.wordSelectionRequest?.cueID == aron.id && editor.wordSelectionRequest?.word == "Aron")
+        // Typing over it clears the word, but the cue stays listed and selected.
+        editor.setText("Ser Arlan taught me sword and shield.", forCue: aron.id)
+        #expect(editor.cue(withID: aron.id)?.unsureWords == nil)
+        #expect(editor.reviewedWordCues.map(\.id) == [aron.id, egg.id])
+        #expect(editor.selectedCueID == aron.id)
+        editor.select(egg.id)
+        #expect(editor.reviewedWordCues.map(\.id) == [egg.id])
+        // The last word fixed: the review stays while its cue is selected, and ends after.
+        editor.setText("Aegon.", forCue: egg.id)
+        #expect(editor.isReviewingWords)
+        editor.select(aron.id)
+        #expect(!editor.isReviewingWords)
+    }
+
     @Test func splittingKeepsEachWordWithItsHalf() {
         var line = cue("I'm Ser Duncan.", at: 0)
         line.unsureWords = ["Duncan"]
@@ -408,7 +433,7 @@ struct AIStateTests {
         editor.aiSettings.joinsLinesAfterTranslating = true
         #expect(editor.perform(.translateWithAI))
         await finish(editor)
-        #expect(editor.track.cues.map { $0.text.replacing("\n", with: " ") } == ["[ar] I'd leave my sword, but it [ar] would only rust.", "[ar] Farewell."])
+        #expect(editor.track.cues.map { $0.text.replacing("\n", with: " ") } == ["[ar] I'd leave my sword, but it would only rust.", "[ar] Farewell."], "The sentence went as one line")
         let joined = editor.track.cues[0]
         #expect(joined.end == MediaTime(value: 5, timescale: 1))
         #expect(joined.sourceCueIDs == editor.sourceTrack?.cues.prefix(2).map(\.id))
@@ -417,6 +442,20 @@ struct AIStateTests {
         // One undo step brings the two lines back.
         editor.perform(.undo)
         #expect(editor.track.cues.count == 3)
+    }
+
+    @Test func soundDescriptionsAreLeftOutOfTranslationsUnlessKept() async {
+        let editor = makeEditor(cues: [cue("(door opening)", at: 0), cue("(laughs) He's alive.", at: 2), cue("Farewell.", at: 4)])
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.track.cues.map(\.text) == ["[ar] He's alive.", "[ar] Farewell."], "The sounds-only cue goes, the sound goes from the other")
+        #expect(editor.sourceTrack?.cues.count == 3, "The source keeps them")
+
+        let sdh = makeEditor(cues: [cue("(door opening)", at: 0), cue("(laughs) He's alive.", at: 2)])
+        sdh.aiSettings.includesSoundDescriptions = true
+        #expect(sdh.perform(.translateWithAI))
+        await finish(sdh)
+        #expect(sdh.track.cues.map(\.text) == ["[ar] (door opening)", "[ar] (laughs) He's alive."])
     }
 
     @Test func joinShortLinesIsReviewed() {

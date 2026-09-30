@@ -213,6 +213,24 @@ extension EditorState {
         track.cues.reduce(0) { $0 + ($1.unsureWords?.count ?? 0) }
     }
 
+    /// The cues the word review shows: those with words to check, in the order the
+    /// review started with, and the selected one even once its words are fixed, so
+    /// fixing a word does not move the cue away while typing.
+    public var reviewedWordCues: [Cue] {
+        let open = Set(cuesToCheck.map(\.id))
+        let known = Set(wordReviewOrder)
+        let listed = wordReviewOrder.compactMap(cue(withID:)).filter { open.contains($0.id) || $0.id == selectedCueID }
+        return listed + cuesToCheck.filter { !known.contains($0.id) }
+    }
+
+    /// Selects a word to check in its cue's text, to type over it.
+    public func selectUnsureWord(_ index: Int, forCue id: Cue.ID) {
+        guard let word = cue(withID: id)?.unsureWords?[safe: index] else { return }
+        select(id)
+        wordSelectionRequest = WordSelectionRequest(cueID: id, word: word.text, serial: (wordSelectionRequest?.serial ?? 0) + 1)
+        textFocusRequest += 1
+    }
+
     /// Keeps a word as the transcriber heard it: one undoable edit. In the
     /// review, a cue with nothing left to check makes way for the next.
     public func confirmUnsureWord(_ index: Int, forCue id: Cue.ID) {
@@ -220,6 +238,7 @@ extension EditorState {
               words.indices.contains(index)
         else { return }
         let next = isReviewingWords && words.count == 1 ? nextCueToCheck(after: id) : nil
+        if next == nil, isReviewingWords, words.count == 1, cuesToCheck.count == 1 { isReviewingWords = false }
         edit("Confirm Word") { track in
             var remaining = words
             remaining.remove(at: index)
@@ -241,6 +260,7 @@ extension EditorState {
         isReviewingWords.toggle()
         if isReviewingWords {
             isReviewingChoices = false
+            wordReviewOrder = cuesToCheck.map(\.id)
             if let first = cuesToCheck.first, selectedCue?.unsureWords?.isEmpty != false { select(first.id) }
         }
     }
@@ -257,7 +277,7 @@ extension EditorState {
 
     /// The cue to check after `id` in the review's order.
     private func nextCueToCheck(after id: Cue.ID) -> Cue.ID? {
-        let order = cuesToCheck.map(\.id)
+        let order = reviewedWordCues.map(\.id).filter { $0 == id || cue(withID: $0)?.unsureWords?.isEmpty == false }
         guard let index = order.firstIndex(of: id) else { return order.first }
         return order[(index + 1)...].first ?? order[..<index].first
     }
@@ -458,7 +478,8 @@ extension EditorState {
         let stream = status.audioStreamIndex
         let language = transcriptionLanguage
         let pipeline = TranscriptionPipeline(
-            preset: qcPreset, frameRate: frameRate, shotChanges: shotChangeFrames, wordStartLead: transcriber.wordStartLead
+            preset: qcPreset, frameRate: frameRate, shotChanges: shotChangeFrames, wordStartLead: transcriber.wordStartLead,
+            keepsSoundDescriptions: aiSettings.includesSoundDescriptions
         )
         let existing = track.cues
         let prepare = prepareAudio
@@ -546,8 +567,14 @@ extension EditorState {
             reportError("Translation could not start.", error)
             return
         }
-        let cues = untranslatedCues
-        guard let source = sourceTrack, let first = cues.first else { return }
+        // Without sound descriptions, a line of nothing else is not translated (its empty cue goes afterwards).
+        let keepsSounds = aiSettings.includesSoundDescriptions
+        func spoken(_ text: String) -> String { keepsSounds ? text : CleanupTool.withoutSoundDescriptions(text) }
+        let cues = untranslatedCues.filter { cue in sourceCues[cue.id].map { !spoken($0.text).isEmpty } ?? true }
+        guard let source = sourceTrack, let first = cues.first else {
+            removeCuesOfSoundsOnly()
+            return
+        }
         let glossaryEntries = glossary.entries.filter { entry in cues.contains { glossaryHits[sourceCues[$0.id]?.id ?? UUID()]?.contains(entry) == true } }
         let context: [(source: String, target: String)] = track.cues.filter { $0.start < first.start && !$0.text.isEmpty }
             .suffix(20).compactMap { cue in sourceCues[cue.id].map { ($0.text, cue.text) } }
@@ -556,13 +583,16 @@ extension EditorState {
         }, uniquingKeysWith: { first, _ in first })
         let lines = cues.map { cue in
             TranslationRequest.Line(
-                cueID: cue.id, source: sourceCues[cue.id]?.text ?? "", start: cue.start, end: cue.end, voices: voices(for: cue),
+                cueID: cue.id, source: spoken(sourceCues[cue.id]?.text ?? ""), start: cue.start, end: cue.end, voices: voices(for: cue),
                 speakerName: sourceCues[cue.id]?.speaker ?? cue.speaker, memoryExample: examples[cue.id],
                 unsureWords: sourceCues[cue.id]?.unsureWords?.map(\.text)
             )
         }
-        let script = source.cues.map { cue in
-            TranslationRequest.ScriptLine(start: cue.start, voice: (cue.speaker.map { [$0] } ?? cue.voices)?.joined(separator: " then "), text: cue.text)
+        let script = source.cues.compactMap { cue -> TranslationRequest.ScriptLine? in
+            let text = spoken(cue.text)
+            return text.isEmpty ? nil : TranslationRequest.ScriptLine(
+                start: cue.start, voice: (cue.speaker.map { [$0] } ?? cue.voices)?.joined(separator: " then "), text: text
+            )
         }
         let request = TranslationRequest(
             lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
@@ -572,16 +602,23 @@ extension EditorState {
         )
         let fixUp = TranslationPipeline(preset: qcPreset)
         let joinsLines = aiSettings.joinsLinesAfterTranslating
+        // A sentence over several cues goes as one line, and its translation is shared out again.
+        let (grouped, groups) = SentenceSpans.grouping(request)
         let status = AITaskStatus(
-            title: "Translation", provider: translator.name, stages: ["Translating"], detail: "\(AITaskStatus.shortName(translator.name)) · 0 of \(lines.count) lines"
+            title: "Translation", provider: translator.name, stages: ["Translating"],
+            detail: "\(AITaskStatus.shortName(translator.name)) · 0 of \(grouped.lines.count) lines"
         )
         startAITask(
-            status, afterward: { [weak self] in if joinsLines { self?.joinTranslatedLines() } }, summary: Self.translationSummary
+            status, afterward: { [weak self] in
+                if !keepsSounds { self?.removeCuesOfSoundsOnly() }
+                if joinsLines { self?.joinTranslatedLines() }
+            }, summary: Self.translationSummary
         ) { [weak self] report, propose in
             let found = TranslationCollector()
-            let translations = try await translator.translate(request, progress: { report(.provider($0)) }) { batch in
-                propose(Proposals.translation(found.add(fixUp.fix(batch, request: request)), cues: cues))
+            let whole = try await translator.translate(grouped, progress: { report(.provider($0)) }) { batch in
+                propose(Proposals.translation(found.add(fixUp.spread(fixUp.fix(batch, request: grouped), groups: groups, request: grouped)), cues: cues))
             }
+            let translations = fixUp.spread(whole, groups: groups, request: grouped)
             // Lines the translator never sent back (a model declined them) stay empty: say so.
             let done = Set(translations.translations.filter { !$0.text.isEmpty }.map(\.cueID))
             if let first = cues.first(where: { !done.contains($0.id) }), let self {
@@ -594,7 +631,7 @@ extension EditorState {
                     )
                 )
             }
-            return Proposals.translation(fixUp.fix(translations, request: request), cues: cues)
+            return Proposals.translation(fixUp.spread(fixUp.fix(whole, request: grouped), groups: groups, request: grouped), cues: cues)
         }
     }
 
@@ -619,6 +656,17 @@ extension EditorState {
         }
         title = title.replacing(/\s+/, with: " ").trimmingCharacters(in: .whitespaces.union(["-"]))
         return title.isEmpty ? nil : title
+    }
+
+    /// Removes the empty target cues whose source is only sound descriptions
+    /// ("(door opens)"): subtitles for the hearing leave them out. One undoable edit.
+    func removeCuesOfSoundsOnly() {
+        let ids = Set(track.cues.filter { cue in
+            SubtitleText.visibleLines(of: cue.text).joined().allSatisfy(\.isWhitespace)
+                && sourceCues[cue.id].map { !$0.text.isEmpty && CleanupTool.withoutSoundDescriptions($0.text).isEmpty } == true
+        }.map(\.id))
+        guard !ids.isEmpty else { return }
+        edit("Remove Sound Descriptions") { track in track.cues.removeAll { ids.contains($0.id) } }
     }
 
     // MARK: Joining lines
@@ -776,4 +824,11 @@ private final class TranslationCollector: @unchecked Sendable {
 
 extension Array {
     subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
+/// A word to select in a cue's text editor (`EditorState.selectUnsureWord`).
+public struct WordSelectionRequest: Equatable, Sendable {
+    public var cueID: Cue.ID
+    public var word: String
+    public var serial: Int
 }

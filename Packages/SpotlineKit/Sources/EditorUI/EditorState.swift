@@ -42,7 +42,11 @@ public final class EditorState {
             guard track.cues != oldValue.cues else { return }
             // The review ends when no choice is left open.
             if isReviewingChoices, !track.cues.contains(where: { $0.flag?.isResolved == false }) { isReviewingChoices = false }
-            if isReviewingWords, !track.cues.contains(where: { $0.unsureWords?.isEmpty == false }) { isReviewingWords = false }
+            // The cue being fixed keeps the review open until the user leaves it.
+            if isReviewingWords, !track.cues.contains(where: { $0.unsureWords?.isEmpty == false }),
+               !(selectedCueID.map(wordReviewOrder.contains) ?? false) {
+                isReviewingWords = false
+            }
             updateSourceCues()
             updateIssues()
             updateCurrentCue()
@@ -172,7 +176,15 @@ public final class EditorState {
     static let qcPresetKey = "QCPreset"
     /// Show times as HH:MM:SS,mmm instead of SMPTE frames.
     public private(set) var showsMilliseconds = false
-    public internal(set) var selectedCueID: Cue.ID?
+    public internal(set) var selectedCueID: Cue.ID? {
+        // A word review with nothing left to check ends once the user leaves the cue they fixed last.
+        didSet { if isReviewingWords, selectedCueID != oldValue, wordsToCheckCount == 0 { isReviewingWords = false } }
+    }
+    /// The cues the word review shows, in the order it started with, so a cue
+    /// being fixed stays in place (`reviewedWordCues`).
+    @ObservationIgnored var wordReviewOrder: [Cue.ID] = []
+    /// Asks the selected cue's text editor to select a word to check, to type over it.
+    public internal(set) var wordSelectionRequest: WordSelectionRequest?
     /// The file the subtitles were last imported from or exported to.
     public internal(set) var subtitleFile: SubtitleFileReference? {
         didSet { if subtitleFile != oldValue, !isLoadingProject { projectDidChange?(.other) } }
@@ -185,7 +197,7 @@ public final class EditorState {
         didSet { if !isEditingText { textEditCueID = nil } }
     }
     /// Increments when the text editor should take keyboard focus (after adding a cue).
-    public private(set) var textFocusRequest = 0
+    public internal(set) var textFocusRequest = 0
 
     // MARK: Project state (EditorState+Project.swift)
 
