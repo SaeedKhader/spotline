@@ -25,6 +25,9 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
         editor.projectActions = self
         editor.projectDidChange = { [weak self] change in self?.editorDidChange(change) }
         editor.aiToolWillStart = { [weak self] in self?.saveNextToVideoIfUntitled() }
+        let window = ObjectIdentifier(self)
+        editor.onAITaskChange = { task in AIActivity.shared.update(task, for: window) }
+        if !editor.launchOptions.isUITestMode { editor.onAITaskEnd = { end in AIActivity.shared.ended(end) } }
     }
 
     override public class var autosavesInPlace: Bool { true }
@@ -72,6 +75,7 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
     }
 
     override public func close() {
+        AIActivity.shared.update(nil, for: ObjectIdentifier(self))
         editor.close()
         super.close()
         workspace.documentDidClose(self)

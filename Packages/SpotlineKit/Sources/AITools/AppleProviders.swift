@@ -22,7 +22,7 @@ public struct AppleSpeechTranscriber: Transcriber {
     }
 
     public func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
         let requested = Locale(identifier: language ?? Locale.current.identifier)
@@ -57,12 +57,12 @@ public struct AppleSpeechTranscriber: Transcriber {
             let start = CMTime(value: chunk.start.value, timescale: CMTimeScale(clamping: chunk.start.timescale))
             continuation.yield(AnalyzerInput(buffer: buffer, bufferStartTime: start))
             fed += chunk.samples.count
-            progress(Double(fed) / Double(total) * 0.9)
+            progress(.fraction(Double(fed) / Double(total) * 0.9))
         }
         continuation.finish()
         try await analyzer.finalizeAndFinishThroughEndOfInput()
         let words = try await collector.value
-        progress(1)
+        progress(.fraction(1))
         return words.sorted { $0.start < $1.start }
     }
 
@@ -123,7 +123,7 @@ public struct AppleTranslator: CueTranslator {
     public init() {}
 
     public func translate(
-        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        _ request: TranslationRequest, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable (TranslationBatch) -> Void
     ) async throws -> TranslationBatch {
         let source = Locale.Language(identifier: Languages.base(request.sourceLanguage))
@@ -147,6 +147,7 @@ public struct AppleTranslator: CueTranslator {
         for range in Self.batches(of: sentences.count, first: 5, size: 30) {
             try Task.checkCancellation()
             let batch = Array(sentences[range])
+            progress(.lines(done: results.count, total: request.lines.count, inFlight: batch.flatMap { $0.map { request.lines[$0].cueID } }))
             let requests = batch.map { group in
                 TranslationSession.Request(
                     sourceText: group.map { Self.sourceText(request.lines[$0].source) }.joined(separator: " "),
@@ -167,8 +168,8 @@ public struct AppleTranslator: CueTranslator {
                 }
             }
             found(TranslationBatch(translations: Array(results[before...])))
-            progress(Double(results.count) / Double(max(request.lines.count, 1)))
         }
+        progress(.lines(done: results.count, total: request.lines.count, inFlight: []))
         return TranslationBatch(translations: results)
     }
 

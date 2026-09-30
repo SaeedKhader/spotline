@@ -6,14 +6,6 @@ import MediaAnalysis
 import SubtitleCore
 import SubtitleTranslation
 
-/// A running AI tool: what it is doing and how far it has got.
-public struct AITaskStatus: Equatable, Sendable {
-    /// "Transcribing", "Translating"…
-    public var title: String
-    /// 0 to 1.
-    public var fraction: Double
-}
-
 /// Makes providers for the current settings. `live` uses the real ones (API keys
 /// from the Keychain), `scripted` fixed answers for UI tests.
 @MainActor
@@ -364,28 +356,43 @@ extension EditorState {
         if selectedCueID == nil, let first = changes.min(by: { $0.cue.start < $1.cue.start }) { select(first.cueID) }
     }
 
-    /// Runs `work` in the background with progress over the cue list. Results it
+    /// Runs `work` in the background with its progress over the cue list. Results it
     /// passes to `propose` go into the track at once; its final result adds the rest.
+    /// `summary` says what the tool did, from the cues it wrote.
     private func startAITask(
-        _ title: String,
+        _ status: AITaskStatus,
         afterward: (@MainActor () -> Void)? = nil,
+        summary: @escaping @MainActor (_ written: [Cue]) -> AITaskSummary,
         _ work: @escaping @MainActor (
-            _ progress: @escaping @Sendable (Double) -> Void, _ propose: @escaping @Sendable (ProposedChangeSet) -> Void
+            _ report: @escaping @Sendable (AITaskStep) -> Void, _ propose: @escaping @Sendable (ProposedChangeSet) -> Void
         ) async throws -> ProposedChangeSet
     ) {
         aiToolWillStart?()
-        aiTask = AITaskStatus(title: title, fraction: 0)
+        let title = status.title
+        aiSummary = nil
+        aiTask = status
+        aiTaskGeneration += 1
+        let generation = aiTaskGeneration
         appliedAIChanges = []
         partialSerial = 0
+        reportSerial = 0
         let serial = SerialCounter()
         let propose: @Sendable (ProposedChangeSet) -> Void = { [weak self] proposal in
             let number = serial.next()
             Task { @MainActor in self?.applyResults(proposal, serial: number) }
         }
-        let report: @Sendable (Double) -> Void = { [weak self] fraction in
+        let reports = SerialCounter()
+        let report: @Sendable (AITaskStep) -> Void = { [weak self] step in
+            let number = reports.next()
+            let now = Date()
             Task { @MainActor in
-                guard let self, let task = self.aiTask, task.title == title, fraction > task.fraction else { return }
-                self.aiTask?.fraction = min(fraction, 1)
+                // Reports can arrive out of order, or from a task that was cancelled.
+                guard let self, self.aiTaskGeneration == generation, self.aiTask != nil, number > self.reportSerial else { return }
+                self.reportSerial = number
+                switch step {
+                case .provider(let progress): self.aiTask?.update(with: progress, now: now)
+                case .stage(let name, let detail, let fraction): self.aiTask?.enter(name, detail: detail, fraction: fraction)
+                }
             }
         }
         aiTaskHandle = Task { [weak self] in
@@ -393,16 +400,26 @@ extension EditorState {
                 let final = try await work(report, propose)
                 guard let self, !Task.isCancelled else { return }
                 self.applyResults(final)
+                let written = self.track.cues.filter { self.appliedAIChanges.contains($0.id) }
                 self.aiTask = nil
-                afterward?()
-                if self.appliedAIChanges.isEmpty {
+                if written.isEmpty {
+                    afterward?()
                     self.reportError("\(title) found nothing to add.", AIError.nothingToDo("Every cue is already as the tool would make it."))
+                    self.onAITaskEnd?(AITaskEnd(title: "\(title) found nothing to add", message: "Every cue is already as the tool would make it.", succeeded: false))
+                    return
                 }
+                let done = summary(written)
+                afterward?()
+                self.show(done)
+                self.onAITaskEnd?(AITaskEnd(title: "\(title) finished", message: done.fullText, succeeded: true))
             } catch {
                 guard let self else { return }
                 self.aiTask = nil
                 // What was written before the failure stays (and undoes like any edit).
-                if !(error is CancellationError), !Task.isCancelled { self.reportError("\(title) stopped.", error) }
+                if !(error is CancellationError), !Task.isCancelled {
+                    self.reportError("\(title) stopped.", error)
+                    self.onAITaskEnd?(AITaskEnd(title: "\(title) stopped", message: error.localizedDescription, succeeded: false))
+                }
             }
         }
     }
@@ -411,6 +428,18 @@ extension EditorState {
         aiTaskHandle?.cancel()
         aiTaskHandle = nil
         aiTask = nil
+    }
+
+    /// Shows what a tool did in the AI bar until `aiSummaryDuration` has passed or another tool starts.
+    private func show(_ summary: AITaskSummary) {
+        aiSummary = summary
+        let generation = aiTaskGeneration
+        let duration = aiSummaryDuration
+        Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard let self, self.aiTaskGeneration == generation, self.aiSummary == summary else { return }
+            self.aiSummary = nil
+        }
     }
 
     /// Cue list cleanup, done by rule on the Mac in an instant.
@@ -450,23 +479,49 @@ extension EditorState {
         let provider = aiSettings.transcription
         // Words this project already got from the provider are used again, not paid for and uploaded again.
         let stored = storedTranscript(provider: provider, audioStream: stream, language: language)
-        startAITask("Transcription") { [weak self] progress, propose in
-            let audio = try await prepare(url, stream) { progress($0 * 0.15) }
+        let status = if stored != nil {
+            AITaskStatus(title: "Transcription", provider: transcriber.name, stages: ["Building cues"], detail: "Using the saved transcript")
+        } else {
+            AITaskStatus(
+                title: "Transcription", provider: transcriber.name,
+                stages: ["Preparing audio"] + (transcriber.uploadsInOnePiece ? ["Uploading"] : []) + ["Transcribing", "Building cues"]
+            )
+        }
+        startAITask(status, summary: Self.transcriptionSummary) { [weak self] report, propose in
             let words: [TranscribedWord]
             if let stored {
                 words = stored
             } else {
-                words = try await transcriber.transcribe(audio, language: language) { progress(0.15 + $0 * 0.75) } found: { words in
+                let audio = try await prepare(url, stream) { report(.stage("Preparing audio", detail: "Preparing audio · \(AITaskStatus.percent($0))", fraction: $0)) }
+                words = try await transcriber.transcribe(audio, language: language) { report(.provider($0)) } found: { words in
                     // Cues show as soon as they are complete.
                     propose(Proposals.transcription(accumulator.add(words), existing: existing))
                 }
                 self?.storeTranscript(words, provider: provider, audioStream: stream, language: language)
+                report(.stage("Building cues", detail: nil, fraction: nil))
             }
             guard !words.isEmpty else { throw AIError.nothingToDo("No speech was heard.") }
             let cues = try await Self.runDetached { accumulator.finish(with: words) }
-            progress(1)
             return Proposals.transcription(cues, existing: existing)
         }
+    }
+
+    /// "212 cues transcribed · 9 with words to check".
+    static func transcriptionSummary(_ written: [Cue]) -> AITaskSummary {
+        let unsure = written.count(where: { $0.unsureWords?.isEmpty == false })
+        return AITaskSummary(
+            text: written.count == 1 ? "1 cue transcribed" : "\(written.count) cues transcribed",
+            followUp: unsure == 0 ? nil : "\(unsure) with words to check"
+        )
+    }
+
+    /// "640 lines translated · 12 flagged".
+    static func translationSummary(_ written: [Cue]) -> AITaskSummary {
+        let flagged = written.count(where: { $0.flag?.isResolved == false })
+        return AITaskSummary(
+            text: written.count == 1 ? "1 line translated" : "\(written.count) lines translated",
+            followUp: flagged == 0 ? nil : "\(flagged) flagged"
+        )
     }
 
     /// Who says a cue, as the transcriber labelled the voices: the cue's own
@@ -541,12 +596,18 @@ extension EditorState {
         let joinsLines = aiSettings.joinsLinesAfterTranslating
         // A sentence over several cues goes as one line, and its translation is shared out again.
         let (grouped, groups) = SentenceSpans.grouping(request)
-        startAITask("Translation", afterward: { [weak self] in
-            if !keepsSounds { self?.removeCuesOfSoundsOnly() }
-            if joinsLines { self?.joinTranslatedLines() }
-        }) { [weak self] progress, propose in
+        let status = AITaskStatus(
+            title: "Translation", provider: translator.name, stages: ["Translating"],
+            detail: "\(AITaskStatus.shortName(translator.name)) · 0 of \(grouped.lines.count) lines"
+        )
+        startAITask(
+            status, afterward: { [weak self] in
+                if !keepsSounds { self?.removeCuesOfSoundsOnly() }
+                if joinsLines { self?.joinTranslatedLines() }
+            }, summary: Self.translationSummary
+        ) { [weak self] report, propose in
             let found = TranslationCollector()
-            let whole = try await translator.translate(grouped, progress: progress) { batch in
+            let whole = try await translator.translate(grouped, progress: { report(.provider($0)) }) { batch in
                 propose(Proposals.translation(found.add(fixUp.spread(fixUp.fix(batch, request: grouped), groups: groups, request: grouped)), cues: cues))
             }
             let translations = fixUp.spread(whole, groups: groups, request: grouped)
@@ -681,6 +742,21 @@ extension EditorState {
             return result
         }
     }
+}
+
+/// A step of a running AI tool, as its work reports it.
+enum AITaskStep: Sendable {
+    /// The provider's own report.
+    case provider(AIProgress)
+    /// A stage the editor does itself: preparing audio, building cues.
+    case stage(String, detail: String?, fraction: Double?)
+}
+
+/// How an AI tool ended, for a notification when Spotline is in the background.
+public struct AITaskEnd: Sendable, Equatable {
+    public var title: String
+    public var message: String
+    public var succeeded: Bool
 }
 
 /// Numbers partial results in the order they were made.

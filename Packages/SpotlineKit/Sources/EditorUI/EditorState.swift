@@ -105,7 +105,21 @@ public final class EditorState {
     /// What the last AI tool proposed, shown as a diff in the cue list until each change is accepted or rejected.
     public internal(set) var pendingReview: ProposedChangeSet?
     /// The AI tool running now, with its progress; nil when none.
-    public internal(set) var aiTask: AITaskStatus?
+    public internal(set) var aiTask: AITaskStatus? {
+        didSet { if aiTask != oldValue { onAITaskChange?(aiTask) } }
+    }
+    /// What the last AI tool did, shown in the AI bar for a few seconds after it finishes.
+    public internal(set) var aiSummary: AITaskSummary?
+    /// How long `aiSummary` stays. Tests shorten it.
+    @ObservationIgnored public var aiSummaryDuration: Duration = .seconds(8)
+    /// Tells the app about the running AI tool (the Dock shows its progress).
+    @ObservationIgnored public var onAITaskChange: (@MainActor (AITaskStatus?) -> Void)?
+    /// Tells the app how an AI tool ended (a notification while Spotline is in the background).
+    @ObservationIgnored public var onAITaskEnd: (@MainActor (AITaskEnd) -> Void)?
+    /// Counts AI tools started, so reports from one that was cancelled are dropped.
+    @ObservationIgnored var aiTaskGeneration = 0
+    /// The last progress report taken in; older ones arriving late are dropped.
+    @ObservationIgnored var reportSerial = 0
     @ObservationIgnored var aiTaskHandle: Task<Void, Never>?
     /// Cues the running tool has already written, so later results do not write them again.
     @ObservationIgnored var appliedAIChanges: Set<Cue.ID> = []

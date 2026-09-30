@@ -60,8 +60,12 @@ public enum AccessibilityID {
         public static func memoryMatch(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).memory.\(index)" }
         /// The bar over the cue list while an AI tool runs or its changes wait for review.
         public static let aiBar = "cueList.ai"
-        /// The running AI tool; its value is e.g. "Transcribing 40%".
+        /// The running AI tool; its value is e.g. "Transcription: Uploading 6.1 of 18 MB".
         public static let aiTask = "cueList.ai.task"
+        /// What the last AI tool did, for a few seconds after; its value is e.g. "2 lines translated · 1 flagged".
+        public static let aiSummary = "cueList.ai.summary"
+        /// Over a row whose line a translator is working on now.
+        public static func inFlight(_ cueID: UUID) -> String { "\(row(cueID)).inFlight" }
         /// Proposed AI changes waiting for review; its value is e.g. "Transcription: 12 changes".
         public static let aiReview = "cueList.ai.review"
         /// A cue an AI tool proposes to add, shown between the real rows until accepted or rejected.
