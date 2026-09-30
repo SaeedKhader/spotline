@@ -413,20 +413,25 @@ extension EditorState {
         guard let source = sourceTrack, let first = cues.first else { return }
         let glossaryEntries = glossary.entries.filter { entry in cues.contains { glossaryHits[sourceCues[$0.id]?.id ?? UUID()]?.contains(entry) == true } }
         let context: [(source: String, target: String)] = track.cues.filter { $0.start < first.start && !$0.text.isEmpty }
-            .suffix(6).compactMap { cue in sourceCues[cue.id].map { ($0.text, cue.text) } }
+            .suffix(20).compactMap { cue in sourceCues[cue.id].map { ($0.text, cue.text) } }
         let examples = Dictionary(cues.compactMap { cue in
             sourceCues[cue.id].flatMap { memory.matches(for: $0.text, limit: 1).first }.map { (cue.id, ($0.entry.source, $0.entry.target)) }
         }, uniquingKeysWith: { first, _ in first })
         let lines = cues.map { cue in
             TranslationRequest.Line(
                 cueID: cue.id, source: sourceCues[cue.id]?.text ?? "", start: cue.start, end: cue.end, voices: voices(for: cue),
-                speakerName: sourceCues[cue.id]?.speaker ?? cue.speaker, memoryExample: examples[cue.id]
+                speakerName: sourceCues[cue.id]?.speaker ?? cue.speaker, memoryExample: examples[cue.id],
+                unsureWords: sourceCues[cue.id]?.unsureWords
             )
+        }
+        let script = source.cues.map { cue in
+            TranslationRequest.ScriptLine(start: cue.start, voice: (cue.speaker.map { [$0] } ?? cue.voices)?.joined(separator: " then "), text: cue.text)
         }
         let request = TranslationRequest(
             lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
             glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) },
-            maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast
+            maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast,
+            work: workTitle, notes: track.translatorNotes, script: script, style: aiSettings.translationStyle
         )
         let fixUp = TranslationPipeline(preset: qcPreset)
         let joinsLines = aiSettings.joinsLinesAfterTranslating
@@ -451,6 +456,29 @@ extension EditorState {
         }
     }
 
+    /// What is being translated, from the video's file name without release tags:
+    /// "A Knight of the Seven Kingdoms (2026) S01E01 The Hedge Knight".
+    var workTitle: String? {
+        guard let url = status.mediaURL ?? mediaReference.map({ URL(fileURLWithPath: $0.path) }) else { return nil }
+        return Self.workTitle(fromFileName: url.deletingPathExtension().lastPathComponent)
+    }
+
+    static func workTitle(fromFileName name: String) -> String? {
+        var title = name.replacing(/\[[^\]]*\]/, with: "")
+        // Parentheses with release details go; a year stays.
+        title = title.replacing(/\(([^)]*)\)/) { match in
+            let inside = String(match.output.1)
+            return inside.wholeMatch(of: /(19|20)\d\d/) != nil ? "(\(inside))" : ""
+        }
+        if !title.contains(" ") { title = title.replacing(/[._]/, with: " ") }
+        // Everything from the first release tag on goes.
+        if let tag = title.firstMatch(of: /(?i)\b(\d{3,4}p|web-?(rip|dl)?|bluray|bdrip|hdtv|x26[45]|h\.?26[45]|hevc|remux|amzn|nf|hdr|dv)\b/) {
+            title = String(title[..<tag.range.lowerBound])
+        }
+        title = title.replacing(/\s+/, with: " ").trimmingCharacters(in: .whitespaces.union(["-"]))
+        return title.isEmpty ? nil : title
+    }
+
     // MARK: Joining lines
 
     /// Joins the lines a translation just wrote that nobody has edited since
@@ -465,7 +493,8 @@ extension EditorState {
     /// The joins `CueJoiner` finds among the cues `eligible` accepts. Cues are
     /// only joined with neighbours that are eligible too.
     func joinProposal(eligible: (Cue) -> Bool) -> ProposedChangeSet {
-        let joiner = CueJoiner(preset: qcPreset)
+        var joiner = CueJoiner(preset: qcPreset)
+        joiner.sentencePerLine = TranslationStyle.endsLinesBare(track.languageCode) && aiSettings.translationStyle.dropsFinalPunctuation
         var runs: [[Cue]] = [[]]
         for cue in track.cues.sorted(by: { $0.start < $1.start }) {
             if eligible(cue) {

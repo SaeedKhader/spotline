@@ -37,6 +37,19 @@ struct GlossaryView: View {
                 }
             }
             Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Notes for the AI translator").font(.caption).foregroundStyle(.secondary)
+                TextField(
+                    "The show, the setting, who is who: “Dunk is a tall hedge knight; Egg is his squire, a boy.”",
+                    text: Binding(get: { editor.track.translatorNotes ?? "" }, set: { editor.setTranslatorNotes($0) }),
+                    axis: .vertical
+                )
+                .lineLimit(2...5)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier(AccessibilityID.Glossary.translatorNotes)
+            }
+            .padding(8)
+            Divider()
             HStack(spacing: 8) {
                 Button {
                     let id = editor.addGlossaryEntry()
@@ -57,6 +70,7 @@ struct GlossaryView: View {
                 .disabled(selection.isEmpty)
                 .accessibilityIdentifier(AccessibilityID.Glossary.removeEntries)
                 Spacer()
+                CommandButton(command: .addNamesToGlossary, editor: editor)
             }
             .buttonStyle(.borderless)
             .padding(8)

@@ -45,10 +45,12 @@ public struct TranslationRequest: Sendable, Equatable {
         public var speakerName: String?
         /// A similar line translated before (translation memory), as an example.
         public var memoryExample: (source: String, target: String)?
+        /// Words the transcriber was unsure of in the source.
+        public var unsureWords: [String]?
 
         public init(
             cueID: Cue.ID, source: String, start: MediaTime, end: MediaTime, voices: [String]? = nil, speakerName: String? = nil,
-            memoryExample: (source: String, target: String)? = nil
+            memoryExample: (source: String, target: String)? = nil, unsureWords: [String]? = nil
         ) {
             self.cueID = cueID
             self.source = source
@@ -57,12 +59,26 @@ public struct TranslationRequest: Sendable, Equatable {
             self.voices = voices
             self.speakerName = speakerName
             self.memoryExample = memoryExample
+            self.unsureWords = unsureWords
         }
 
         public static func == (lhs: Line, rhs: Line) -> Bool {
             lhs.cueID == rhs.cueID && lhs.source == rhs.source && lhs.start == rhs.start && lhs.end == rhs.end
-                && lhs.voices == rhs.voices && lhs.speakerName == rhs.speakerName
+                && lhs.voices == rhs.voices && lhs.speakerName == rhs.speakerName && lhs.unsureWords == rhs.unsureWords
                 && lhs.memoryExample?.source == rhs.memoryExample?.source && lhs.memoryExample?.target == rhs.memoryExample?.target
+        }
+    }
+
+    /// A line of the whole episode's source, for context.
+    public struct ScriptLine: Sendable, Equatable {
+        public var start: MediaTime
+        public var voice: String?
+        public var text: String
+
+        public init(start: MediaTime, voice: String? = nil, text: String) {
+            self.start = start
+            self.voice = voice
+            self.text = text
         }
     }
 
@@ -77,11 +93,18 @@ public struct TranslationRequest: Sendable, Equatable {
     public var maxLines: Int?
     /// The people known so far; confirmed ones are facts the user settled.
     public var cast: [CastMember]
+    /// What is being translated, e.g. "A Knight of the Seven Kingdoms S01E01 The Hedge Knight".
+    public var work: String?
+    /// The user's notes for the translator: the show, the setting, who is who.
+    public var notes: String?
+    /// The whole episode's source lines, for context: names, callbacks, what a reply answers.
+    public var script: [ScriptLine]
+    public var style: TranslationStyle
 
     public init(
         lines: [Line], precedingContext: [(source: String, target: String)] = [], sourceLanguage: String, targetLanguage: String,
         glossary: [(source: String, target: String, note: String)] = [], maxCharactersPerLine: Int? = nil, maxLines: Int? = nil,
-        cast: [CastMember] = []
+        cast: [CastMember] = [], work: String? = nil, notes: String? = nil, script: [ScriptLine] = [], style: TranslationStyle = TranslationStyle()
     ) {
         self.lines = lines
         self.precedingContext = precedingContext
@@ -91,6 +114,10 @@ public struct TranslationRequest: Sendable, Equatable {
         self.maxCharactersPerLine = maxCharactersPerLine
         self.maxLines = maxLines
         self.cast = cast
+        self.work = work
+        self.notes = notes
+        self.script = script
+        self.style = style
     }
 
     public static func == (lhs: TranslationRequest, rhs: TranslationRequest) -> Bool {
@@ -98,10 +125,47 @@ public struct TranslationRequest: Sendable, Equatable {
             && lhs.glossary.map { [$0.source, $0.target, $0.note] } == rhs.glossary.map { [$0.source, $0.target, $0.note] }
             && lhs.precedingContext.map { [$0.source, $0.target] } == rhs.precedingContext.map { [$0.source, $0.target] }
             && lhs.maxCharactersPerLine == rhs.maxCharactersPerLine && lhs.maxLines == rhs.maxLines && lhs.cast == rhs.cast
+            && lhs.work == rhs.work && lhs.notes == rhs.notes && lhs.script == rhs.script && lhs.style == rhs.style
     }
 
     /// True when the target language changes "you", verbs or adjectives for someone's gender or number.
     public var targetIsGendered: Bool { Languages.addressesByGender(targetLanguage) }
+}
+
+/// House style for a translation, from Settings › AI.
+public struct TranslationStyle: Sendable, Equatable {
+    public enum Register: String, Sendable, CaseIterable, Identifiable {
+        /// Say what is said: profanity stays profanity, violence stays violence.
+        case faithful
+        /// Milder, conventional wording for profanity and sex, as broadcasters
+        /// in the Arab world use; the meaning never changes.
+        case broadcast
+
+        public var id: String { rawValue }
+        public var title: String {
+            switch self {
+            case .faithful: "Faithful (say what is said)"
+            case .broadcast: "Broadcast (milder wording, same meaning)"
+            }
+        }
+    }
+
+    public var register: Register = .faithful
+    /// No full stop or comma at the end of a line, as Arabic subtitles are written.
+    public var dropsFinalPunctuation = true
+    /// Names in parentheses, "(دانك)", as some Arabic subtitlers write them.
+    public var namesInParentheses = false
+
+    public init(register: Register = .faithful, dropsFinalPunctuation: Bool = true, namesInParentheses: Bool = false) {
+        self.register = register
+        self.dropsFinalPunctuation = dropsFinalPunctuation
+        self.namesInParentheses = namesInParentheses
+    }
+
+    /// Languages whose subtitles end lines without a full stop.
+    public static func endsLinesBare(_ language: String) -> Bool {
+        ["ar", "fa", "ur"].contains(Languages.base(language))
+    }
 }
 
 /// One translated line.

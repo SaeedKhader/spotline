@@ -237,6 +237,11 @@ extension EditorCommand {
         id: "translation.fillExactMatches", title: "Fill Untranslated Cues from Memory", category: .translation
     )
     /// Stores every translated cue with its source in the translation memory.
+    /// Adds how the translation spells each person's name to the glossary, so the
+    /// next episodes spell them the same.
+    public static let addNamesToGlossary = EditorCommand(
+        id: "translation.addNamesToGlossary", title: "Add Names to Glossary", category: .translation
+    )
     public static let addTranslationsToMemory = EditorCommand(
         id: "translation.addToMemory", title: "Add All Translations to Memory", category: .translation
     )
@@ -310,7 +315,7 @@ extension EditorCommand {
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
         toggleMilliseconds,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
-        addTranslationsToMemory, showGlossary, importGlossary,
+        addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
         transcribe, translateWithAI, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]

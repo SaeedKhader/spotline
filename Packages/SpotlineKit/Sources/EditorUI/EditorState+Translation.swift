@@ -187,6 +187,25 @@ extension EditorState {
         }
     }
 
+    /// People whose translated name the glossary does not have yet.
+    public var namesMissingFromGlossary: [CastMember] {
+        track.cast.filter { person in
+            person.translatedName?.isEmpty == false
+                && !glossary.entries.contains { $0.source.caseInsensitiveCompare(person.name) == .orderedSame }
+        }
+    }
+
+    // MARK: Notes for the translator
+
+    /// Changes the notes the AI translator gets with every line (the show, the
+    /// setting, who is who). Saved with the project; typing undoes as one step.
+    public func setTranslatorNotes(_ notes: String) {
+        let value = notes.isEmpty ? nil : notes
+        guard value != track.translatorNotes else { return }
+        edit("Translator Notes", coalescing: translatorNotesSession) { track in track.translatorNotes = value }
+        translatorNotesSession = true
+    }
+
     // MARK: Translation memory
 
     /// Up to three suggestions for the cue's source text, best first.

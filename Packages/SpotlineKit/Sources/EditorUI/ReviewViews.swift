@@ -366,6 +366,7 @@ struct ChoiceReviewHeader: View {
 extension TranslationVariant {
     /// Who the variant assumes, in a few words: "Beth ♀ to Morty ♂", "to two women".
     var summary: String {
+        if let assumedSource { return "If the line is “\(assumedSource.replacing("\n", with: " "))”" }
         var speakerPart: String?
         if let speaker { speakerPart = "\(speaker) \(speakerGender.symbol)".trimmingCharacters(in: .whitespaces) }
         else if speakerGender == .male || speakerGender == .female { speakerPart = "\(speakerGender == .male ? "a man" : "a woman") speaking" }

@@ -22,6 +22,9 @@ public struct CueJoiner: Sendable {
     public var shortCharacters = 16
     /// Most cues joined into one.
     public var maxCues = 3
+    /// Puts each sentence on a line of its own when they fit, as subtitles without
+    /// closing full stops are written (Arabic): "مرحبًا\nهل أنت فتى الإسطبل؟".
+    public var sentencePerLine = false
 
     public init(preset: QCPreset) {
         self.preset = preset
@@ -132,13 +135,14 @@ public struct CueJoiner: Sendable {
             return lines.allSatisfy(fits) ? lines.joined(separator: "\n") : nil
         }
         let whole = CueSegmenter.join(parts)
-        if fits(whole) { return whole }
-        guard maxLines >= 2 else { return nil }
         // Breaks between texts where a sentence ends, the most balanced first.
         let sentenceBreaks = (1..<parts.count).filter { !goesOn[$0 - 1] }
-        let candidates = sentenceBreaks.map { (CueSegmenter.join(Array(parts[..<$0])), CueSegmenter.join(Array(parts[$0...]))) }
+        let candidates = maxLines < 2 ? [] : sentenceBreaks.map { (CueSegmenter.join(Array(parts[..<$0])), CueSegmenter.join(Array(parts[$0...]))) }
             .filter { fits($0.0) && fits($0.1) }
             .sorted { abs($0.0.count - $0.1.count) < abs($1.0.count - $1.1.count) }
+        if sentencePerLine, let best = candidates.first { return best.0 + "\n" + best.1 }
+        if fits(whole) { return whole }
+        guard maxLines >= 2 else { return nil }
         if let best = candidates.first { return best.0 + "\n" + best.1 }
         // One sentence over all of them: laid out as one.
         guard sentenceBreaks.isEmpty else { return nil }

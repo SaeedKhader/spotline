@@ -274,6 +274,8 @@ public final class EditorState {
     /// The cue whose text the current typing session changes. Keystrokes in one
     /// session undo together.
     @ObservationIgnored private var textEditCueID: Cue.ID?
+    /// True while the translator notes are being typed, so the typing undoes as one step.
+    @ObservationIgnored var translatorNotesSession = false
 
     /// Asks the user for a media file. Tests replace it.
     @ObservationIgnored public var chooseMedia: @MainActor () -> URL? = EditorPanels.chooseMedia
@@ -414,6 +416,8 @@ public final class EditorState {
             true
         case EditorCommand.openSourceSubtitles.id:
             true
+        case EditorCommand.addNamesToGlossary.id:
+            isTranslating && !namesMissingFromGlossary.isEmpty
         case EditorCommand.closeSourceSubtitles.id, EditorCommand.addTranslationsToMemory.id, EditorCommand.showGlossary.id,
              EditorCommand.importGlossary.id:
             isTranslating
@@ -544,6 +548,10 @@ public final class EditorState {
             return fillExactMatches()
         case EditorCommand.addTranslationsToMemory.id:
             addTranslationsToMemory()
+        case EditorCommand.addNamesToGlossary.id:
+            let names = namesMissingFromGlossary
+            guard !names.isEmpty else { return false }
+            glossary.merge(names.map { Glossary.Entry(source: $0.name, target: $0.translatedName ?? "", note: "Name") })
         case EditorCommand.showGlossary.id:
             showGlossaryPanel(self)
         case EditorCommand.importGlossary.id:
@@ -1156,6 +1164,7 @@ public final class EditorState {
 
     private func endTextEditSession() {
         textEditCueID = nil
+        translatorNotesSession = false
     }
 
     func refreshUndoState() {

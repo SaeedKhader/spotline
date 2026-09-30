@@ -26,6 +26,8 @@ struct AIStateTests {
         editor.reportError = { title, error in Issue.record("\(title) \(error)") }
         // These one-second test cues would all be joined; joining has its own tests.
         editor.aiSettings.joinsLinesAfterTranslating = false
+        // Keeps the scripted "[ar] Hello." as it comes; house style has its own tests.
+        editor.aiSettings.translationStyle.dropsFinalPunctuation = false
         return editor
     }
 

@@ -113,6 +113,37 @@ struct TranslationFixUpTests {
         #expect(lines.allSatisfy { $0.count <= 42 })
     }
 
+    @Test func arabicLinesEndWithoutAFullStop() {
+        let id = UUID()
+        let request = TranslationRequest(
+            lines: [.init(cueID: id, source: "Hello, Dunk.", start: .zero, end: MediaTime(value: 1, timescale: 1))],
+            sourceLanguage: "en", targetLanguage: "ar"
+        )
+        let fixed = pipeline.fix([CueTranslation(cueID: id, text: "- مرحبا.\n- أهلا،")], request: request)
+        #expect(fixed[0].text == "- مرحبا\n- أهلا")
+        #expect(pipeline.fix([CueTranslation(cueID: id, text: "لماذا أنت...")], request: request)[0].text == "لماذا أنت...")
+        #expect(pipeline.fix([CueTranslation(cueID: id, text: "حقًا؟")], request: request)[0].text == "حقًا؟")
+        var keep = request
+        keep.style.dropsFinalPunctuation = false
+        #expect(pipeline.fix([CueTranslation(cueID: id, text: "مرحبا.")], request: keep)[0].text == "مرحبا.")
+    }
+
+    @Test func aSlashTheModelCopiedIsALineBreak() {
+        #expect(pipeline.layout("لا تُعدّ سرقة إن كنت / تنوي إعادته.") == "لا تُعدّ سرقة إن كنت تنوي إعادته.")
+    }
+
+    @Test func namesKeepTheirAgreedSpelling() {
+        let names = NameEnforcer(names: [("Dunk", "دانك"), ("Arlan", "أرلان"), ("Thunder", "ثندر"), ("Egg", "إغ")])
+        #expect(names.apply(to: "دنك. السير دنك.", source: "Dunk. Ser Dunk.") == "دانك. السير دانك.")
+        #expect(names.apply(to: "خدم السير آرلن والده.", source: "Ser Arlan served his father.") == "خدم السير أرلان والده.")
+        #expect(names.apply(to: "واحمد ربك أن \"ثَندر\" لم يركلك", source: "Thank the gods Thunder didn't kick you") == "واحمد ربك أن \"ثَندر\" لم يركلك")
+        #expect(names.apply(to: "انطلق يا ثاندر!", source: "Go, Thunder!") == "انطلق يا ثندر!")
+        #expect(names.apply(to: "ولدنك", source: "And for Dunk") == "ولدنك", "Two prefixes: left alone rather than guessed")
+        #expect(names.apply(to: "ودنك هنا", source: "And Dunk is here") == "ودانك هنا")
+        // Only where the source says the name.
+        #expect(names.apply(to: "دنك", source: "Hello.") == "دنك")
+    }
+
     @Test func dialogueKeepsALinePerSpeaker() {
         #expect(pipeline.layout("- مرحبا.\n\n- أهلا.") == "- مرحبا.\n- أهلا.")
         #expect(AppleTranslator.sourceText("- Hi.\n- Hello.") == "- Hi.\n- Hello.")

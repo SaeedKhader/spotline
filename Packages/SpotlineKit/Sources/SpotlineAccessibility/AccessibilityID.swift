@@ -104,6 +104,8 @@ public enum AccessibilityID {
         public static let root = "glossary"
         public static let addEntry = "glossary.add"
         public static let removeEntries = "glossary.remove"
+        /// The notes for the AI translator under the terms.
+        public static let translatorNotes = "glossary.translatorNotes"
         /// One term's field: `glossary.entry.<id>.source`, `.target` or `.note`.
         public static func field(_ entryID: UUID, _ field: Field) -> String { "glossary.entry.\(entryID.uuidString).\(field.rawValue)" }
 
@@ -132,6 +134,10 @@ public enum AccessibilityID {
         public static func apiKeySaved(_ provider: String) -> String { "\(apiKey(provider)).saved" }
         /// Shown when a chosen cloud provider can't run yet (cloud off, or no key); its value says why.
         public static let providerProblem = "settings.ai.problem"
+        public static let joinsLines = "settings.ai.joinsLines"
+        public static let register = "settings.ai.register"
+        public static let dropsFinalPunctuation = "settings.ai.dropsFinalPunctuation"
+        public static let namesInParentheses = "settings.ai.namesInParentheses"
     }
 
     /// Settings › Agents.

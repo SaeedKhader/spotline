@@ -201,4 +201,36 @@ struct TranslationStateTests {
         #expect(editor.perform(.splitCue))
         #expect(editor.track.cues[1].sourceCueID == first.sourceCueID)
     }
+
+    @Test func theWorkTitleComesFromTheFileNameWithoutReleaseTags() {
+        #expect(EditorState.workTitle(fromFileName: "A Knight of the Seven Kingdoms (2026) S01E01 The Hedge Knight (1080p AMZN Webrip x265 10bit EAC3 5.1 Atmos - DNU)[TAoE]")
+            == "A Knight of the Seven Kingdoms (2026) S01E01 The Hedge Knight")
+        #expect(EditorState.workTitle(fromFileName: "Game.of.Thrones.S02E01.The.North.Remembers.2160p.TrueHD.Atmos.7.1.DV.HEVC.REMUX-FraMeSToR")
+            == "Game of Thrones S02E01 The North Remembers")
+        #expect(EditorState.workTitle(fromFileName: "[pseudo] Rick and Morty S01E01 Pilot [BDRip] [1080p] [h.265]") == "Rick and Morty S01E01 Pilot")
+    }
+
+    @Test func namesTheTranslationSpelledGoToTheGlossary() throws {
+        let editor = try translating()
+        #expect(!editor.canPerform(.addNamesToGlossary))
+        editor.edit("Cast") { track in
+            track.cast = [CastMember(name: "Dunk", translatedName: "دانك"), CastMember(name: "Egg"), CastMember(name: "Winterfell", translatedName: "وينترفيل")]
+        }
+        editor.addGlossaryEntry(source: "Winterfell", target: "وينترفل")
+        #expect(editor.namesMissingFromGlossary.map(\.name) == ["Dunk"])
+        #expect(editor.perform(.addNamesToGlossary))
+        #expect(editor.glossary.entries.map(\.target).sorted() == ["دانك", "وينترفل"])
+        #expect(!editor.canPerform(.addNamesToGlossary))
+    }
+
+    @Test func translatorNotesAreSavedWithTheTrackAndUndoAsOneStep() throws {
+        let editor = try translating()
+        editor.setTranslatorNotes("Egg")
+        editor.setTranslatorNotes("Egg is a boy.")
+        #expect(editor.track.translatorNotes == "Egg is a boy.")
+        let decoded = try JSONDecoder().decode(SubtitleTrack.self, from: JSONEncoder().encode(editor.track))
+        #expect(decoded.translatorNotes == "Egg is a boy.")
+        editor.perform(.undo)
+        #expect(editor.track.translatorNotes == nil)
+    }
 }

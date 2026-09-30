@@ -91,10 +91,12 @@ public struct SubtitleTrack: Identifiable, Hashable, Sendable, Codable {
     /// The people in the episode, as AI translation came to know them (names from the
     /// dialogue, genders, voices). Picks confirm them; nobody enters them by hand.
     public var cast: [CastMember]
+    /// The user's notes for an AI translator: the show, the setting, who is who.
+    public var translatorNotes: String?
 
     public init(
         id: UUID = UUID(), languageCode: String = "und", cues: [Cue] = [], styles: [SubtitleStyle] = [],
-        properties: [String: String] = [:], cast: [CastMember] = []
+        properties: [String: String] = [:], cast: [CastMember] = [], translatorNotes: String? = nil
     ) {
         self.id = id
         self.languageCode = languageCode
@@ -102,10 +104,11 @@ public struct SubtitleTrack: Identifiable, Hashable, Sendable, Codable {
         self.styles = styles
         self.properties = properties
         self.cast = cast
+        self.translatorNotes = translatorNotes
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, languageCode, cues, styles, properties, cast
+        case id, languageCode, cues, styles, properties, cast, translatorNotes
     }
 
     /// Projects saved before the cast existed have none.
@@ -117,6 +120,7 @@ public struct SubtitleTrack: Identifiable, Hashable, Sendable, Codable {
         styles = try container.decodeIfPresent([SubtitleStyle].self, forKey: .styles) ?? []
         properties = try container.decodeIfPresent([String: String].self, forKey: .properties) ?? [:]
         cast = try container.decodeIfPresent([CastMember].self, forKey: .cast) ?? []
+        translatorNotes = try container.decodeIfPresent(String.self, forKey: .translatorNotes)
     }
 
     /// The style named `name`, else the one named "Default", else the first.

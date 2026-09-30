@@ -29,13 +29,19 @@ public struct CastMember: Identifiable, Hashable, Sendable, Codable {
     public var isConfirmed: Bool
     /// The transcriber's labels for this person's voice ("speaker_1").
     public var voices: [String]
+    /// How the translation spells the name ("Dunk" → "دانك"), kept the same in every line.
+    public var translatedName: String?
 
-    public init(id: UUID = UUID(), name: String, gender: Gender = .unknown, isConfirmed: Bool = false, voices: [String] = []) {
+    public init(
+        id: UUID = UUID(), name: String, gender: Gender = .unknown, isConfirmed: Bool = false, voices: [String] = [],
+        translatedName: String? = nil
+    ) {
         self.id = id
         self.name = name
         self.gender = gender
         self.isConfirmed = isConfirmed
         self.voices = voices
+        self.translatedName = translatedName
     }
 
     /// Names match ignoring case and surrounding spaces.
@@ -55,10 +61,13 @@ public struct TranslationVariant: Hashable, Sendable, Codable {
     public var listeners: [String]
     public var listenerGender: Gender
     public var listenerCount: ListenerCount
+    /// For a line the transcriber may have misheard: the source line this
+    /// variant translates ("It's an elm."), nil when it is the line as heard.
+    public var assumedSource: String?
 
     public init(
         text: String, speaker: String? = nil, speakerGender: Gender = .unknown, listeners: [String] = [],
-        listenerGender: Gender = .unknown, listenerCount: ListenerCount = .unknown
+        listenerGender: Gender = .unknown, listenerCount: ListenerCount = .unknown, assumedSource: String? = nil
     ) {
         self.text = text
         self.speaker = speaker
@@ -66,6 +75,7 @@ public struct TranslationVariant: Hashable, Sendable, Codable {
         self.listeners = listeners
         self.listenerGender = listenerGender
         self.listenerCount = listenerCount
+        self.assumedSource = assumedSource
     }
 
     /// False when the variant assumes something a confirmed cast member contradicts:
@@ -98,6 +108,9 @@ public struct TranslationFlag: Hashable, Sendable, Codable {
         case genderedWords
         /// It is not clear who says the line.
         case speaker
+        /// The source line reads as misheard (ungrammatical, or not fitting the
+        /// scene): the variants translate what was heard and what was likely said.
+        case source
     }
 
     public var reasons: [Reason]
@@ -160,8 +173,13 @@ extension Array where Element == CastMember {
             if let index = firstIndex(where: { $0.isNamed(person.name) }) {
                 if !self[index].isConfirmed, person.gender != .unknown { self[index].gender = person.gender }
                 for voice in person.voices where !self[index].voices.contains(voice) { self[index].voices.append(voice) }
+                // The first spelling stays: names read the same in every line.
+                if self[index].translatedName == nil, let spelling = person.translatedName?.trimmingCharacters(in: .whitespaces), !spelling.isEmpty {
+                    self[index].translatedName = spelling
+                }
             } else {
-                append(CastMember(name: person.name, gender: person.gender, voices: person.voices))
+                let spelling = person.translatedName?.trimmingCharacters(in: .whitespaces)
+                append(CastMember(name: person.name, gender: person.gender, voices: person.voices, translatedName: spelling?.isEmpty == false ? spelling : nil))
             }
         }
     }

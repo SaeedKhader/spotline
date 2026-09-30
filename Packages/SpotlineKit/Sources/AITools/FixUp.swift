@@ -44,12 +44,21 @@ public struct TranslationPipeline: Sendable {
         self.preset = preset
     }
 
-    public func fix(_ translations: [CueTranslation], request: TranslationRequest) -> [CueTranslation] {
-        translations.map { translation in
+    public func fix(_ translations: [CueTranslation], request: TranslationRequest, cast: [CastMember]? = nil) -> [CueTranslation] {
+        let names = NameEnforcer(cast: cast ?? request.cast)
+        let sources = Dictionary(request.lines.map { ($0.cueID, $0.source) }, uniquingKeysWith: { first, _ in first })
+        let bare = TranslationStyle.endsLinesBare(request.targetLanguage) && request.style.dropsFinalPunctuation
+        func fix(_ text: String, cueID: Cue.ID) -> String {
+            var text = layout(text)
+            if !names.isEmpty, let source = sources[cueID] { text = names.apply(to: text, source: source) }
+            if bare { text = Self.withoutFinalPunctuation(text) }
+            return text
+        }
+        return translations.map { translation in
             var fixed = translation
-            fixed.text = layout(translation.text)
+            fixed.text = fix(translation.text, cueID: translation.cueID)
             if var flag = translation.flag {
-                for index in flag.variants.indices { flag.variants[index].text = layout(flag.variants[index].text) }
+                for index in flag.variants.indices { flag.variants[index].text = fix(flag.variants[index].text, cueID: translation.cueID) }
                 fixed.flag = flag
             }
             return fixed
@@ -57,13 +66,30 @@ public struct TranslationPipeline: Sendable {
     }
 
     public func fix(_ batch: TranslationBatch, request: TranslationRequest) -> TranslationBatch {
-        TranslationBatch(translations: fix(batch.translations, request: request), cast: batch.cast)
+        var cast = request.cast
+        cast.merge(batch.cast)
+        return TranslationBatch(translations: fix(batch.translations, request: request, cast: cast), cast: batch.cast)
+    }
+
+    /// Each line without a closing full stop or comma (an ellipsis, question or
+    /// exclamation mark stays), as Arabic subtitles are written.
+    static func withoutFinalPunctuation(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            var line = String(line)
+            while let last = line.last, ".,،".contains(last), !line.hasSuffix(".."), !line.hasSuffix("…") {
+                line.removeLast()
+                line = line.trimmingCharacters(in: .whitespaces)
+            }
+            return line
+        }.joined(separator: "\n")
     }
 
     /// One line when it fits the preset's line length, else two balanced lines,
     /// with no blank lines or stray spaces. Dialogue (a line per speaker) and
     /// text with markup keep their lines.
     func layout(_ text: String) -> String {
+        // A " / " the model copied for a line break is one.
+        let text = text.replacing(" / ", with: "\n")
         let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         guard !Self.isDialogue(lines), !text.contains("<"), !text.contains("{") else { return lines.joined(separator: "\n") }
         let words = lines.joined(separator: " ").split(separator: " ").map(String.init)
