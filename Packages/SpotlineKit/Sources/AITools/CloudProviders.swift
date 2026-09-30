@@ -307,36 +307,19 @@ struct MultipartForm {
     }
 }
 
-// MARK: - Claude
+// MARK: - Batched translation
 
-/// Cloud translation with Claude (Anthropic's Messages API). Each batch of lines
-/// goes with the lines before it, the glossary, translation memory examples,
-/// the transcriber's voice labels, the cast known so far and the QC limits.
-///
-/// Into languages that inflect for gender or number (Arabic first), Claude flags
-/// every line that could be translated more than one way ("you" for a man, a
-/// woman or a group; gendered verbs and adjectives; an unclear speaker), writes
-/// every valid variant, recommends one from the scene and says why in a line.
-/// It also names the people it recognizes, which builds the cast.
-public struct ClaudeTranslator: CueTranslator {
-    public var name: String { model == Self.defaultModel ? "Claude (cloud)" : "Claude \(model) (cloud)" }
-    /// Opus by default; Sonnet, at half the price, is a setting.
-    public static let defaultModel = "claude-opus-5-5"
-    public static let sonnetModel = "claude-sonnet-5-5"
-    let model: String
-    let apiKey: String
-    let http: HTTPClient
-    var endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+/// A cloud translator that sends lines in batches, with the lines before each
+/// batch and the cast found so far, and asks again for lines left out or declined.
+protocol BatchedCueTranslator: CueTranslator {
     /// Lines per request, and how many earlier lines go along as context.
-    var batchSize = 40
-    var contextLines = 6
+    var batchSize: Int { get }
+    var contextLines: Int { get }
+    /// Translates one batch in one request.
+    func translateBatch(_ request: TranslationRequest) async throws -> TranslationBatch
+}
 
-    public init(apiKey: String, model: String = ClaudeTranslator.defaultModel, session: URLSession = .shared) {
-        self.apiKey = apiKey
-        self.model = model
-        http = HTTPClient(session: session)
-    }
-
+extension BatchedCueTranslator {
     public func translate(
         _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
         found: @escaping @Sendable (TranslationBatch) -> Void
@@ -363,7 +346,7 @@ public struct ClaudeTranslator: CueTranslator {
         return results
     }
 
-    /// Translates the lines, then asks again, in halves, for any Claude left out or
+    /// Translates the lines, then asks again, in halves, for any the model left out or
     /// declined (a refusal is often about one line in the batch), down to single lines.
     /// Lines that never come back are `skipped`; the editor marks them "Not translated".
     func translateLines(_ request: TranslationRequest) async throws -> (batch: TranslationBatch, skipped: [TranslationRequest.Line]) {
@@ -394,6 +377,37 @@ public struct ClaudeTranslator: CueTranslator {
         let order = Dictionary(uniqueKeysWithValues: request.lines.enumerated().map { ($0.element.cueID, $0.offset) })
         result.translations.sort { (order[$0.cueID] ?? 0) < (order[$1.cueID] ?? 0) }
         return (result, skipped)
+    }
+}
+
+// MARK: - Claude
+
+/// Cloud translation with Claude (Anthropic's Messages API). Each batch of lines
+/// goes with the lines before it, the glossary, translation memory examples,
+/// the transcriber's voice labels, the cast known so far and the QC limits.
+///
+/// Into languages that inflect for gender or number (Arabic first), Claude flags
+/// every line that could be translated more than one way ("you" for a man, a
+/// woman or a group; gendered verbs and adjectives; an unclear speaker), writes
+/// every valid variant, recommends one from the scene and says why in a line.
+/// It also names the people it recognizes, which builds the cast.
+public struct ClaudeTranslator: BatchedCueTranslator {
+    public var name: String { model == Self.defaultModel ? "Claude (cloud)" : "Claude \(model) (cloud)" }
+    /// Opus by default; Sonnet, at half the price, is a setting.
+    public static let defaultModel = "claude-opus-5-5"
+    public static let sonnetModel = "claude-sonnet-5-5"
+    let model: String
+    let apiKey: String
+    let http: HTTPClient
+    var endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    /// Lines per request, and how many earlier lines go along as context.
+    var batchSize = 40
+    var contextLines = 6
+
+    public init(apiKey: String, model: String = ClaudeTranslator.defaultModel, session: URLSession = .shared) {
+        self.apiKey = apiKey
+        self.model = model
+        http = HTTPClient(session: session)
     }
 
     func translateBatch(_ request: TranslationRequest) async throws -> TranslationBatch {
@@ -429,6 +443,20 @@ public struct ClaudeTranslator: CueTranslator {
 
     /// The Messages API request: structured output constrained to a JSON schema.
     static func body(for request: TranslationRequest, model: String = defaultModel) -> [String: Any] {
+        [
+            "model": model,
+            "max_tokens": 32000,
+            "fallbacks": "default",
+            "output_config": ["effort": "medium", "format": ["type": "json_schema", "schema": outputSchema(for: request)]],
+            "system": systemPrompt(for: request),
+            "messages": [["role": "user", "content": userPrompt(for: request)]],
+        ]
+    }
+
+    /// The JSON schema of the answer: the translations, and for gendered targets
+    /// their flags and variants and the cast. Every field is required, as OpenAI's
+    /// strict structured outputs need.
+    static func outputSchema(for request: TranslationRequest) -> [String: Any] {
         var item: [String: Any] = ["id": string, "text": string]
         var output: [String: Any] = [:]
         if request.targetIsGendered {
@@ -442,14 +470,7 @@ public struct ClaudeTranslator: CueTranslator {
             output["cast"] = array(object(["name": string, "gender": oneOf(personGenderValues), "voices": array(string)]))
         }
         output["translations"] = array(object(item))
-        return [
-            "model": model,
-            "max_tokens": 32000,
-            "fallbacks": "default",
-            "output_config": ["effort": "medium", "format": ["type": "json_schema", "schema": object(output)]],
-            "system": systemPrompt(for: request),
-            "messages": [["role": "user", "content": userPrompt(for: request)]],
-        ]
+        return object(output)
     }
 
     static func systemPrompt(for request: TranslationRequest) -> String {
@@ -589,6 +610,11 @@ public struct ClaudeTranslator: CueTranslator {
         guard let output = texts.reversed().lazy.compactMap({ try? JSONDecoder().decode(Output.self, from: Data($0.utf8)) }).first else {
             throw AIError.provider("Claude's answer could not be read.")
         }
+        return batch(from: output, request: request)
+    }
+
+    /// The answer's translations mapped back to the cues, with their flags, and the cast.
+    static func batch(from output: Output, request: TranslationRequest) -> TranslationBatch {
         let ids = Dictionary(uniqueKeysWithValues: request.lines.enumerated().map { (lineID($0.offset), $0.element.cueID) })
         let translations: [CueTranslation] = output.translations.compactMap { item in
             guard let cueID = ids[item.id] else { return nil }
@@ -633,5 +659,89 @@ public struct ClaudeTranslator: CueTranslator {
         var flag = TranslationFlag(reasons: reasons, variants: variants, confidence: confidence, note: item.note ?? "")
         flag.rerank(with: cast)
         return flag
+    }
+}
+
+// MARK: - OpenAI
+
+/// Cloud translation with OpenAI's GPT-6 Luna (the Responses API), far cheaper than
+/// Claude. It gets Claude's prompt and answers in the same JSON schema (strict
+/// structured outputs), so lines are flagged with variants and the cast builds the same way.
+public struct OpenAITranslator: BatchedCueTranslator {
+    public var name: String { model == Self.defaultModel ? "OpenAI GPT-6 Luna (cloud)" : "OpenAI \(model) (cloud)" }
+    public static let defaultModel = "gpt-6-luna"
+    let model: String
+    let apiKey: String
+    let http: HTTPClient
+    var endpoint = URL(string: "https://api.openai.com/v1/responses")!
+    var batchSize = 40
+    var contextLines = 6
+
+    public init(apiKey: String, model: String = OpenAITranslator.defaultModel, session: URLSession = .shared) {
+        self.apiKey = apiKey
+        self.model = model
+        http = HTTPClient(session: session)
+    }
+
+    func translateBatch(_ request: TranslationRequest) async throws -> TranslationBatch {
+        var urlRequest = URLRequest(url: endpoint, timeoutInterval: 600)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: Self.body(for: request, model: model))
+        let data = try await http.send(urlRequest)
+        return try Self.translations(from: data, request: request)
+    }
+
+    /// The Responses API request. `store` is off, so OpenAI keeps no copy of the dialogue
+    /// for the dashboard. High effort: Luna is cheap, and the flags need the reasoning.
+    static func body(for request: TranslationRequest, model: String = defaultModel) -> [String: Any] {
+        [
+            "model": model,
+            "instructions": ClaudeTranslator.systemPrompt(for: request),
+            "input": ClaudeTranslator.userPrompt(for: request),
+            "max_output_tokens": 32000,
+            "reasoning": ["effort": "high"],
+            "store": false,
+            "text": ["format": [
+                "type": "json_schema", "name": "subtitle_translations", "strict": true,
+                "schema": ClaudeTranslator.outputSchema(for: request),
+            ]],
+        ]
+    }
+
+    struct Response: Decodable {
+        struct Item: Decodable {
+            struct Content: Decodable {
+                var type: String
+                var text: String?
+            }
+
+            var type: String
+            var content: [Content]?
+        }
+
+        struct Incomplete: Decodable {
+            var reason: String?
+        }
+
+        var status: String?
+        var output: [Item]
+        var incomplete_details: Incomplete?
+    }
+
+    static func translations(from data: Data, request: TranslationRequest) throws -> TranslationBatch {
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        let contents = response.output.filter { $0.type == "message" }.flatMap { $0.content ?? [] }
+        if contents.contains(where: { $0.type == "refusal" }) { throw AIError.declined }
+        if response.status == "incomplete" {
+            throw response.incomplete_details?.reason == "content_filter" ? AIError.declined : AIError.cutOff
+        }
+        let texts = contents.filter { $0.type == "output_text" }.compactMap(\.text)
+        guard !texts.isEmpty else { throw AIError.provider("OpenAI sent no translation.") }
+        guard let output = texts.reversed().lazy.compactMap({ try? JSONDecoder().decode(ClaudeTranslator.Output.self, from: Data($0.utf8)) }).first else {
+            throw AIError.provider("OpenAI's answer could not be read.")
+        }
+        return ClaudeTranslator.batch(from: output, request: request)
     }
 }

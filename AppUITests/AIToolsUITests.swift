@@ -14,6 +14,27 @@ final class AIToolsUITests: XCTestCase {
     }
 
     @MainActor
+    func testSettingsOfferLunaForTranslationAndSayWhatItNeeds() throws {
+        let app = launchApp()
+        app.typeKey(",", modifierFlags: .command)
+        let aiTab = app.toolbars.buttons["AI"]
+        XCTAssertTrue(aiTab.waitForExistence(timeout: 10), "No AI tab in Settings")
+        aiTab.click()
+
+        let picker = app.popUpButtons[AccessibilityID.AISettings.translationProvider]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10), "No translation provider picker")
+        picker.click()
+        let luna = app.menuItems["OpenAI GPT-6 Luna (cloud, cheapest)"]
+        XCTAssertTrue(luna.waitForExistence(timeout: 10), "Luna is not offered")
+        luna.click()
+
+        // Cloud is off in a fresh app, so the choice says what it needs first.
+        let problem = app.descendants(matching: .any)[AccessibilityID.AISettings.providerProblem]
+        XCTAssertTrue(problem.waitForExistence(timeout: 10))
+        waitForValue(of: problem, toEqual: "OpenAI GPT-6 Luna needs Allow cloud providers turned on.")
+    }
+
+    @MainActor
     func testTranscriptionFillsTheCueList() throws {
         let app = launchApp()
         _ = button(.stepForward, in: app)
