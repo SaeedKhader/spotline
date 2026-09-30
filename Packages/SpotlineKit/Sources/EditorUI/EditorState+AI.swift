@@ -632,7 +632,7 @@ extension EditorState {
             lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
             glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) } + briefTerms.map { ($0.term, $0.translation, $0.note) },
             maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast,
-            work: workTitle, notes: track.translatorNotes, script: script, style: aiSettings.translationStyle,
+            work: workTitle, notes: translatorNotesWithBrief, script: script, style: aiSettings.translationStyle,
             leavesOutWalla: aiSettings.leavesOutWalla, leavesOutFictionalLanguages: aiSettings.leavesOutFictionalLanguages
         )
         let fixUp = TranslationPipeline(preset: qcPreset)

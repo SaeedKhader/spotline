@@ -215,6 +215,10 @@ public enum AccessibilityID {
         public static func termGlossary(_ id: UUID) -> String { "\(term(id)).glossary" }
         public static func removeTerm(_ id: UUID) -> String { "\(term(id)).remove" }
         public static let addTerm = "brief.addTerm"
+        /// The plot, as editable text.
+        public static let plot = "brief.plot"
+        /// Scene by scene, who talks to whom, as editable text.
+        public static let scenes = "brief.scenes"
         public static let confirmButton = "brief.confirm"
         public static let notNowButton = "brief.notNow"
         /// In the review sidebar while the review waits for the brief.

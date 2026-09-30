@@ -59,5 +59,15 @@ struct EpisodeBriefTests {
         withBrief.brief = EpisodeBrief(people: [EpisodeBrief.Person(voices: ["speaker_0"], name: "Dunk")], targetLanguage: "ar", work: "Pilot")
         let decoded = try JSONDecoder().decode(SubtitleTrack.self, from: JSONEncoder().encode(withBrief))
         #expect(decoded.brief == withBrief.brief)
+        // Briefs saved before the plot and scenes have none.
+        let early = Data(#"{"people": [], "terms": [], "targetLanguage": "ar", "isConfirmed": true}"#.utf8)
+        let brief = try JSONDecoder().decode(EpisodeBrief.self, from: early)
+        #expect(brief.plot.isEmpty && brief.scenes.isEmpty && brief.storyNotes == nil)
+    }
+
+    @Test func thePlotAndScenesBecomeNotes() {
+        let brief = EpisodeBrief(plot: "Dunk rides to Ashford.", scenes: "0:00 Dunk talks to Egg.", targetLanguage: "ar")
+        #expect(brief.storyNotes == "Plot: Dunk rides to Ashford.\n\nScenes (time, who talks to whom):\n0:00 Dunk talks to Egg.")
+        #expect(EpisodeBrief(plot: " ", targetLanguage: "ar").storyNotes == nil)
     }
 }

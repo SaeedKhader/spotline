@@ -33,6 +33,9 @@ struct EpisodeBriefBuilderTests {
         let format = try #require((body["text"] as? [String: Any])?["format"] as? [String: Any])
         #expect(format["strict"] as? Bool == true)
         #expect((body["instructions"] as? String)?.contains("Arabic") == true)
+        #expect((body["instructions"] as? String)?.contains("who talks to whom") == true)
+        let schema = try #require(format["schema"] as? [String: Any])
+        #expect((schema["required"] as? [String]) == ["people", "plot", "scenes", "terms"])
         // Without a title there is nothing to look up.
         let untitled = OpenAIBriefBuilder.body(for: request(work: nil))
         #expect(untitled["tools"] == nil)
@@ -50,6 +53,12 @@ struct EpisodeBriefBuilderTests {
             "terms": [
               {"term": "Ashford Meadow", "heard_as": ["Ash for Meadow", "ashford meadow"], "translation": "مرج آشفورد", "note": "The tourney ground", "confidence": 0.8},
               {"term": " ", "heard_as": [], "translation": "", "note": "", "confidence": 0.5}
+            ],
+            "plot": " Dunk buries his knight and rides to Ashford. ",
+            "scenes": [
+              {"start_seconds": 0, "summary": "Dunk talks to his dead knight."},
+              {"start_seconds": 65.4, "summary": "Egg asks Dunk to take him on."},
+              {"start_seconds": 90, "summary": " "}
             ]}
             """
         let brief = try OpenAIBriefBuilder.brief(from: CloudProviderTests.openAIResponse(output), request: request())
@@ -65,6 +74,8 @@ struct EpisodeBriefBuilderTests {
         #expect(brief.terms.map(\.term) == ["Ashford Meadow"])
         #expect(brief.terms[0].heardAs == ["Ash for Meadow"])
         #expect(brief.terms[0].addsToGlossary)
+        #expect(brief.plot == "Dunk buries his knight and rides to Ashford.")
+        #expect(brief.scenes == "0:00 Dunk talks to his dead knight.\n1:05 Egg asks Dunk to take him on.")
     }
 
     @Test func aRefusedOrCutOffAnswerIsAnError() throws {

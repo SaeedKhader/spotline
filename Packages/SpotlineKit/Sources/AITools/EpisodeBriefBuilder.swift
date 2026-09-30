@@ -147,7 +147,11 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             "term": string, "heard_as": ["type": "array", "items": string], "translation": string, "note": string,
             "confidence": ["type": "number"],
         ])
-        return object(["people": ["type": "array", "items": person], "terms": ["type": "array", "items": term]])
+        let scene = object(["start_seconds": ["type": "number"], "summary": string])
+        return object([
+            "people": ["type": "array", "items": person], "terms": ["type": "array", "items": term], "plot": string,
+            "scenes": ["type": "array", "items": scene],
+        ])
     }
 
     static func instructions(for request: BriefRequest) -> String {
@@ -171,6 +175,12 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             In "terms", list the places, titles, houses, made-up words and other names that recur or that the transcript \
             may have misheard, with the show's spelling (term), how the transcript heard it when differently (heard_as), \
             its \(target) spelling (translation), a short note and your confidence. Leave out everyday words.
+
+            In "plot", say what happens in the episode in 3 to 5 plain sentences, using the names.
+
+            In "scenes", go scene by scene in time order: when it starts (start_seconds) and one line on who is \
+            there, who talks to whom and about what, e.g. "Egg asks Dunk to take him on as his squire." A new scene \
+            starts when the place or the people change. This tells the subtitlers who "you" is in each line.
 
             Keep every spelling the project already agreed (listed below the transcript). Do not invent people or terms.
             """
@@ -230,8 +240,15 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             var confidence: Double?
         }
 
+        struct Scene: Decodable {
+            var start_seconds: Double?
+            var summary: String?
+        }
+
         var people: [Person]?
         var terms: [Term]?
+        var plot: String?
+        var scenes: [Scene]?
     }
 
     static func brief(from data: Data, request: BriefRequest) throws -> EpisodeBrief {
@@ -275,7 +292,16 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
                 confidence: clamp(term.confidence)
             )
         }
-        var brief = EpisodeBrief(people: people, terms: terms, targetLanguage: request.targetLanguage, work: request.work)
+        let scenes = (output.scenes ?? []).compactMap { scene -> String? in
+            let summary = (scene.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !summary.isEmpty else { return nil }
+            let seconds = max(0, Int(scene.start_seconds ?? 0))
+            return String(format: "%d:%02d ", seconds / 60, seconds % 60) + summary
+        }
+        var brief = EpisodeBrief(
+            people: people, terms: terms, plot: (output.plot ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+            scenes: scenes.joined(separator: "\n"), targetLanguage: request.targetLanguage, work: request.work
+        )
         brief.addMissingVoices(request.voices)
         return brief
     }
@@ -303,6 +329,7 @@ public struct ScriptedBriefBuilder: EpisodeBriefBuilder {
         }
         var brief = EpisodeBrief(
             people: people, terms: [EpisodeBrief.Term(term: "Citadel", heardAs: ["Citadelle"], translation: "القلعة", note: "A place", confidence: 0.9)],
+            plot: "Rick wakes Morty to go on an adventure.", scenes: "0:00 Rick greets Morty, who says he is fine.",
             targetLanguage: request.targetLanguage, work: request.work
         )
         brief.addMissingVoices(voices)

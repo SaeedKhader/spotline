@@ -24,6 +24,10 @@ final class EpisodeBriefUITests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 5), "The brief's person is missing")
         XCTAssertTrue(sheet.textFields.matching(NSPredicate(format: "value == %@", "ريك")).firstMatch.exists, "The Arabic spelling is missing")
         XCTAssertTrue(sheet.textFields.matching(NSPredicate(format: "value == %@", "Citadel")).firstMatch.exists, "The term is missing")
+        let plot = sheet.descendants(matching: .any)[AccessibilityID.Brief.plot]
+        XCTAssertEqual(plot.value as? String, "Rick wakes Morty to go on an adventure.")
+        let scenes = sheet.descendants(matching: .any)[AccessibilityID.Brief.scenes]
+        XCTAssertEqual(scenes.value as? String, "0:00 Rick greets Morty, who says he is fine.")
 
         // Edit, then confirm: the dialog goes and the review shows.
         name.click()

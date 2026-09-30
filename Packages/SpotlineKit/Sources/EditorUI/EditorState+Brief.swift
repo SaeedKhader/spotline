@@ -17,6 +17,13 @@ extension EditorState {
         isBuildingBrief || track.brief.map { !$0.isConfirmed } == true
     }
 
+    /// The user's notes for the translator, then the confirmed brief's plot and scenes.
+    var translatorNotesWithBrief: String? {
+        let story = track.brief?.isConfirmed == true ? track.brief?.storyNotes : nil
+        let parts = [track.translatorNotes?.trimmingCharacters(in: .whitespacesAndNewlines), story].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
     /// Opens the brief, or builds one when there is none yet.
     func showEpisodeBrief() {
         if track.brief != nil {

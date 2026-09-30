@@ -8,7 +8,8 @@ import SwiftUI
 /// by itself once it is built after transcription). One row a person: the voices,
 /// their first line to play, name, gender and the target language's spelling, and how
 /// sure the brief is. Two voices that are one person merge. Below, the show's names
-/// and terms, each ticked to go into the glossary. The review waits for Confirm.
+/// and terms, each ticked to go into the glossary, then the plot and, scene by scene,
+/// who talks to whom, as text to edit. The review waits for Confirm.
 struct EpisodeBriefSheet: View {
     let editor: EditorState
     @State private var draft: EpisodeBrief?
@@ -21,11 +22,12 @@ struct EpisodeBriefSheet: View {
                     VStack(alignment: .leading, spacing: 16) {
                         peopleSection(draft)
                         termsSection(draft)
+                        storySection
                     }
                     .padding(.vertical, 2)
                 }
                 .scrollBounceBehavior(.basedOnSize)
-                .frame(minHeight: 200, maxHeight: 460)
+                .frame(minHeight: 200, maxHeight: 520)
             }
             footer
         }
@@ -120,6 +122,34 @@ struct EpisodeBriefSheet: View {
             Button("Add Term") { draft?.terms.append(EpisodeBrief.Term(term: "", addsToGlossary: true)) }
                 .controlSize(.small)
                 .accessibilityIdentifier(AccessibilityID.Brief.addTerm)
+        }
+    }
+
+    // MARK: Plot and scenes
+
+    private var storySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Plot").font(.subheadline.weight(.semibold))
+            TextEditor(text: Binding(get: { draft?.plot ?? "" }, set: { draft?.plot = $0 }))
+                .font(.body)
+                .frame(height: 64)
+                .scrollContentBackground(.hidden)
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary))
+                .accessibilityLabel("Plot")
+                .accessibilityIdentifier(AccessibilityID.Brief.plot)
+            Text("Scenes").font(.subheadline.weight(.semibold))
+            Text("Who talks to whom in each scene, one line each. The translator uses this to tell who “you” is.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: Binding(get: { draft?.scenes ?? "" }, set: { draft?.scenes = $0 }))
+                .font(.body)
+                .frame(height: 140)
+                .scrollContentBackground(.hidden)
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary))
+                .accessibilityLabel("Scenes")
+                .accessibilityIdentifier(AccessibilityID.Brief.scenes)
         }
     }
 

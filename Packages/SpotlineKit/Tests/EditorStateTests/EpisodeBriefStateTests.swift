@@ -149,6 +149,8 @@ struct EpisodeBriefStateTests {
         let request = try #require(recorder.requests.first)
         #expect(request.glossary.map(\.source).contains("Citadel"))
         #expect(request.cast.first?.name == "Rick" && request.cast.first?.isConfirmed == true)
+        #expect(request.notes?.contains("Plot: Rick wakes Morty to go on an adventure.") == true)
+        #expect(request.notes?.contains("0:00 Rick greets Morty") == true)
     }
 }
 
