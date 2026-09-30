@@ -34,6 +34,7 @@ struct EpisodeBriefBuilderTests {
         #expect(format["strict"] as? Bool == true)
         #expect((body["instructions"] as? String)?.contains("Arabic") == true)
         #expect((body["instructions"] as? String)?.contains("who talks to whom") == true)
+        #expect((body["instructions"] as? String)?.contains("the scenes and every note in English") == true)
         let schema = try #require(format["schema"] as? [String: Any])
         #expect((schema["required"] as? [String]) == ["people", "plot", "scenes", "terms"])
         // Without a title there is nothing to look up.

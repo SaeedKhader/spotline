@@ -182,6 +182,9 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             there, who talks to whom and about what, e.g. "Egg asks Dunk to take him on as his squire." A new scene \
             starts when the place or the people change. This tells the subtitlers who "you" is in each line.
 
+            Write the plot, the scenes and every note in English, whatever the languages of the transcript and \
+            the subtitles: only "translation" is in \(target).
+
             Keep every spelling the project already agreed (listed below the transcript). Do not invent people or terms.
             """
         if request.work != nil {
