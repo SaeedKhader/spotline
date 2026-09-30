@@ -11,7 +11,7 @@ public struct AITaskStatus: Equatable, Sendable {
     public var title: String
     /// The provider's name without where it runs: "ElevenLabs Scribe", "Claude".
     public var provider: String
-    /// The steps in order: "Preparing audio", "Uploading", "Transcribing", "Building cues".
+    /// The steps in order: "Preparing audio", "Compressing audio", "Uploading", "Transcribing".
     public var stages: [String]
     public var stage = 0
     /// What is happening now: "Uploading 6.1 of 18 MB", "Claude · 120 of 640 lines".
@@ -20,6 +20,8 @@ public struct AITaskStatus: Equatable, Sendable {
     public var fraction: Double?
     /// Since when the provider has been working with nothing to measure it by.
     public var waitingSince: Date?
+    /// How long that wait took before, for this much audio (timed on earlier runs); nil the first time.
+    public var usualWait: TimeInterval?
     /// The cues of the lines being translated now.
     public var inFlight: Set<Cue.ID> = []
     /// When the lines should all be done, from the rate measured over the batches
@@ -38,6 +40,7 @@ public struct AITaskStatus: Equatable, Sendable {
     public static func == (lhs: AITaskStatus, rhs: AITaskStatus) -> Bool {
         lhs.title == rhs.title && lhs.provider == rhs.provider && lhs.stages == rhs.stages && lhs.stage == rhs.stage
             && lhs.detail == rhs.detail && lhs.fraction == rhs.fraction && lhs.waitingSince == rhs.waitingSince
+            && lhs.usualWait == rhs.usualWait
             && lhs.inFlight == rhs.inFlight && lhs.estimatedEnd == rhs.estimatedEnd
     }
 
@@ -51,6 +54,31 @@ public struct AITaskStatus: Equatable, Sendable {
     public var overallFraction: Double {
         guard !stages.isEmpty else { return 0 }
         return (Double(stage) + (fraction ?? 0)) / Double(stages.count)
+    }
+
+    /// "Step 4 of 5", or nil for a task of one step.
+    public var step: String? {
+        stages.count > 1 ? "Step \(stage + 1) of \(stages.count)" : nil
+    }
+
+    /// How far the stage has got at `now`: measured, else the time waited against
+    /// the usual wait (never full while still waiting); nil when neither is known,
+    /// or the wait has run past the usual one.
+    public func fraction(at now: Date) -> Double? {
+        if let fraction { return fraction }
+        guard let since = waitingSince, let usualWait, usualWait > 0 else { return nil }
+        let value = now.timeIntervalSince(since) / usualWait
+        return value < 0.95 ? max(value, 0) : nil
+    }
+
+    /// "0:09 of about 1:20", "1:35, longer than usual", "0:09".
+    public func waited(at now: Date) -> String? {
+        guard let since = waitingSince else { return nil }
+        let elapsed = Self.elapsed(since: since, now: now)
+        guard let usualWait else { return elapsed }
+        return now.timeIntervalSince(since) <= usualWait
+            ? "\(elapsed) of about \(Self.elapsed(since: since, now: since.addingTimeInterval(usualWait)))"
+            : "\(elapsed), longer than usual"
     }
 
     /// Moves to the stage named `name` (a stage that isn't listed leaves it where it is).
@@ -68,11 +96,11 @@ public struct AITaskStatus: Equatable, Sendable {
         switch progress {
         case .fraction(let value):
             enter(title == "Translation" ? "Translating" : "Transcribing", detail: "\(provider) · \(Self.percent(value))", fraction: value)
-        case .encoding:
-            enter("Uploading", detail: "Compressing audio")
+        case .encoding(let value):
+            enter("Compressing audio", detail: "Compressing audio · \(Self.percent(value))", fraction: value)
         case .uploading(let sent, let total):
             let value = total > 0 ? Double(sent) / Double(total) : nil
-            enter("Uploading", detail: "Uploading \(Self.megabytes(sent, of: total))", fraction: value)
+            enter("Uploading", detail: "Uploading \(Self.megabytes(sent, of: total))" + (value.map { " · \(Self.percent($0))" } ?? ""), fraction: value)
         case .waiting:
             enter("Transcribing", detail: "\(provider) is transcribing")
             if waitingSince == nil { waitingSince = now }

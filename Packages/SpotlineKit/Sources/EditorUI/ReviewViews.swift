@@ -380,13 +380,13 @@ extension Gender {
     }
 }
 
-/// A running AI tool: "Transcription · ElevenLabs Scribe is transcribing · 1:12"
-/// over a bar with a segment per stage.
+/// A running AI tool: "Transcription · Step 4 of 4: ElevenLabs Scribe is
+/// transcribing · 0:09 of about 1:20" over a bar with a segment per step.
 struct AITaskProgress: View {
     let task: AITaskStatus
 
     var body: some View {
-        // Elapsed time and time left move on their own; everything else changes with the task.
+        // Waited time and time left move on their own; everything else changes with the task.
         SwiftUI.TimelineView(.periodic(from: .now, by: 1)) { context in
             let text = details(now: context.date)
             VStack(alignment: .leading, spacing: 4) {
@@ -398,8 +398,8 @@ struct AITaskProgress: View {
                 }
                 .lineLimit(1)
                 .truncationMode(.middle)
-                StageBar(stages: task.stages.count, stage: task.stage, fraction: task.fraction)
-                    .frame(maxWidth: 260)
+                StageBar(stages: task.stages.count, stage: task.stage, fraction: task.fraction(at: context.date))
+                    .frame(maxWidth: 280)
             }
             .help(task.stages.enumerated().map { ($0.offset == task.stage ? "▸ " : "   ") + $0.element }.joined(separator: "\n"))
             .accessibilityElement(children: .ignore)
@@ -409,49 +409,62 @@ struct AITaskProgress: View {
         }
     }
 
-    /// "Claude · 120 of 640 lines · about 4 min left".
+    /// "Step 4 of 5: ElevenLabs Scribe is transcribing · 0:09 of about 1:20", "Claude · 120 of 640 lines · about 4 min left".
     private func details(now: Date) -> String {
-        var parts = [task.detail]
-        if let since = task.waitingSince { parts.append(AITaskStatus.elapsed(since: since, now: now)) }
+        var parts = [task.step.map { "\($0): \(task.detail)" } ?? task.detail]
+        if let waited = task.waited(at: now) { parts.append(waited) }
         if let end = task.estimatedEnd, let left = AITaskStatus.timeLeft(until: end, now: now) { parts.append(left) }
         return parts.joined(separator: " · ")
     }
 }
 
-/// A thin bar with a segment per stage: stages done are full, the current one
-/// fills as far as it is measured, or pulses when nothing measures it.
+/// A bar with a segment per step: steps done are full, later ones empty, and the
+/// current one fills as far as it is measured (or as long as it usually takes).
+/// When nothing measures it, a shimmer runs through it left to right.
 private struct StageBar: View {
     let stages: Int
     let stage: Int
     let fraction: Double?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
             ForEach(0..<max(stages, 1), id: \.self) { index in
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.aiTint.opacity(0.18))
-                        if index < stage {
-                            Capsule().fill(Color.aiTint)
-                        } else if index == stage {
+                        Capsule().fill(index < stage ? Color.aiTint : index == stage ? Color.aiTint.opacity(0.2) : Color.secondary.opacity(0.25))
+                        if index == stage {
                             if let fraction {
                                 Capsule().fill(Color.aiTint)
-                                    .frame(width: max(geometry.size.width * min(max(fraction, 0), 1), 4))
+                                    .frame(width: max(geometry.size.width * min(max(fraction, 0), 1), 5))
                                     .animation(.easeOut(duration: 0.3), value: fraction)
                             } else {
-                                Capsule().fill(Color.aiTint.opacity(pulse ? 0.75 : 0.35))
+                                StageShimmer()
                             }
                         }
                     }
                 }
+                .frame(height: 5)
             }
         }
-        .frame(height: 4)
+    }
+}
+
+/// A band of the AI tint sweeping left to right, over and over; still with Reduce Motion.
+private struct StageShimmer: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geometry in
+            let band = max(geometry.size.width * 0.45, 12)
+            LinearGradient(colors: [Color.aiTint.opacity(0), Color.aiTint, Color.aiTint.opacity(0)], startPoint: .leading, endPoint: .trailing)
+                .frame(width: band)
+                .offset(x: -band + (geometry.size.width + band) * phase)
+        }
+        .clipShape(Capsule())
         .onAppear {
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
+            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { phase = 1 }
         }
     }
 }

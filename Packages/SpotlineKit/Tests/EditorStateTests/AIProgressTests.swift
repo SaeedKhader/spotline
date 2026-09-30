@@ -40,33 +40,48 @@ struct AIProgressTests {
 
     @Test func anUploadIsItsOwnStageThenTheWaitIsTimedNotGuessed() {
         var task = AITaskStatus(
-            title: "Transcription", provider: "ElevenLabs Scribe (cloud)", stages: ["Preparing audio", "Uploading", "Transcribing", "Building cues"]
+            title: "Transcription", provider: "ElevenLabs Scribe (cloud)",
+            stages: ["Preparing audio", "Compressing audio", "Uploading", "Transcribing"]
         )
         #expect(task.provider == "ElevenLabs Scribe")
         #expect(task.detail == "Preparing audio")
-        task.update(with: .encoding, now: start)
-        #expect(task.stage == 1 && task.detail == "Compressing audio" && task.fraction == nil)
+        // Compressing is its own stage, measured from empty.
+        task.update(with: .encoding(0), now: start)
+        #expect(task.stage == 1 && task.detail == "Compressing audio · 0%" && task.fraction == 0)
+        task.update(with: .encoding(0.4), now: start)
+        #expect(task.detail == "Compressing audio · 40%" && task.fraction == 0.4)
         task.update(with: .uploading(sent: 6_100_000, total: 18_000_000), now: start)
-        #expect(task.detail == "Uploading 6.1 of 18 MB")
+        #expect(task.stage == 2)
+        #expect(task.detail == "Uploading 6.1 of 18 MB · 34%")
         #expect(abs((task.fraction ?? 0) - 6.1 / 18) < 0.001)
         task.update(with: .waiting, now: start)
-        #expect(task.stage == 2 && task.detail == "ElevenLabs Scribe is transcribing")
+        #expect(task.stage == 3 && task.detail == "ElevenLabs Scribe is transcribing")
         #expect(task.fraction == nil, "Nothing measures the provider's work: no percentage")
         #expect(task.waitingSince == start)
         task.update(with: .waiting, now: start.addingTimeInterval(30))
         #expect(task.waitingSince == start, "The wait is timed from when it began")
+        #expect(task.step == "Step 4 of 4")
+        #expect(task.fraction(at: start.addingTimeInterval(30)) == nil, "The first time, nothing says how long it takes")
+        #expect(task.waited(at: start.addingTimeInterval(9)) == "0:09")
+        // Once timed before, the wait is measured against how long it usually takes, never shown full.
+        task.usualWait = 80
+        #expect(task.fraction(at: start.addingTimeInterval(40)) == 0.5)
+        #expect(task.waited(at: start.addingTimeInterval(9)) == "0:09 of about 1:20")
+        #expect(task.fraction(at: start.addingTimeInterval(79)) == nil)
+        #expect(task.waited(at: start.addingTimeInterval(95)) == "1:35, longer than usual")
+        task.usualWait = nil
         #expect(AITaskStatus.elapsed(since: start, now: start.addingTimeInterval(72)) == "1:12")
         #expect(AITaskStatus.elapsed(since: start, now: start.addingTimeInterval(3725)) == "1:02:05")
-        task.enter("Building cues")
-        #expect(task.stage == 3 && task.waitingSince == nil)
         #expect(task.overallFraction == 0.75)
+        task.enter("Uploading")
+        #expect(task.stage == 2 && task.waitingSince == nil)
     }
 
     @Test func partsAndOnDeviceWorkAreCounted() {
-        var task = AITaskStatus(title: "Transcription", provider: "OpenAI Whisper (cloud)", stages: ["Preparing audio", "Transcribing", "Building cues"])
+        var task = AITaskStatus(title: "Transcription", provider: "OpenAI Whisper (cloud)", stages: ["Preparing audio", "Transcribing"])
         task.update(with: .parts(done: 3, total: 12), now: start)
         #expect(task.stage == 1 && task.detail == "OpenAI Whisper · 3 of 12 parts" && task.fraction == 0.25)
-        var local = AITaskStatus(title: "Transcription", provider: "Apple Speech (on this Mac)", stages: ["Preparing audio", "Transcribing", "Building cues"])
+        var local = AITaskStatus(title: "Transcription", provider: "Apple Speech (on this Mac)", stages: ["Preparing audio", "Transcribing"])
         local.update(with: .fraction(0.4), now: start)
         #expect(local.detail == "Apple Speech · 40%")
     }
@@ -105,11 +120,12 @@ struct AIProgressTests {
         var seen: [AITaskStatus?] = []
         editor.onAITaskChange = { seen.append($0) }
         #expect(editor.perform(.transcribe))
-        #expect(editor.aiTask?.stages == ["Preparing audio", "Uploading", "Transcribing", "Building cues"])
+        #expect(editor.aiTask?.stages == ["Preparing audio", "Compressing audio", "Uploading", "Transcribing"])
         await waitUntil { editor.aiTask?.waitingSince != nil }
         #expect(editor.aiTask?.detail == "Uploading is transcribing")
-        #expect(editor.aiTask?.stage == 2)
-        #expect(seen.contains { $0?.detail == "Uploading 1.0 of 2.0 MB" }, "The app hears each step, for the Dock")
+        #expect(editor.aiTask?.stage == 3)
+        #expect(seen.contains { $0?.detail == "Compressing audio · 50%" })
+        #expect(seen.contains { $0?.detail == "Uploading 1.0 of 2.0 MB · 50%" }, "The app hears each step, for the Dock")
         release.continuation.yield()
         await waitUntil { editor.aiTask == nil }
         #expect(seen.last == .some(nil))
@@ -117,12 +133,37 @@ struct AIProgressTests {
         #expect(editor.aiSummary?.followUp == nil)
     }
 
+    @Test func theWaitIsTimedForNextTime() async {
+        let editor = makeEditor()
+        let release = AsyncStream<Void>.makeStream()
+        editor.aiProviders = AIProviderFactory(
+            transcriber: { _ in UploadingTranscriber(words: ScriptedTranscriber.fixture.words, gate: release.stream) },
+            translator: { _ in ScriptedTranslator() }
+        )
+        editor.aiSettings.transcription = .elevenLabsScribe
+        editor.perform(.transcribe)
+        await waitUntil { editor.aiTask?.waitingSince != nil }
+        #expect(editor.aiTask?.usualWait == nil)
+        try? await Task.sleep(for: .milliseconds(100))
+        release.continuation.yield()
+        await waitUntil { editor.aiTask == nil }
+        // 10 seconds of audio: the wait per second of audio is kept by provider.
+        let rate = try! #require(editor.waitRates[AISettings.TranscriptionProvider.elevenLabsScribe.rawValue])
+        #expect(rate > 0.005 && rate < 0.1)
+        // A new run of the same audio (the stored words are cleared) expects about as long.
+        editor.storedTranscripts = []
+        editor.perform(.transcribe)
+        await waitUntil { editor.aiTask?.usualWait != nil }
+        #expect(abs((editor.aiTask?.usualWait ?? 0) - rate * 10) < 0.001)
+        editor.perform(.cancelAITask)
+    }
+
     @Test func aSavedTranscriptIsSaidToBeUsed() async {
         let editor = makeEditor()
         editor.perform(.transcribe)
         await waitUntil { editor.aiTask == nil }
         #expect(editor.perform(.transcribe))
-        #expect(editor.aiTask?.stages == ["Building cues"])
+        #expect(editor.aiTask?.stages == ["Transcribing"])
         #expect(editor.aiTask?.detail == "Using the saved transcript")
     }
 
@@ -175,10 +216,13 @@ private struct UploadingTranscriber: Transcriber {
         _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
-        progress(.encoding)
+        progress(.encoding(0))
+        progress(.encoding(0.5))
+        progress(.encoding(1))
         progress(.uploading(sent: 1_000_000, total: 2_000_000))
         progress(.waiting)
         for await _ in gate { break }
+        try Task.checkCancellation()
         found(words)
         return words
     }
