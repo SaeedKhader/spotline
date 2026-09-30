@@ -25,6 +25,8 @@ struct CueEditorList: View {
     let editor: EditorState
     @FocusState private var focusedText: Cue.ID?
     @FocusState private var isListFocused: Bool
+    /// The rows' height, so the space under them can fill the rest of the list.
+    @State private var rowsHeight: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +56,7 @@ struct CueEditorList: View {
         )
         return GeometryReader { geometry in ScrollViewReader { proxy in
             ScrollView {
+                VStack(spacing: 0) {
                 LazyVStack(spacing: 0) {
                     ForEach(listItems) { item in
                         Group {
@@ -83,13 +86,16 @@ struct CueEditorList: View {
                         Divider()
                     }
                 }
-                // The rows fill at least the visible height, so a click below the last
-                // row (no row takes it) lands here: it leaves the text and deselects.
-                .frame(minHeight: geometry.size.height, alignment: .top)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    editor.perform(.deselectCue)
-                    isListFocused = true
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
+                // The space under the last row: a click there leaves the text and deselects.
+                Color.clear
+                    .frame(height: max(geometry.size.height - rowsHeight, 80))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editor.perform(.deselectCue)
+                        isListFocused = true
+                    }
+                    .accessibilityHidden(true)
                 }
             }
             .focusable()
@@ -297,7 +303,8 @@ private struct CueRow: View {
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
                     focusedText.wrappedValue = nil
-                    leaveText()
+                    // After this key press, so the list does not take the same Esc as a second one.
+                    Task { @MainActor in leaveText() }
                     return .handled
                 }
                 .environment(\.layoutDirection, directions.target.layoutDirection)

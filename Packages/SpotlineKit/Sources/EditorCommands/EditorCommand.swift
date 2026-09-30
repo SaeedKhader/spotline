@@ -105,10 +105,10 @@ extension EditorCommand {
         id: "cue.setOutAtPlayhead", title: "Set Out at Playhead", category: .cue,
         defaultShortcut: KeyShortcut(.character("o"))
     )
-    /// Esc outside the text: no cue selected (the first Esc leaves the text).
+    /// No cue selected. In the cue list, Esc runs it once the text is left (the first Esc leaves
+    /// the text); it has no menu shortcut, which would take that first Esc from the text.
     public static let deselectCue = EditorCommand(
-        id: "navigation.deselectCue", title: "Deselect Cue", category: .navigation,
-        defaultShortcut: KeyShortcut(.escape)
+        id: "navigation.deselectCue", title: "Deselect Cue", category: .navigation
     )
     public static let previousCue = EditorCommand(
         id: "navigation.previousCue", title: "Select Previous Cue", category: .navigation,
