@@ -195,3 +195,43 @@ struct ProposedChangeTests {
         #expect(CueSegmenter.voices(of: [TranscribedWord(text: "Hi", start: .zero, end: .zero)]) == nil)
     }
 }
+
+struct TranscriptCleanupTests {
+    let rate = FrameRate.fps25
+
+    func words(_ list: [(String, Double, Double)]) -> [TranscribedWord] {
+        list.map { TranscribedWord(text: $0.0, start: MediaTime(seconds: $0.1, timescale: 1000), end: MediaTime(seconds: $0.2, timescale: 1000)) }
+    }
+
+    func texts(_ list: [(String, Double, Double)]) -> [String] {
+        TranscriptionPipeline(preset: .netflix, frameRate: rate).cues(from: words(list)).map(\.text)
+    }
+
+    @Test func hesitationsGo() {
+        #expect(texts([("So,", 0, 0.3), ("um,", 0.35, 0.6), ("I", 0.7, 0.8), ("think", 0.85, 1.1), ("so.", 1.15, 1.4)]) == ["So, I think so."])
+        #expect(texts([("I", 0, 0.2), ("was,", 0.25, 0.5), ("uh.", 0.6, 0.9)]) == ["I was."])
+    }
+
+    @Test func stuttersGoButRepeatsOnPurposeStay() {
+        #expect(texts([("I,", 0, 0.2), ("I", 0.3, 0.4), ("don't", 0.45, 0.7), ("know.", 0.75, 1.0)]) == ["I don't know."])
+        #expect(texts([("D-", 0, 0.2), ("Dunk.", 0.3, 0.7)]) == ["Dunk."])
+        #expect(texts([("W-what?", 0, 0.5)]) == ["What?"])
+        #expect(texts([("No,", 0, 0.2), ("no,", 0.3, 0.5), ("no.", 0.6, 0.9)]) == ["No, no, no."])
+    }
+
+    @Test func cuesOfOnlyAnInterjectionGo() {
+        #expect(texts([("Hmm.", 0, 0.5), ("Fine.", 3, 3.5), ("Oh.", 6, 6.3)]) == ["Fine."])
+        #expect(texts([("Oh,", 0, 0.2), ("I", 0.3, 0.4), ("see.", 0.45, 0.8)]) == ["Oh, I see."])
+    }
+
+    @Test func aWordStretchedOverMusicIsShortened() {
+        let cues = TranscriptionPipeline(preset: .netflix, frameRate: rate).cues(from: words([("It's", 10, 17)]))
+        #expect(cues.count == 1)
+        #expect(cues[0].duration.seconds < 2)
+    }
+
+    @Test func shortCuesStayUpLongerWhenThereIsRoom() {
+        let cues = TranscriptionPipeline(preset: .netflix, frameRate: rate).cues(from: words([("Yes.", 0, 0.3), ("Go.", 5, 5.3)]))
+        #expect(cues[0].duration.seconds >= 1.2)
+    }
+}

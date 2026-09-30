@@ -24,6 +24,8 @@ struct AIStateTests {
             return PreparedAudio(source: .mix, audioStreamIndex: 0, duration: MediaTime(value: 10, timescale: 1), chunks: [])
         }
         editor.reportError = { title, error in Issue.record("\(title) \(error)") }
+        // These one-second test cues would all be joined; joining has its own tests.
+        editor.aiSettings.joinsLinesAfterTranslating = false
         return editor
     }
 
@@ -266,6 +268,34 @@ struct AIStateTests {
         #expect(editor.voices(for: editor.track.cues[0]) == ["speaker_0"], "The source's voices go to the translator")
         await finish(editor)
         #expect(editor.track.cues.map(\.text) == ["[ar] Where are you going? ♀", "[ar] Home."])
+    }
+
+    @Test func translationJoinsTheLinesItWrote() async {
+        func line(_ text: String, _ start: Int64, _ end: Int64) -> Cue {
+            Cue(start: MediaTime(value: start, timescale: 1), end: MediaTime(value: end, timescale: 1), text: text)
+        }
+        let editor = makeEditor(cues: [line("I'd leave my sword, but it", 1, 3), line("would only rust.", 3, 5), line("Farewell.", 7, 8)])
+        editor.aiSettings.joinsLinesAfterTranslating = true
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.track.cues.map { $0.text.replacing("\n", with: " ") } == ["[ar] I'd leave my sword, but it [ar] would only rust.", "[ar] Farewell."])
+        let joined = editor.track.cues[0]
+        #expect(joined.end == MediaTime(value: 5, timescale: 1))
+        #expect(joined.sourceCueIDs == editor.sourceTrack?.cues.prefix(2).map(\.id))
+        // It reads both source lines as its source.
+        #expect(editor.sourceCues[joined.id]?.text == "I'd leave my sword, but it\nwould only rust.")
+        // One undo step brings the two lines back.
+        editor.perform(.undo)
+        #expect(editor.track.cues.count == 3)
+    }
+
+    @Test func joinShortLinesIsReviewed() {
+        let editor = makeEditor(cues: [cue("Hello.", at: 0), cue("Are you the stable boy?", at: 1), cue("Yes.", at: 5)])
+        #expect(editor.perform(.joinShortLines))
+        let review = try? #require(editor.pendingReview)
+        #expect(review?.changes.count == 2)
+        editor.perform(.acceptAllChanges)
+        #expect(editor.track.cues.map(\.text) == ["Hello. Are you the stable boy?", "Yes."])
     }
 
     @Test func cuesShowWhileTranscribingAndEditsAreKept() async throws {

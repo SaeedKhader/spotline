@@ -17,9 +17,10 @@ public struct TranscriptionPipeline: Sendable {
         self.wordStartLead = wordStartLead
     }
 
-    /// Cues for the words, in order. Words must be in time order.
+    /// Cues for the words, in order. Words must be in time order. Hesitations,
+    /// stutters and cues of nothing but an interjection are left out (`TranscriptCleanup`).
     public func cues(from words: [TranscribedWord]) -> [Cue] {
-        segmenter.cues(from: corrected(words))
+        segmenter.cues(from: TranscriptCleanup.words(corrected(words))).filter { !TranscriptCleanup.isOnlyInterjections($0.text) }
     }
 
     func corrected(_ words: [TranscribedWord]) -> [TranscribedWord] {

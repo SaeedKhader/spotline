@@ -40,6 +40,9 @@ public struct CueSegmenter: Sendable {
     public var chainSeconds = 0.5
     /// How far after the first word a cue may start to land on a shot change.
     public var maxLateStartSeconds = 0.15
+    /// Cues stay up at least this long when the next cue leaves room: shorter
+    /// ones flash by (the professional subtitles of the akotsk review never went under 1.38 s).
+    public var comfortableSeconds = 1.2
 
     public init(preset: QCPreset, frameRate: FrameRate, shotChanges: [Int64] = []) {
         self.preset = preset
@@ -218,6 +221,7 @@ public struct CueSegmenter: Sendable {
         let linger = Int64((lingerSeconds * rate).rounded())
         let chain = Int64((chainSeconds * rate).rounded())
         let minimum = Int64((minDuration * rate).rounded(.up))
+        let comfortable = Int64((comfortableSeconds * rate).rounded(.up))
         let maximum = Int64((maxDuration * rate).rounded(.down))
         let snap = preset.shotChangeFrames ?? 0
         let lateStart = Int64((maxLateStartSeconds * rate).rounded())
@@ -231,7 +235,7 @@ public struct CueSegmenter: Sendable {
                shot < end {
                 start = shot
             }
-            end = max(end, start + minimum)
+            end = max(end, start + minimum, start + comfortable)
             if let speed = preset.maxCharactersPerSecond, speed > 0 {
                 let characters = cues[index].text.filter { !$0.isNewline }.count
                 end = max(end, start + Int64((Double(characters) / speed * rate).rounded(.up)))
