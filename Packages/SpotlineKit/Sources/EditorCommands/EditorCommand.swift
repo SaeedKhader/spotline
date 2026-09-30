@@ -130,6 +130,11 @@ extension EditorCommand {
     public static let fixOverlaps = EditorCommand(
         id: "cue.fixOverlaps", title: "Fix Overlaps and Short Gaps", category: .review
     )
+    /// Joins short cues and sentences split over two cues, as a subtitler would
+    /// (`CueJoiner`), proposed as changes to review.
+    public static let joinShortLines = EditorCommand(
+        id: "cue.joinShortLines", title: "Join Short Lines", category: .review
+    )
     public static let previousIssue = EditorCommand(
         id: "navigation.previousIssue", title: "Previous Cue with Issues", category: .review,
         defaultShortcut: KeyShortcut(.upArrow, modifiers: [.command, .option])
@@ -232,6 +237,11 @@ extension EditorCommand {
         id: "translation.fillExactMatches", title: "Fill Untranslated Cues from Memory", category: .translation
     )
     /// Stores every translated cue with its source in the translation memory.
+    /// Adds how the translation spells each person's name to the glossary, so the
+    /// next episodes spell them the same.
+    public static let addNamesToGlossary = EditorCommand(
+        id: "translation.addNamesToGlossary", title: "Add Names to Glossary", category: .translation
+    )
     public static let addTranslationsToMemory = EditorCommand(
         id: "translation.addToMemory", title: "Add All Translations to Memory", category: .translation
     )
@@ -264,6 +274,15 @@ extension EditorCommand {
     /// Keeps the recommended variant of every line not yet decided, as one edit.
     public static let acceptRemainingChoices = EditorCommand(
         id: "ai.acceptRemainingChoices", title: "Accept Remaining Choices", category: .ai
+    )
+    /// Shows only the cues with words the transcriber was unsure of, least sure first, or every cue again.
+    public static let reviewWords = EditorCommand(
+        id: "ai.reviewWords", title: "Review Words to Check", category: .ai,
+        defaultShortcut: KeyShortcut(.character("w"), modifiers: [.command, .control])
+    )
+    /// Keeps every word still to check as it is, as one edit.
+    public static let confirmRemainingWords = EditorCommand(
+        id: "ai.confirmRemainingWords", title: "Confirm Remaining Words", category: .ai
     )
     public static let maskProfanity = EditorCommand(id: "ai.maskProfanity", title: "Mask Profanity", category: .ai)
     public static let removeHearingImpaired = EditorCommand(id: "ai.removeHearingImpaired", title: "Remove Hearing-Impaired Text", category: .ai)
@@ -300,13 +319,13 @@ extension EditorCommand {
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
         previousCue, nextCue, previousShotChange, nextShotChange,
-        toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps,
+        toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps, joinShortLines,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
         toggleMilliseconds,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
-        addTranslationsToMemory, showGlossary, importGlossary,
-        transcribe, translateWithAI, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
+        transcribe, translateWithAI, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

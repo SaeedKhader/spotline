@@ -80,6 +80,10 @@ extension EditorState {
         case EditorCommand.translateWithAI.id:
             // Outside translation mode, the cues being edited become the source.
             return idle && (isTranslating ? !untranslatedCues.isEmpty : track.cues.contains { !$0.text.isEmpty })
+        case EditorCommand.reviewWords.id:
+            return isReviewingWords || !cuesToCheck.isEmpty
+        case EditorCommand.confirmRemainingWords.id:
+            return !cuesToCheck.isEmpty
         case EditorCommand.reviewChoices.id:
             return isReviewingChoices || track.cues.contains { $0.flag?.isResolved == false }
         case EditorCommand.acceptRemainingChoices.id:
@@ -103,11 +107,10 @@ extension EditorState {
         case EditorCommand.translateWithAI.id:
             // Words the transcription was unsure of would be translated wrong too: offer to check them first.
             let unsure = cuesWithUnsureSource
-            if let first = unsure.first {
+            if !unsure.isEmpty {
                 switch confirmTranslatingUnsureCues(unsure.count) {
                 case .review:
-                    if !isIssuesPanelShown { perform(.toggleIssuesPanel) }
-                    select(first.id)
+                    if !isReviewingWords { toggleWordReview() }
                     return true
                 case .cancel:
                     return false
@@ -117,6 +120,8 @@ extension EditorState {
             }
             if !isTranslating { useCuesAsSource() }
             translateUntranslatedCues()
+        case EditorCommand.reviewWords.id: toggleWordReview()
+        case EditorCommand.confirmRemainingWords.id: confirmRemainingWords()
         case EditorCommand.reviewChoices.id: toggleChoiceReview()
         case EditorCommand.acceptRemainingChoices.id: acceptRemainingChoices()
         case EditorCommand.maskProfanity.id: runCleanup(.maskProfanity)
@@ -194,6 +199,69 @@ extension EditorState {
         return sourceCues[cue.id] != nil ? "translation" : "transcription"
     }
 
+    // MARK: Words to check
+
+    /// Cues with words the transcriber was unsure of, least sure first: what the word review shows.
+    public var cuesToCheck: [Cue] {
+        func certainty(_ cue: Cue) -> Double { cue.unsureWords?.compactMap(\.confidence).min() ?? 0.5 }
+        return track.cues.filter { $0.unsureWords?.isEmpty == false }
+            .sorted { (certainty($0), $0.start) < (certainty($1), $1.start) }
+    }
+
+    /// How many words are still to check.
+    public var wordsToCheckCount: Int {
+        track.cues.reduce(0) { $0 + ($1.unsureWords?.count ?? 0) }
+    }
+
+    /// Keeps a word as the transcriber heard it: one undoable edit. In the
+    /// review, a cue with nothing left to check makes way for the next.
+    public func confirmUnsureWord(_ index: Int, forCue id: Cue.ID) {
+        guard let cueIndex = track.cues.firstIndex(where: { $0.id == id }), let words = track.cues[cueIndex].unsureWords,
+              words.indices.contains(index)
+        else { return }
+        let next = isReviewingWords && words.count == 1 ? nextCueToCheck(after: id) : nil
+        edit("Confirm Word") { track in
+            var remaining = words
+            remaining.remove(at: index)
+            track.cues[cueIndex].unsureWords = remaining.isEmpty ? nil : remaining
+        }
+        if let next, cue(withID: next)?.unsureWords?.isEmpty == false { select(next) }
+    }
+
+    /// Keeps every word still to check, as one undoable edit, and leaves the review.
+    func confirmRemainingWords() {
+        edit(EditorCommand.confirmRemainingWords.title) { track in
+            for index in track.cues.indices { track.cues[index].unsureWords = nil }
+        }
+        isReviewingWords = false
+    }
+
+    /// Shows only the cues with words to check, least sure first, or every cue again.
+    func toggleWordReview() {
+        isReviewingWords.toggle()
+        if isReviewingWords {
+            isReviewingChoices = false
+            if let first = cuesToCheck.first, selectedCue?.unsureWords?.isEmpty != false { select(first.id) }
+        }
+    }
+
+    /// Plays a word to check with a moment before and after, then pauses.
+    public func playUnsureWord(_ index: Int, forCue id: Cue.ID) {
+        guard hasMedia, let word = cue(withID: id)?.unsureWords?[safe: index], let start = word.start else { return }
+        let lead = MediaTime(value: 300, timescale: 1000)
+        let from = start > lead ? start - lead : .zero
+        playback.seek(toFrame: from.firstFrame(at: frameRate), rate: frameRate)
+        playbackStopTime = (word.end ?? start) + lead
+        playback.play(rate: 1)
+    }
+
+    /// The cue to check after `id` in the review's order.
+    private func nextCueToCheck(after id: Cue.ID) -> Cue.ID? {
+        let order = cuesToCheck.map(\.id)
+        guard let index = order.firstIndex(of: id) else { return order.first }
+        return order[(index + 1)...].first ?? order[..<index].first
+    }
+
     // MARK: Translation choices
 
     /// Cues with an open flag, least confident first: what the choice review shows.
@@ -221,6 +289,7 @@ extension EditorState {
     /// Shows only the cues with open flags, least confident first, or every cue again.
     func toggleChoiceReview() {
         isReviewingChoices.toggle()
+        if isReviewingChoices { isReviewingWords = false }
         if isReviewingChoices, let first = cuesToChoose.first, selectedCue?.flag?.isResolved != false { select(first.id) }
     }
 
@@ -279,6 +348,7 @@ extension EditorState {
     /// passes to `propose` go into the track at once; its final result adds the rest.
     private func startAITask(
         _ title: String,
+        afterward: (@MainActor () -> Void)? = nil,
         _ work: @escaping @MainActor (
             _ progress: @escaping @Sendable (Double) -> Void, _ propose: @escaping @Sendable (ProposedChangeSet) -> Void
         ) async throws -> ProposedChangeSet
@@ -304,6 +374,7 @@ extension EditorState {
                 guard let self, !Task.isCancelled else { return }
                 self.applyResults(final)
                 self.aiTask = nil
+                afterward?()
                 if self.appliedAIChanges.isEmpty {
                     self.reportError("\(title) found nothing to add.", AIError.nothingToDo("Every cue is already as the tool would make it."))
                 }
@@ -391,10 +462,11 @@ extension EditorState {
         return voices.isEmpty ? nil : voices
     }
 
-    /// The cues about to be translated whose source has words the transcription was unsure of.
+    /// The cues about to become a translation's source that have words the
+    /// transcription was unsure of. In translation mode the source can't be edited;
+    /// the translator gets the words marked instead, and flags lines that read misheard.
     var cuesWithUnsureSource: [Cue] {
-        guard isTranslating else { return track.cues.filter { $0.unsureWords?.isEmpty == false } }
-        return untranslatedCues.filter { sourceCues[$0.id]?.unsureWords?.isEmpty == false }
+        isTranslating ? [] : cuesToCheck
     }
 
     /// Target cues with no text whose source has some.
@@ -415,23 +487,29 @@ extension EditorState {
         guard let source = sourceTrack, let first = cues.first else { return }
         let glossaryEntries = glossary.entries.filter { entry in cues.contains { glossaryHits[sourceCues[$0.id]?.id ?? UUID()]?.contains(entry) == true } }
         let context: [(source: String, target: String)] = track.cues.filter { $0.start < first.start && !$0.text.isEmpty }
-            .suffix(6).compactMap { cue in sourceCues[cue.id].map { ($0.text, cue.text) } }
+            .suffix(20).compactMap { cue in sourceCues[cue.id].map { ($0.text, cue.text) } }
         let examples = Dictionary(cues.compactMap { cue in
             sourceCues[cue.id].flatMap { memory.matches(for: $0.text, limit: 1).first }.map { (cue.id, ($0.entry.source, $0.entry.target)) }
         }, uniquingKeysWith: { first, _ in first })
         let lines = cues.map { cue in
             TranslationRequest.Line(
                 cueID: cue.id, source: sourceCues[cue.id]?.text ?? "", start: cue.start, end: cue.end, voices: voices(for: cue),
-                speakerName: sourceCues[cue.id]?.speaker ?? cue.speaker, memoryExample: examples[cue.id]
+                speakerName: sourceCues[cue.id]?.speaker ?? cue.speaker, memoryExample: examples[cue.id],
+                unsureWords: sourceCues[cue.id]?.unsureWords?.map(\.text)
             )
+        }
+        let script = source.cues.map { cue in
+            TranslationRequest.ScriptLine(start: cue.start, voice: (cue.speaker.map { [$0] } ?? cue.voices)?.joined(separator: " then "), text: cue.text)
         }
         let request = TranslationRequest(
             lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
             glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) },
-            maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast
+            maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast,
+            work: workTitle, notes: track.translatorNotes, script: script, style: aiSettings.translationStyle
         )
         let fixUp = TranslationPipeline(preset: qcPreset)
-        startAITask("Translation") { [weak self] progress, propose in
+        let joinsLines = aiSettings.joinsLinesAfterTranslating
+        startAITask("Translation", afterward: { [weak self] in if joinsLines { self?.joinTranslatedLines() } }) { [weak self] progress, propose in
             let found = TranslationCollector()
             let translations = try await translator.translate(request, progress: progress) { batch in
                 propose(Proposals.translation(found.add(fixUp.fix(batch, request: request)), cues: cues))
@@ -450,6 +528,70 @@ extension EditorState {
             }
             return Proposals.translation(fixUp.fix(translations, request: request), cues: cues)
         }
+    }
+
+    /// What is being translated, from the video's file name without release tags:
+    /// "A Knight of the Seven Kingdoms (2026) S01E01 The Hedge Knight".
+    var workTitle: String? {
+        guard let url = status.mediaURL ?? mediaReference.map({ URL(fileURLWithPath: $0.path) }) else { return nil }
+        return Self.workTitle(fromFileName: url.deletingPathExtension().lastPathComponent)
+    }
+
+    static func workTitle(fromFileName name: String) -> String? {
+        var title = name.replacing(/\[[^\]]*\]/, with: "")
+        // Parentheses with release details go; a year stays.
+        title = title.replacing(/\(([^)]*)\)/) { match in
+            let inside = String(match.output.1)
+            return inside.wholeMatch(of: /(19|20)\d\d/) != nil ? "(\(inside))" : ""
+        }
+        if !title.contains(" ") { title = title.replacing(/[._]/, with: " ") }
+        // Everything from the first release tag on goes.
+        if let tag = title.firstMatch(of: /(?i)\b(\d{3,4}p|web-?(rip|dl)?|bluray|bdrip|hdtv|x26[45]|h\.?26[45]|hevc|remux|amzn|nf|hdr|dv)\b/) {
+            title = String(title[..<tag.range.lowerBound])
+        }
+        title = title.replacing(/\s+/, with: " ").trimmingCharacters(in: .whitespaces.union(["-"]))
+        return title.isEmpty ? nil : title
+    }
+
+    // MARK: Joining lines
+
+    /// Joins the lines a translation just wrote that nobody has edited since
+    /// (`CueJoiner`): one undoable edit after the translation's own.
+    func joinTranslatedLines() {
+        let written = appliedAIChanges
+        let proposal = joinProposal { written.contains($0.id) && $0.isAIGenerated == true }
+        guard !proposal.isEmpty else { return }
+        edit(proposal.title) { track in proposal.apply(to: &track) }
+    }
+
+    /// The joins `CueJoiner` finds among the cues `eligible` accepts. Cues are
+    /// only joined with neighbours that are eligible too.
+    func joinProposal(eligible: (Cue) -> Bool) -> ProposedChangeSet {
+        var joiner = CueJoiner(preset: qcPreset)
+        joiner.sentencePerLine = TranslationStyle.endsLinesBare(track.languageCode) && aiSettings.translationStyle.dropsFinalPunctuation
+        var runs: [[Cue]] = [[]]
+        for cue in track.cues.sorted(by: { $0.start < $1.start }) {
+            if eligible(cue) {
+                runs[runs.count - 1].append(cue)
+            } else if !runs[runs.count - 1].isEmpty {
+                runs.append([])
+            }
+        }
+        var original: [Cue] = []
+        var joined: [Cue] = []
+        for run in runs where run.count > 1 {
+            original += run
+            joined += joiner.join(run.map(joinLine(for:)))
+        }
+        return Proposals.join(original, into: joined)
+    }
+
+    /// A cue as the joiner sees it: who says it and, in a translation, its source text.
+    func joinLine(for cue: Cue) -> CueJoiner.Line {
+        let source = sourceCues[cue.id]
+        let voices = source?.voices ?? cue.voices
+        let speaker = cue.speaker ?? source?.speaker ?? (voices?.count == 1 ? voices?.first : nil)
+        return CueJoiner.Line(cue: cue, speaker: speaker, source: isTranslating ? source?.text : nil)
     }
 
     /// Starts a translation of the cues being edited (a transcription, an
@@ -518,4 +660,9 @@ private final class TranslationCollector: @unchecked Sendable {
             return all
         }
     }
+}
+
+
+extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }

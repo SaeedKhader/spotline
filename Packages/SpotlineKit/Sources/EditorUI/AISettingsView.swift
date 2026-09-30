@@ -48,6 +48,24 @@ public struct AISettingsView: View {
             }
 
             Section {
+                Toggle("Join short lines after translating", isOn: $editor.aiSettings.joinsLinesAfterTranslating)
+                    .accessibilityIdentifier(AccessibilityID.AISettings.joinsLines)
+                Picker("Wording", selection: $editor.aiSettings.translationStyle.register) {
+                    ForEach(TranslationStyle.Register.allCases) { Text($0.title).tag($0) }
+                }
+                .accessibilityIdentifier(AccessibilityID.AISettings.register)
+                Toggle("No full stop at the end of lines (Arabic, Persian, Urdu)", isOn: $editor.aiSettings.translationStyle.dropsFinalPunctuation)
+                    .accessibilityIdentifier(AccessibilityID.AISettings.dropsFinalPunctuation)
+                Toggle("Names in parentheses", isOn: $editor.aiSettings.translationStyle.namesInParentheses)
+                    .accessibilityIdentifier(AccessibilityID.AISettings.namesInParentheses)
+            } header: {
+                Text("Translation style")
+            } footer: {
+                Text("Claude also gets the episode's title from the video's file name, and any notes for the translator from the glossary panel.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Allow cloud providers", isOn: $editor.aiSettings.allowsCloud)
                     .accessibilityIdentifier(AccessibilityID.AISettings.allowsCloud)
                 Group {

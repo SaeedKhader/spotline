@@ -77,6 +77,16 @@ public enum AccessibilityID {
         public static let choiceReview = "cueList.choiceReview"
         /// In the actions bar: how many lines still read more than one way; it opens the review.
         public static let choicesSummary = "cueList.choices"
+        /// In the actions bar: how many words the transcriber was unsure of; it opens their review.
+        public static let wordsSummary = "cueList.words"
+        /// Over the cue list while it shows only the cues with words to check; its value explains the review.
+        public static let wordReview = "cueList.wordReview"
+        /// The n-th word to check in a cue (0-based); its value is the word and how sure the transcriber was.
+        public static func word(_ cueID: UUID, _ index: Int) -> String { "\(cell(cueID, .words)).\(index)" }
+        /// Plays the n-th word to check.
+        public static func playWord(_ cueID: UUID, _ index: Int) -> String { "\(word(cueID, index)).play" }
+        /// Confirms the n-th word to check is right.
+        public static func confirmWord(_ cueID: UUID, _ index: Int) -> String { "\(word(cueID, index)).confirm" }
 
         public enum Column: String, CaseIterable, Sendable {
             case number
@@ -87,6 +97,8 @@ public enum AccessibilityID {
             case position
             /// Review warnings; the value lists them.
             case issues
+            /// The words the transcriber was unsure of, under the text.
+            case words
             case text
             /// In translation mode, the source cue's text (read-only).
             case source
@@ -104,6 +116,8 @@ public enum AccessibilityID {
         public static let root = "glossary"
         public static let addEntry = "glossary.add"
         public static let removeEntries = "glossary.remove"
+        /// The notes for the AI translator under the terms.
+        public static let translatorNotes = "glossary.translatorNotes"
         /// One term's field: `glossary.entry.<id>.source`, `.target` or `.note`.
         public static func field(_ entryID: UUID, _ field: Field) -> String { "glossary.entry.\(entryID.uuidString).\(field.rawValue)" }
 
@@ -132,6 +146,10 @@ public enum AccessibilityID {
         public static func apiKeySaved(_ provider: String) -> String { "\(apiKey(provider)).saved" }
         /// Shown when a chosen cloud provider can't run yet (cloud off, or no key); its value says why.
         public static let providerProblem = "settings.ai.problem"
+        public static let joinsLines = "settings.ai.joinsLines"
+        public static let register = "settings.ai.register"
+        public static let dropsFinalPunctuation = "settings.ai.dropsFinalPunctuation"
+        public static let namesInParentheses = "settings.ai.namesInParentheses"
     }
 
     /// Settings › Agents.

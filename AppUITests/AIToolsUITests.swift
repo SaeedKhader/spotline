@@ -84,7 +84,9 @@ final class AIToolsUITests: XCTestCase {
         let ended = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: summary)
         XCTAssertEqual(XCTWaiter().wait(for: [ended], timeout: 10), .completed, "Choices remain")
         waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♂")
-        waitForValue(of: texts.element(boundBy: 1), toEqual: "[ar] Where are you going, John? ♀")
+        // The short last line was joined to the one before once the translation was in (M11).
+        waitForValue(of: texts.element(boundBy: 1), toEqual: "[ar] Where are you going, John? ♀\n[ar] First cue")
+        XCTAssertEqual(texts.count, 2)
         XCTAssertEqual(app.cueCells(.choices).count, 0)
     }
 }

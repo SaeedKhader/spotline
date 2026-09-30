@@ -31,6 +31,7 @@ struct ActionsBar: View {
                 CommandButton(command: .zoomIn, systemImage: "plus.magnifyingglass", editor: editor)
             }
             Spacer(minLength: 8)
+            WordsSummary(editor: editor)
             ChoicesSummary(editor: editor)
             ReviewSummary(editor: editor)
             AnalysisStatusView(editor: editor)
@@ -75,6 +76,36 @@ private struct TimecodeView: View {
             .accessibilityLabel("Timecode")
             .accessibilityValue(editor.timecode.description)
             .accessibilityIdentifier(AccessibilityID.Transport.timecode)
+    }
+}
+
+/// "7 words to check": words the transcriber was unsure of. Click it to review
+/// them (AI › Review Words to Check); while reviewing, Confirm Remaining keeps them.
+private struct WordsSummary: View {
+    let editor: EditorState
+
+    var body: some View {
+        let count = editor.wordsToCheckCount
+        if count > 0 || editor.isReviewingWords {
+            HStack(spacing: 8) {
+                let text = count == 1 ? "1 word to check" : "\(count) words to check"
+                Button {
+                    editor.perform(.reviewWords)
+                } label: {
+                    Label(text, systemImage: "ear")
+                        .foregroundStyle(editor.isReviewingWords ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.hearingTint))
+                }
+                .buttonStyle(.borderless)
+                .help(editor.isReviewingWords ? "Show every cue" : "\(EditorCommand.reviewWords.title): words the transcription wasn't sure of")
+                .accessibilityValue(text)
+                .accessibilityIdentifier(AccessibilityID.CueList.wordsSummary)
+                if editor.isReviewingWords {
+                    CommandButton(command: .confirmRemainingWords, editor: editor)
+                }
+            }
+            .font(.caption)
+            .lineLimit(1)
+        }
     }
 }
 

@@ -358,10 +358,13 @@ struct Benchmark {
         let glossary = (sample.glossary?.entries ?? []).filter { entry in
             cues.contains { index?.entries(inSource: $0.text).contains(entry) == true }
         }
+        // The whole episode goes along as context, as the editor sends it.
+        let script = lines.map { TranslationRequest.ScriptLine(start: $0.start, voice: $0.voices?.joined(separator: " then "), text: $0.source) }
         let request = TranslationRequest(
             lines: lines, sourceLanguage: options.source, targetLanguage: options.target,
             glossary: glossary.map { ($0.source, $0.target, $0.note) },
-            maxCharactersPerLine: options.preset.maxCharactersPerLine, maxLines: options.preset.maxLines
+            maxCharactersPerLine: options.preset.maxCharactersPerLine, maxLines: options.preset.maxLines,
+            work: sample.name, script: script
         )
 
         // Cached by position: the reference cues get new IDs every run.

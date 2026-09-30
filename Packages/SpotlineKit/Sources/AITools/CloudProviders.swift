@@ -383,8 +383,10 @@ extension BatchedCueTranslator {
 // MARK: - Claude
 
 /// Cloud translation with Claude (Anthropic's Messages API). Each batch of lines
-/// goes with the lines before it, the glossary, translation memory examples,
-/// the transcriber's voice labels, the cast known so far and the QC limits.
+/// goes with the whole episode's source (cached, so it is paid for once), the
+/// lines before it with their translations, the glossary, translation memory
+/// examples, the transcriber's voice labels, the cast known so far with how
+/// their names are spelled, the house style and the QC limits.
 ///
 /// Into languages that inflect for gender or number (Arabic first), Claude flags
 /// every line that could be translated more than one way ("you" for a man, a
@@ -400,9 +402,10 @@ public struct ClaudeTranslator: BatchedCueTranslator {
     let apiKey: String
     let http: HTTPClient
     var endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    /// Lines per request, and how many earlier lines go along as context.
+    /// Lines per request, and how many earlier lines go along with their translations.
+    /// (The whole episode's source goes along too, cached: `TranslationRequest.script`.)
     var batchSize = 40
-    var contextLines = 6
+    var contextLines = 20
 
     public init(apiKey: String, model: String = ClaudeTranslator.defaultModel, session: URLSession = .shared) {
         self.apiKey = apiKey
@@ -442,35 +445,38 @@ public struct ClaudeTranslator: BatchedCueTranslator {
     }
 
     /// The Messages API request: structured output constrained to a JSON schema.
+    /// The rules and the episode's script come first and are cached, since every
+    /// batch of the episode sends them unchanged.
     static func body(for request: TranslationRequest, model: String = defaultModel) -> [String: Any] {
-        [
+        var system: [[String: Any]] = [["type": "text", "text": systemPrompt(for: request)]]
+        if let script = scriptText(for: request) { system.append(["type": "text", "text": script]) }
+        system[system.count - 1]["cache_control"] = ["type": "ephemeral"]
+        return [
             "model": model,
             "max_tokens": 32000,
             "fallbacks": "default",
             "output_config": ["effort": "medium", "format": ["type": "json_schema", "schema": outputSchema(for: request)]],
-            "system": systemPrompt(for: request),
+            "system": system,
             "messages": [["role": "user", "content": userPrompt(for: request)]],
         ]
     }
 
-    /// The JSON schema of the answer: the translations, and for gendered targets
-    /// their flags and variants and the cast. Every field is required, as OpenAI's
+    /// The JSON schema of the answer: the translations with their flags and
+    /// variants (gendered wording, or a possibly misheard source), and the cast
+    /// with how each name is spelled. Every field is required, as OpenAI's
     /// strict structured outputs need.
     static func outputSchema(for request: TranslationRequest) -> [String: Any] {
         var item: [String: Any] = ["id": string, "text": string]
-        var output: [String: Any] = [:]
-        if request.targetIsGendered {
-            item["reasons"] = array(oneOf(reasonValues))
-            item["confidence"] = ["type": "number"]
-            item["note"] = string
-            item["variants"] = array(object([
-                "text": string, "speaker": string, "speaker_gender": oneOf(personGenderValues),
-                "listeners": array(string), "listener_gender": oneOf(genderValues), "listener_count": oneOf(countValues),
-            ]))
-            output["cast"] = array(object(["name": string, "gender": oneOf(personGenderValues), "voices": array(string)]))
-        }
-        output["translations"] = array(object(item))
-        return object(output)
+        item["reasons"] = array(oneOf(reasonValues))
+        item["confidence"] = ["type": "number"]
+        item["note"] = string
+        item["variants"] = array(object([
+            "text": string, "speaker": string, "speaker_gender": oneOf(personGenderValues),
+            "listeners": array(string), "listener_gender": oneOf(genderValues), "listener_count": oneOf(countValues),
+            "source": string,
+        ]))
+        let person = object(["name": string, "translation": string, "gender": oneOf(personGenderValues), "voices": array(string)])
+        return object(["translations": array(object(item)), "cast": array(person)])
     }
 
     static func systemPrompt(for request: TranslationRequest) -> String {
@@ -479,15 +485,49 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             You are a professional subtitle translator. Translate film and TV subtitles from \(Languages.name(request.sourceLanguage)) \
             into \(target) for on-screen delivery: natural, idiomatic dialogue that reads quickly, \
             faithful to meaning, tone and register rather than word for word.
+            """
+        if let work = request.work, !work.isEmpty { prompt += "\n\nYou are translating: \(work)." }
+        if let notes = request.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
+            prompt += "\n\nNotes from the user about it:\n\(notes)"
+        }
+        prompt += """
+
 
             Rules:
             - Return exactly one translation per line id you are given, in the same order.
-            - Keep line breaks sensible: at most \(request.maxLines ?? 2) lines of about \(request.maxCharactersPerLine ?? 42) characters each; \
-            use "\\n" for a line break.
+            - Each line is shown as its own subtitle. Keep line breaks sensible: at most \(request.maxLines ?? 2) lines of about \
+            \(request.maxCharactersPerLine ?? 42) characters each; write a line break as "\\n". Break where the phrase breaks: \
+            never end a line on a conjunction, preposition or article. When a sentence runs over several lines, keep each \
+            line's words with that line where \(target) word order allows.
             - Keep inline tags like <i>…</i> around the corresponding words.
             - Use the glossary's agreed translations for its terms, and follow the style of the translation memory examples.
-            - Lines before the ones to translate are context only.
+            - The script and the lines before the ones to translate are context only.
+            - Translate what is said. Never soften, sanitize or replace a violent, sexual or profane line with something milder \
+            or different ("Stop raping" is never "stop joking"). \(registerRule(request.style.register))
+            - Names: spell each person's and place's name the same way in every line, as the known people and the glossary \
+            give it. Transliterate names; never translate them (a horse called Thunder keeps its name).
+            - The source is an automatic transcript and is sometimes misheard. Words in [brackets?] are ones the transcriber \
+            was unsure of. When a line is ungrammatical or garbled, or does not fit the scene (a reply that answers nothing, \
+            a name nobody has), do not smooth it over: flag it with the reason "source", and give one variant for what you \
+            think was said, with "source" set to that line in \(Languages.name(request.sourceLanguage)), and one for the line \
+            as heard, with "source" set to the line as heard. Recommend the likelier one first, and say in "note" what you \
+            think was said.
+            - For a flagged line, "confidence" (0 to 1) is how sure you are of the recommendation, and "note" says why in \
+            a few words. Leave "reasons", "note" and "variants" empty for lines that read one way only.
+            - In "cast", list the people you can identify in these lines and the context: their name as the dialogue uses \
+            it, "translation", how you spell it in \(target), their gender when the dialogue makes it clear, and every voice \
+            label that is mostly theirs (one person often has several).
             """
+        if TranslationStyle.endsLinesBare(request.targetLanguage) || request.style.namesInParentheses {
+            var style: [String] = []
+            if TranslationStyle.endsLinesBare(request.targetLanguage), request.style.dropsFinalPunctuation {
+                style.append("No full stop or comma at the end of a line; keep question and exclamation marks.")
+            }
+            style.append("Leave out hesitations (um, uh) and keep at most one repeat of a stutter.")
+            style.append("Put quoted speech, someone imitating another person, and song lyrics in quotation marks.")
+            if request.style.namesInParentheses { style.append("Put names in parentheses, e.g. (دانك).") }
+            prompt += "\n- House style for \(target): " + style.joined(separator: " ")
+        }
         if request.targetIsGendered {
             prompt += """
 
@@ -497,22 +537,40 @@ public struct ClaudeTranslator: BatchedCueTranslator {
                 address, and the known people listed with the lines. Voice labels come from automatic speaker detection and are \
                 only a hint: one person is sometimes split over several labels, and two people sometimes share one. Work out \
                 who is who from names and context, not from the labels alone.
+                - Keep who is spoken to the same through a scene: once a listener's gender is clear (an animal called "girl" \
+                or "boy" too), keep it for later lines to them. One person talking to one person is singular unless the scene \
+                shows more listeners; use the dual when two people are named or addressed together.
                 - Flag every line whose \(target) wording depends on something the source leaves open: the listener's gender \
                 or number ("listener"), gendered verbs, adjectives or pronouns about someone ("genderedWords"), or who says it \
-                ("speaker"). Put the reasons in "reasons"; leave it empty for a line that reads one way only.
+                ("speaker"). Put the reasons in "reasons".
                 - For a flagged line, write every valid variant in "variants", the one you recommend first; "text" is that first \
                 variant's text. Only list variants whose wording differs. For each, say who it assumes speaks ("speaker", a \
-                name or ""), their gender, who is spoken to ("listeners", names, empty when unknown) and their gender and number.
-                - For a flagged line, "confidence" (0 to 1) is how sure you are of the recommendation, and "note" says why in \
-                a few words with names where you know them, e.g. "Beth is talking to Morty". Leave "note" empty and "variants" \
-                empty for lines that are not flagged.
+                name or ""), their gender, who is spoken to ("listeners", names, empty when unknown) and their gender and number. \
+                Say it in "note" with names where you know them, e.g. "Beth is talking to Morty".
                 - People marked "confirmed" are facts the translator's user settled: never contradict them.
-                - In "cast", list the people you can identify in these lines and the context: their name as the dialogue uses \
-                it, their gender when the dialogue makes it clear, and every voice label that is mostly theirs (one person \
-                often has several).
                 """
         }
         return prompt
+    }
+
+    static func registerRule(_ register: TranslationStyle.Register) -> String {
+        switch register {
+        case .faithful:
+            "Keep the register: profanity stays profanity."
+        case .broadcast:
+            "Use the conventions of broadcast subtitles: milder, conventional wording for profanity and sexual terms, with the same meaning."
+        }
+    }
+
+    /// The whole episode's source, one line each with its time and voice, nil without one.
+    static func scriptText(for request: TranslationRequest) -> String? {
+        guard !request.script.isEmpty else { return nil }
+        var text = "The whole episode's source, for context (time, voice, line):\n"
+        for line in request.script {
+            let seconds = Int(line.start.seconds)
+            text += String(format: "[%d:%02d] ", seconds / 60, seconds % 60) + "\(line.voice ?? "?"): \(sourceLine(line.text))\n"
+        }
+        return text
     }
 
     static func userPrompt(for request: TranslationRequest) -> String {
@@ -527,22 +585,26 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         let examples = request.lines.compactMap(\.memoryExample)
         if !examples.isEmpty {
             text += "Translation memory examples:\n"
-            for example in examples.prefix(20) { text += "- \(oneLine(example.source)) → \(oneLine(example.target))\n" }
+            for example in examples.prefix(20) { text += "- \(sourceLine(example.source)) → \(sourceLine(example.target))\n" }
             text += "\n"
         }
-        if request.targetIsGendered, !request.cast.isEmpty {
+        if !request.cast.isEmpty {
             text += "Known people:\n"
             for person in request.cast {
-                var facts = [person.gender == .unknown ? "gender unknown" : person.gender.rawValue]
-                if person.isConfirmed { facts.append("confirmed") }
-                if !person.voices.isEmpty { facts.append("voice \(person.voices.joined(separator: ", "))") }
-                text += "- \(person.name) (\(facts.joined(separator: ", ")))\n"
+                var facts: [String] = []
+                if request.targetIsGendered {
+                    facts.append(person.gender == .unknown ? "gender unknown" : person.gender.rawValue)
+                    if person.isConfirmed { facts.append("confirmed") }
+                    if !person.voices.isEmpty { facts.append("voice \(person.voices.joined(separator: ", "))") }
+                }
+                let spelling = person.translatedName.map { " → \($0)" } ?? ""
+                text += "- \(person.name)\(spelling)\(facts.isEmpty ? "" : " (\(facts.joined(separator: ", ")))")\n"
             }
             text += "\n"
         }
         if !request.precedingContext.isEmpty {
             text += "Previous lines (context only, already translated):\n"
-            for line in request.precedingContext { text += "- \(oneLine(line.source)) → \(oneLine(line.target))\n" }
+            for line in request.precedingContext { text += "- \(sourceLine(line.source)) → \(sourceLine(line.target))\n" }
             text += "\n"
         }
         text += "Lines to translate (id | time | voice | text):\n"
@@ -550,15 +612,28 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             var voice = line.voices.map { $0.joined(separator: " then ") } ?? "?"
             if let name = line.speakerName { voice += " (\(name))" }
             let time = String(format: "%.1fs", line.start.seconds)
-            text += "\(lineID(index)) | \(time) | \(voice) | \(oneLine(line.source))\n"
+            text += "\(lineID(index)) | \(time) | \(voice) | \(sourceLine(marking: line.unsureWords, in: line.source))\n"
         }
         return text
     }
 
     static func lineID(_ index: Int) -> String { "L\(index + 1)" }
 
-    private static func oneLine(_ text: String) -> String {
-        text.replacing("\n", with: " / ")
+    /// A line with its breaks written "\\n", as the answer writes them. (A " / "
+    /// for a break was copied into translations.)
+    static func sourceLine(_ text: String) -> String {
+        text.replacing("\n", with: "\\n")
+    }
+
+    /// The line with the words the transcriber was unsure of in brackets: "You'll [late?], master."
+    static func sourceLine(marking unsure: [String]?, in text: String) -> String {
+        var marked = text
+        for word in Set(unsure ?? []) where !word.isEmpty {
+            let pattern = "(?<![\\p{L}\\p{N}])(" + NSRegularExpression.escapedPattern(for: word) + ")(?![\\p{L}\\p{N}])"
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            marked = regex.stringByReplacingMatches(in: marked, range: NSRange(marked.startIndex..., in: marked), withTemplate: "[$1?]")
+        }
+        return sourceLine(marked)
     }
 
     struct Response: Decodable {
@@ -580,6 +655,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
                 var listeners: [String]?
                 var listener_gender: String?
                 var listener_count: String?
+                var source: String?
             }
 
             var id: String
@@ -592,6 +668,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
 
         struct Person: Decodable {
             var name: String
+            var translation: String?
             var gender: String?
             var voices: [String]?
         }
@@ -620,20 +697,24 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             guard let cueID = ids[item.id] else { return nil }
             let text = item.text.replacing("\\n", with: "\n")
             var translation = CueTranslation(cueID: cueID, text: text)
-            if request.targetIsGendered { translation.flag = flag(from: item, text: text, cast: request.cast) }
+            translation.flag = flag(from: item, text: text, cast: request.cast, gendered: request.targetIsGendered)
             if let chosen = translation.flag?.chosenVariant { translation.text = chosen.text }
             return translation
         }
         let cast = (output.cast ?? []).map { person in
-            CastMember(name: person.name, gender: person.gender.flatMap(Gender.init(rawValue:)) ?? .unknown, voices: person.voices ?? [])
+            CastMember(
+                name: person.name, gender: person.gender.flatMap(Gender.init(rawValue:)) ?? .unknown, voices: person.voices ?? [],
+                translatedName: person.translation.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+            )
         }
         return TranslationBatch(translations: translations, cast: cast)
     }
 
     /// The flag for a line, when it has reasons and at least two different wordings.
     /// The recommended text comes first, and variants the confirmed cast rules out go last.
-    static func flag(from item: Output.Item, text: String, cast: [CastMember]) -> TranslationFlag? {
-        let reasons = (item.reasons ?? []).compactMap(TranslationFlag.Reason.init(rawValue:))
+    /// Into a language without gendered address, only a possibly misheard source is flagged.
+    static func flag(from item: Output.Item, text: String, cast: [CastMember], gendered: Bool = true) -> TranslationFlag? {
+        let reasons = (item.reasons ?? []).compactMap(TranslationFlag.Reason.init(rawValue:)).filter { gendered || $0 == .source }
         guard !reasons.isEmpty else { return nil }
         var variants: [TranslationVariant] = []
         for variant in item.variants ?? [] {
@@ -645,7 +726,10 @@ public struct ClaudeTranslator: BatchedCueTranslator {
                 speakerGender: variant.speaker_gender.flatMap(Gender.init(rawValue:)) ?? .unknown,
                 listeners: (variant.listeners ?? []).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
                 listenerGender: variant.listener_gender.flatMap(Gender.init(rawValue:)) ?? .unknown,
-                listenerCount: variant.listener_count.flatMap(ListenerCount.init(rawValue:)) ?? .unknown
+                listenerCount: variant.listener_count.flatMap(ListenerCount.init(rawValue:)) ?? .unknown,
+                // Only a possibly misheard line's variants are about the source; others repeat it.
+                assumedSource: reasons.contains(.source)
+                    ? variant.source.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0.replacing("\\n", with: "\n") } : nil
             ))
         }
         // The text is the recommendation: first, whatever order the variants came in.
@@ -675,7 +759,7 @@ public struct OpenAITranslator: BatchedCueTranslator {
     let http: HTTPClient
     var endpoint = URL(string: "https://api.openai.com/v1/responses")!
     var batchSize = 40
-    var contextLines = 6
+    var contextLines = 20
 
     public init(apiKey: String, model: String = OpenAITranslator.defaultModel, session: URLSession = .shared) {
         self.apiKey = apiKey
@@ -698,7 +782,9 @@ public struct OpenAITranslator: BatchedCueTranslator {
     static func body(for request: TranslationRequest, model: String = defaultModel) -> [String: Any] {
         [
             "model": model,
-            "instructions": ClaudeTranslator.systemPrompt(for: request),
+            // The script last, so OpenAI's automatic prompt caching reuses rules and script for every batch.
+            "instructions": [ClaudeTranslator.systemPrompt(for: request), ClaudeTranslator.scriptText(for: request)]
+                .compactMap { $0 }.joined(separator: "\n\n"),
             "input": ClaudeTranslator.userPrompt(for: request),
             "max_output_tokens": 32000,
             "reasoning": ["effort": "high"],

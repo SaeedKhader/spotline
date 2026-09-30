@@ -3,14 +3,16 @@ import SubtitleCore
 /// Pairs target cues with the source cues they translate.
 public enum Alignment {
     /// For each target cue, the source cue it translates: the one it links to
-    /// (`sourceCueID`), else the source cue it overlaps most in time.
+    /// (`sourceCueID`), else the source cue it overlaps most in time. A target
+    /// cue joined from several (`joinedSourceCueIDs`) gets their text as one cue.
     public static func sourceCues(for target: [Cue], in source: [Cue]) -> [Cue.ID: Cue] {
         let byID = Dictionary(source.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let finder = OverlapFinder(source)
         var result: [Cue.ID: Cue] = [:]
         for cue in target {
             if let id = cue.sourceCueID, let linked = byID[id] {
-                result[cue.id] = linked
+                let joined = (cue.joinedSourceCueIDs ?? []).compactMap { byID[$0] }
+                result[cue.id] = joined.isEmpty ? linked : combined([linked] + joined)
             } else if let overlapping = finder.bestOverlap(for: cue) {
                 result[cue.id] = overlapping
             }
@@ -29,6 +31,21 @@ public enum Alignment {
             }
             return cue
         }
+    }
+
+    /// Source cues read as one: the first's ID and position, their span, their
+    /// lines (a line each, as dialogue when they are), voices and unsure words.
+    static func combined(_ cues: [Cue]) -> Cue {
+        var cue = cues[0]
+        for next in cues.dropFirst() {
+            cue.end = max(cue.end, next.end)
+            cue.text += "\n" + next.text
+            let voices = (cue.voices ?? []) + (next.voices ?? []).filter { !(cue.voices ?? []).contains($0) }
+            cue.voices = voices.isEmpty ? nil : voices
+            let unsure = (cue.unsureWords ?? []) + (next.unsureWords ?? [])
+            cue.unsureWords = unsure.isEmpty ? nil : unsure
+        }
+        return cue
     }
 
     /// Empty target cues with the source's timing and position, linked to it: the

@@ -59,6 +59,7 @@ public struct EditorMenuCommands: Commands {
         CommandMenu("AI") {
             buttons(for: .ai, only: [.transcribe, .translateWithAI])
             Divider()
+            buttons(for: .ai, only: [.reviewWords, .confirmRemainingWords])
             buttons(for: .ai, only: [.reviewChoices, .acceptRemainingChoices])
             Divider()
             buttons(for: .ai, only: [.maskProfanity, .removeHearingImpaired, .fixPunctuation])

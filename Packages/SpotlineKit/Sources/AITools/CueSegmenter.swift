@@ -40,6 +40,9 @@ public struct CueSegmenter: Sendable {
     public var chainSeconds = 0.5
     /// How far after the first word a cue may start to land on a shot change.
     public var maxLateStartSeconds = 0.15
+    /// Cues stay up at least this long when the next cue leaves room: shorter
+    /// ones flash by (the professional subtitles of the akotsk review never went under 1.38 s).
+    public var comfortableSeconds = 1.2
 
     public init(preset: QCPreset, frameRate: FrameRate, shotChanges: [Int64] = []) {
         self.preset = preset
@@ -70,11 +73,12 @@ public struct CueSegmenter: Sendable {
     /// Below this, a word is one the transcriber was unsure of, marked for checking.
     public static let unsureConfidence = 0.5
 
-    /// The words the transcriber was unsure of, without punctuation, nil when none.
-    static func unsureWords(of words: [TranscribedWord]) -> [String]? {
-        let unsure = words.filter { ($0.confidence ?? 1) < unsureConfidence }
-            .map { $0.text.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) }
-            .filter { !$0.isEmpty }
+    /// The words the transcriber was unsure of, without punctuation, with their times, nil when none.
+    static func unsureWords(of words: [TranscribedWord]) -> [UnsureWord]? {
+        let unsure = words.filter { ($0.confidence ?? 1) < unsureConfidence }.compactMap { word -> UnsureWord? in
+            let text = word.text.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            return text.isEmpty ? nil : UnsureWord(text: text, start: word.start, end: word.end, confidence: word.confidence)
+        }
         return unsure.isEmpty ? nil : unsure
     }
 
@@ -193,9 +197,20 @@ public struct CueSegmenter: Sendable {
         var score = Double(abs(first - second))
         // Prefer a shorter top line, and a break after a comma or full stop.
         if first > second { score += 2 }
-        if space > text.startIndex, ",.;:!?؟،".contains(text[text.index(before: space)]) { score -= 6 }
+        if space > text.startIndex, ",.;:!?؟،".contains(text[text.index(before: space)]) { score -= 12 }
+        // Never leave an article, preposition or conjunction at the end of the top line.
+        let lastWord = text[..<space].split(separator: " ").last.map { $0.lowercased() } ?? ""
+        if danglingWords.contains(lastWord) { score += 14 }
         return score
     }
+
+    /// Words that belong with the word after them, in English and Arabic.
+    static let danglingWords: Set<String> = [
+        "a", "an", "the", "of", "to", "in", "on", "at", "for", "and", "or", "but", "with", "from", "by", "as", "if",
+        "my", "your", "his", "her", "its", "our", "their", "this", "that", "i", "you're", "i'm", "not",
+        "و", "في", "من", "على", "إلى", "عن", "أن", "ألا", "لن", "لم", "لا", "ما", "يا", "مع", "ثم", "أو", "بل", "قد", "كي",
+        "حتى", "الذي", "التي", "هذا", "هذه", "ذلك", "تلك", "إن", "لو", "كان", "كانت", "إذا", "لكن", "لكنه", "لكنها", "أي",
+    ]
 
     /// Ends cues a little after their last word, or long enough to be read at
     /// the preset's reading speed, stretches short ones to the minimum
@@ -207,6 +222,7 @@ public struct CueSegmenter: Sendable {
         let linger = Int64((lingerSeconds * rate).rounded())
         let chain = Int64((chainSeconds * rate).rounded())
         let minimum = Int64((minDuration * rate).rounded(.up))
+        let comfortable = Int64((comfortableSeconds * rate).rounded(.up))
         let maximum = Int64((maxDuration * rate).rounded(.down))
         let snap = preset.shotChangeFrames ?? 0
         let lateStart = Int64((maxLateStartSeconds * rate).rounded())
@@ -220,7 +236,7 @@ public struct CueSegmenter: Sendable {
                shot < end {
                 start = shot
             }
-            end = max(end, start + minimum)
+            end = max(end, start + minimum, start + comfortable)
             if let speed = preset.maxCharactersPerSecond, speed > 0 {
                 let characters = cues[index].text.filter { !$0.isNewline }.count
                 end = max(end, start + Int64((Double(characters) / speed * rate).rounded(.up)))

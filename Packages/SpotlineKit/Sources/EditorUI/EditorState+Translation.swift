@@ -71,7 +71,11 @@ extension EditorState {
     /// Recomputes `sourceCues`; observers see a change only when the pairing differs.
     func updateSourceCues() {
         let pairs = sourceTrack.map { Alignment.sourceCues(for: track.cues, in: $0.cues) } ?? [:]
-        if pairs != sourceCues { sourceCues = pairs }
+        guard pairs != sourceCues else { return }
+        let joined = track.cues.contains { $0.joinedSourceCueIDs != nil }
+        sourceCues = pairs
+        // A joined cue reads its source cues as one, with glossary terms from all of them.
+        if joined { updateGlossaryHits() }
     }
 
     // MARK: Languages
@@ -144,7 +148,9 @@ extension EditorState {
             return
         }
         var hits: [Cue.ID: [Glossary.Entry]] = [:]
-        for cue in source.cues {
+        // Joined target cues read their source cues as one (with the first's ID), so those come last.
+        let joined = sourceCues.values.filter { cue in !source.cues.contains { $0.id == cue.id && $0.text == cue.text } }
+        for cue in source.cues + joined {
             let entries = glossaryIndex.entries(inSource: cue.text)
             if !entries.isEmpty { hits[cue.id] = entries }
         }
@@ -179,6 +185,25 @@ extension EditorState {
         } catch {
             reportError("“\(url.lastPathComponent)” could not be imported as a glossary.", error)
         }
+    }
+
+    /// People whose translated name the glossary does not have yet.
+    public var namesMissingFromGlossary: [CastMember] {
+        track.cast.filter { person in
+            person.translatedName?.isEmpty == false
+                && !glossary.entries.contains { $0.source.caseInsensitiveCompare(person.name) == .orderedSame }
+        }
+    }
+
+    // MARK: Notes for the translator
+
+    /// Changes the notes the AI translator gets with every line (the show, the
+    /// setting, who is who). Saved with the project; typing undoes as one step.
+    public func setTranslatorNotes(_ notes: String) {
+        let value = notes.isEmpty ? nil : notes
+        guard value != track.translatorNotes else { return }
+        edit("Translator Notes", coalescing: translatorNotesSession) { track in track.translatorNotes = value }
+        translatorNotesSession = true
     }
 
     // MARK: Translation memory
@@ -241,13 +266,11 @@ extension EditorState {
     // MARK: Quality control
 
     /// Untranslated cues and glossary terms not used. (Lines that read more than
-    /// one way have their own review: AI › Review Translation Choices.)
+    /// one way have their own review: AI › Review Translation Choices; words the
+    /// transcriber was unsure of too: AI › Review Words to Check.)
     func addTranslationIssues(to issues: inout [Cue.ID: [QCIssue]]) {
         for cue in track.cues {
             var found: [QCIssue] = []
-            if let source = sourceCues[cue.id], let words = source.unsureWords, !words.isEmpty {
-                found.append(QCIssue(kind: .unsureWords(words), message: "Check the source transcription: \(words.map { "“\($0)”" }.joined(separator: ", "))"))
-            }
             if let source = sourceCues[cue.id] {
                 let sourceHasText = !SubtitleText.visibleLines(of: source.text).joined().allSatisfy(\.isWhitespace)
                 if sourceHasText, let index = issues[cue.id]?.firstIndex(where: { $0.kind == .empty }) {

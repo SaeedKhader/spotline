@@ -79,6 +79,10 @@ public struct AISettings: Sendable, Equatable {
     public var allowsCloud = false
     /// The spoken language for transcription, nil to use the audio track's language (else the Mac's).
     public var transcriptionLanguage: String?
+    /// After translating, joins short lines and sentences split over two cues (`CueJoiner`).
+    public var joinsLinesAfterTranslating = true
+    /// House style for translations.
+    public var translationStyle = TranslationStyle()
 
     public init() {}
 
@@ -86,6 +90,10 @@ public struct AISettings: Sendable, Equatable {
     static let translationKey = "AITranslationProvider"
     static let allowsCloudKey = "AIAllowsCloud"
     static let languageKey = "AITranscriptionLanguage"
+    static let joinsLinesKey = "AIJoinsLinesAfterTranslating"
+    static let registerKey = "AITranslationRegister"
+    static let dropsFinalPunctuationKey = "AIDropsFinalPunctuation"
+    static let namesInParenthesesKey = "AINamesInParentheses"
 
     public static func load(from defaults: UserDefaults?) -> AISettings {
         var settings = AISettings()
@@ -94,6 +102,10 @@ public struct AISettings: Sendable, Equatable {
         settings.translation = defaults.string(forKey: translationKey).flatMap(TranslationProvider.init) ?? .appleTranslation
         settings.allowsCloud = defaults.bool(forKey: allowsCloudKey)
         settings.transcriptionLanguage = defaults.string(forKey: languageKey)
+        settings.joinsLinesAfterTranslating = defaults.object(forKey: joinsLinesKey) as? Bool ?? true
+        settings.translationStyle.register = defaults.string(forKey: registerKey).flatMap(TranslationStyle.Register.init) ?? .faithful
+        settings.translationStyle.dropsFinalPunctuation = defaults.object(forKey: dropsFinalPunctuationKey) as? Bool ?? true
+        settings.translationStyle.namesInParentheses = defaults.bool(forKey: namesInParenthesesKey)
         return settings
     }
 
@@ -103,6 +115,10 @@ public struct AISettings: Sendable, Equatable {
         defaults.set(translation.rawValue, forKey: Self.translationKey)
         defaults.set(allowsCloud, forKey: Self.allowsCloudKey)
         defaults.set(transcriptionLanguage, forKey: Self.languageKey)
+        defaults.set(joinsLinesAfterTranslating, forKey: Self.joinsLinesKey)
+        defaults.set(translationStyle.register.rawValue, forKey: Self.registerKey)
+        defaults.set(translationStyle.dropsFinalPunctuation, forKey: Self.dropsFinalPunctuationKey)
+        defaults.set(translationStyle.namesInParentheses, forKey: Self.namesInParenthesesKey)
     }
 }
 

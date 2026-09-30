@@ -33,12 +33,56 @@ struct CloudProviderTests {
         #expect(user.contains("L2 | 3.0s | ? | Winterfell is cold."))
         #expect(user.contains("- Beth (female, confirmed, voice speaker_1)"))
         #expect(user.contains("- Morty (male)"))
-        #expect((body["system"] as? String)?.contains("variants") == true, "Arabic asks for flags and variants")
+        func system(_ body: [String: Any]) -> String {
+            ((body["system"] as? [[String: Any]]) ?? []).compactMap { $0["text"] as? String }.joined(separator: "\n")
+        }
+        #expect(system(body).contains("\"listener\""), "Arabic asks for flags on gendered wording")
+        #expect(system(body).contains("dual"))
         let english = ClaudeTranslator.body(for: request(target: "en", cast: cast))
-        #expect((english["system"] as? String)?.contains("variants") == false)
-        #expect((english["messages"] as? [[String: Any]])?.first?["content"] as? String == nil
-            || !(((english["messages"] as? [[String: Any]])?.first?["content"] as? String) ?? "").contains("Known people"))
+        #expect(!system(english).contains("\"listener\""))
+        #expect(system(english).contains("\"source\""), "Every language flags lines that may be misheard")
+        let englishUser = ((english["messages"] as? [[String: Any]])?.first?["content"] as? String) ?? ""
+        #expect(englishUser.contains("- Beth\n"), "Names without genders into English")
         #expect(try JSONSerialization.data(withJSONObject: body).count > 0)
+    }
+
+    @Test func claudeGetsTheEpisodeTheStyleAndDoubtfulWords() throws {
+        var request = request(cast: [CastMember(name: "Dunk", translatedName: "دانك")])
+        request.lines[0].unsureWords = ["busy"]
+        request.work = "A Knight of the Seven Kingdoms S01E01"
+        request.notes = "Egg is a boy."
+        request.script = [.init(start: MediaTime(value: 75, timescale: 1), voice: "speaker_0", text: "You are busy.\nVery.")]
+        request.style.namesInParentheses = true
+        let body = ClaudeTranslator.body(for: request)
+        let blocks = try #require(body["system"] as? [[String: Any]])
+        #expect(blocks.count == 2)
+        let rules = try #require(blocks[0]["text"] as? String)
+        #expect(rules.contains("You are translating: A Knight of the Seven Kingdoms S01E01."))
+        #expect(rules.contains("Egg is a boy."))
+        #expect(rules.contains("\"Stop raping\" is never \"stop joking\""))
+        #expect(rules.contains("No full stop"))
+        #expect(rules.contains("parentheses"))
+        // The script is the last system block and is cached with the rules.
+        #expect((blocks[1]["text"] as? String)?.contains("[1:15] speaker_0: You are busy.\\nVery.") == true)
+        #expect(blocks[1]["cache_control"] != nil)
+        let user = try #require((body["messages"] as? [[String: Any]])?.first?["content"] as? String)
+        #expect(user.contains("L1 | 0.0s | speaker_1 | You are [busy?]."))
+        #expect(user.contains("- Dunk → دانك"))
+    }
+
+    @Test func aPossiblyMisheardLineIsFlaggedInAnyLanguage() throws {
+        let output = """
+            {"translations": [{"id": "L1", "text": "It's an elm.", "reasons": ["source"], "confidence": 0.8, "note": "Probably “It's an elm.”",
+               "variants": [
+                 {"text": "It's an elm.", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "unknown", "listener_count": "unknown", "source": "It's an elm."},
+                 {"text": "The answer is no.", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "unknown", "listener_count": "unknown", "source": "It's a no."}]}],
+             "cast": [{"name": "Dunk", "translation": "Dunk", "gender": "male", "voices": []}]}
+            """
+        let batch = try ClaudeTranslator.translations(from: Self.response(output), request: request(target: "en"))
+        let flag = try #require(batch.translations[0].flag)
+        #expect(flag.reasons == [.source])
+        #expect(flag.variants.map(\.assumedSource) == ["It's an elm.", "It's a no."])
+        #expect(batch.cast[0].translatedName == "Dunk")
     }
 
     static func response(_ output: String) throws -> Data {
@@ -53,7 +97,7 @@ struct CloudProviderTests {
                "variants": [
                  {"text": "انت مشغول.", "speaker": "Morty", "speaker_gender": "male", "listeners": ["Jerry"], "listener_gender": "male", "listener_count": "one"},
                  {"text": "انتِ مشغولة.", "speaker": "Morty", "speaker_gender": "male", "listeners": ["Beth"], "listener_gender": "female", "listener_count": "one"},
-                 {"text": "انتم مشغولون.", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "mixed", "listener_count": "many"}]},
+                 {"text": "انتم مشغولون.", "speaker": "", "speaker_gender": "unknown", "listeners": [], "listener_gender": "mixed", "listener_count": "many", "source": "You are busy."}]},
               {"id": "L2", "text": "وينترفيل باردة.", "reasons": [], "confidence": 1, "note": "", "variants": []}
             ],
             "cast": [{"name": "Beth", "gender": "female", "voices": []}, {"name": "Morty", "gender": "male", "voices": ["speaker_1"]}]}
@@ -71,6 +115,7 @@ struct CloudProviderTests {
         #expect(flag.chosen == 0 && first.text == "انتِ مشغولة.")
         #expect(flag.variants[0].speaker == "Morty" && flag.variants[2].speaker == nil)
         #expect(flag.variants[2].listenerGender == .mixed && flag.variants[2].listenerCount == .many)
+        #expect(flag.variants.allSatisfy { $0.assumedSource == nil }, "A listener flag's variants are not about the source")
         #expect(batch.translations[1].flag == nil, "No reasons, no flag")
         #expect(batch.cast.map(\.name) == ["Beth", "Morty"])
         #expect(batch.cast[1].voices == ["speaker_1"] && !batch.cast[1].isConfirmed)
