@@ -32,6 +32,16 @@ final class AIToolsUITests: XCTestCase {
         let problem = app.descendants(matching: .any)[AccessibilityID.AISettings.providerProblem]
         XCTAssertTrue(problem.waitForExistence(timeout: 10))
         waitForValue(of: problem, toEqual: "OpenAI GPT-6 Luna needs Allow cloud providers turned on.")
+
+        // A cloud translator gets a reasoning effort, medium unless changed.
+        let effort = app.popUpButtons[AccessibilityID.AISettings.reasoningEffort]
+        XCTAssertTrue(effort.waitForExistence(timeout: 10), "No reasoning effort for Luna")
+        waitForValue(of: effort, toEqual: "Medium")
+        effort.click()
+        let low = app.menuItems["Low (fastest)"]
+        XCTAssertTrue(low.waitForExistence(timeout: 10))
+        low.click()
+        waitForValue(of: effort, toEqual: "Low (fastest)")
     }
 
     @MainActor

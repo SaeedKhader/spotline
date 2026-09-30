@@ -30,6 +30,7 @@ struct SpotlineBench {
           --transcriber NAME     apple (default), whisper or scribe (keys from Settings › AI, else OPENAI_API_KEY, ELEVENLABS_API_KEY)
           --translator NAME      apple (default), claude (Opus), claude-sonnet (key from Settings › AI, else ANTHROPIC_API_KEY)
                                  or luna (OpenAI GPT-6 Luna; else OPENAI_API_KEY)
+          --effort LEVEL         reasoning effort for claude and luna: low, medium (default), high
           --preset ID            QC preset: netflix (default), netflixChildren, broadcast, basic
           --skip-translation     transcription only
           --fresh                ignore cached model results
@@ -61,6 +62,7 @@ struct Options {
     var target = "ar"
     var transcriber = "apple"
     var translator = "apple"
+    var effort = AISettings.ReasoningEffort.medium
     var preset = QCPreset.standard
     var skipTranslation = false
     var fresh = false
@@ -82,6 +84,10 @@ struct Options {
             case "--target": target = try value(argument)
             case "--transcriber": transcriber = try value(argument)
             case "--translator": translator = try value(argument)
+            case "--effort":
+                let level = try value(argument)
+                guard let found = AISettings.ReasoningEffort(rawValue: level) else { throw Error(message: "No effort \(level).") }
+                effort = found
             case "--preset":
                 let id = try value(argument)
                 guard let found = QCPreset.named(id) else { throw Error(message: "No preset \(id).") }
@@ -269,10 +275,13 @@ struct Benchmark {
         case "apple": return AppleTranslator()
         case "claude", "claude-sonnet":
             guard let key = Self.apiKey(.anthropic, environment: "ANTHROPIC_API_KEY") else { throw AIError.missingAPIKey(provider: "Anthropic") }
-            return ClaudeTranslator(apiKey: key, model: options.translator == "claude" ? ClaudeTranslator.defaultModel : ClaudeTranslator.sonnetModel)
+            return ClaudeTranslator(
+                apiKey: key, model: options.translator == "claude" ? ClaudeTranslator.defaultModel : ClaudeTranslator.sonnetModel,
+                effort: options.effort
+            )
         case "luna":
             guard let key = Self.apiKey(.openAI, environment: "OPENAI_API_KEY") else { throw AIError.missingAPIKey(provider: "OpenAI") }
-            return OpenAITranslator(apiKey: key)
+            return OpenAITranslator(apiKey: key, effort: options.effort)
         default:
             throw Options.Error(message: "No translator \(options.translator).")
         }
@@ -368,7 +377,8 @@ struct Benchmark {
         )
 
         // Cached by position: the reference cues get new IDs every run.
-        let key = "\(sample.name).\(Self.cacheKey(translator.name)).\(options.source)-\(options.target).json"
+        let effort = options.translator == "apple" ? "" : ".\(options.effort.rawValue)"
+        let key = "\(sample.name).\(Self.cacheKey(translator.name))\(effort).\(options.source)-\(options.target).json"
         var translations: [CueTranslation]
         if let cached = cache.load([Cache.Translation].self, key), cached.count == cues.count {
             translations = zip(cues, cached).map { CueTranslation(cueID: $0.id, text: $1.text, flag: $1.flag) }

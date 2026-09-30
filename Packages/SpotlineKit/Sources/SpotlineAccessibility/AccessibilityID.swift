@@ -144,6 +144,7 @@ public enum AccessibilityID {
         public static let transcriptionProvider = "settings.ai.transcription"
         public static let transcriptionLanguage = "settings.ai.language"
         public static let translationProvider = "settings.ai.translation"
+        public static let reasoningEffort = "settings.ai.reasoningEffort"
         public static let allowsCloud = "settings.ai.allowsCloud"
         public static func apiKey(_ provider: String) -> String { "settings.ai.key.\(provider)" }
         /// Beside a key field; its value is "saved" once the Keychain has the key.

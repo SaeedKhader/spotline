@@ -154,6 +154,30 @@ struct CloudProviderTests {
         }
     }
 
+    @Test func reasoningEffortReachesBothProviders() throws {
+        let claude = try #require(ClaudeTranslator.body(for: request())["output_config"] as? [String: Any])
+        #expect(claude["effort"] as? String == "medium")
+        let luna = try #require(OpenAITranslator.body(for: request())["reasoning"] as? [String: Any])
+        #expect(luna["effort"] as? String == "medium")
+        for effort in AISettings.ReasoningEffort.allCases {
+            let claude = ClaudeTranslator.body(for: request(), effort: effort)["output_config"] as? [String: Any]
+            #expect(claude?["effort"] as? String == effort.rawValue)
+            let luna = OpenAITranslator.body(for: request(), effort: effort)["reasoning"] as? [String: Any]
+            #expect(luna?["effort"] as? String == effort.rawValue)
+        }
+    }
+
+    @Test func reasoningEffortIsSavedAndDefaultsToMedium() throws {
+        let suite = "ReasoningEffortTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(AISettings.load(from: defaults).reasoningEffort == .medium)
+        var settings = AISettings()
+        settings.reasoningEffort = .low
+        settings.save(to: defaults)
+        #expect(AISettings.load(from: defaults).reasoningEffort == .low)
+    }
+
     @Test func lunaRequestUsesClaudesPromptAndAStrictSchema() throws {
         let cast = [CastMember(name: "Beth", gender: .female, isConfirmed: true, voices: ["speaker_1"])]
         let request = request(cast: cast)

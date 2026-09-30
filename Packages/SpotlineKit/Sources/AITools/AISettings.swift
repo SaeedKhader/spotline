@@ -73,8 +73,27 @@ public struct AISettings: Sendable, Equatable {
         }
     }
 
+    /// How long a cloud translator thinks before it answers. More catches more lines
+    /// that read two ways and more misheard source, but each batch takes longer.
+    public enum ReasoningEffort: String, Sendable, CaseIterable, Identifiable {
+        case low
+        case medium
+        case high
+
+        public var id: String { rawValue }
+        public var title: String {
+            switch self {
+            case .low: "Low (fastest)"
+            case .medium: "Medium"
+            case .high: "High (slowest, most careful)"
+            }
+        }
+    }
+
     public var transcription: TranscriptionProvider = .appleSpeech
     public var translation: TranslationProvider = .appleTranslation
+    /// For Claude and GPT-6 Luna. Medium by default: high made Luna slow for little gain.
+    public var reasoningEffort: ReasoningEffort = .medium
     /// Off by default: the user allows sending audio and text to cloud providers.
     public var allowsCloud = false
     /// The spoken language for transcription, nil to use the audio track's language (else the Mac's).
@@ -88,6 +107,7 @@ public struct AISettings: Sendable, Equatable {
 
     static let transcriptionKey = "AITranscriptionProvider"
     static let translationKey = "AITranslationProvider"
+    static let effortKey = "AIReasoningEffort"
     static let allowsCloudKey = "AIAllowsCloud"
     static let languageKey = "AITranscriptionLanguage"
     static let joinsLinesKey = "AIJoinsLinesAfterTranslating"
@@ -100,6 +120,7 @@ public struct AISettings: Sendable, Equatable {
         guard let defaults else { return settings }
         settings.transcription = defaults.string(forKey: transcriptionKey).flatMap(TranscriptionProvider.init) ?? .appleSpeech
         settings.translation = defaults.string(forKey: translationKey).flatMap(TranslationProvider.init) ?? .appleTranslation
+        settings.reasoningEffort = defaults.string(forKey: effortKey).flatMap(ReasoningEffort.init) ?? .medium
         settings.allowsCloud = defaults.bool(forKey: allowsCloudKey)
         settings.transcriptionLanguage = defaults.string(forKey: languageKey)
         settings.joinsLinesAfterTranslating = defaults.object(forKey: joinsLinesKey) as? Bool ?? true
@@ -113,6 +134,7 @@ public struct AISettings: Sendable, Equatable {
         guard let defaults else { return }
         defaults.set(transcription.rawValue, forKey: Self.transcriptionKey)
         defaults.set(translation.rawValue, forKey: Self.translationKey)
+        defaults.set(reasoningEffort.rawValue, forKey: Self.effortKey)
         defaults.set(allowsCloud, forKey: Self.allowsCloudKey)
         defaults.set(transcriptionLanguage, forKey: Self.languageKey)
         defaults.set(joinsLinesAfterTranslating, forKey: Self.joinsLinesKey)
