@@ -122,11 +122,14 @@ public struct TranslationRequest: Sendable, Equatable {
     /// The whole episode's source lines, for context: names, callbacks, what a reply answers.
     public var script: [ScriptLine]
     public var style: TranslationStyle
+    /// Asks the translator to mark crowd chatter (walla) instead of translating it.
+    public var leavesOutWalla: Bool
 
     public init(
         lines: [Line], precedingContext: [(source: String, target: String)] = [], sourceLanguage: String, targetLanguage: String,
         glossary: [(source: String, target: String, note: String)] = [], maxCharactersPerLine: Int? = nil, maxLines: Int? = nil,
-        cast: [CastMember] = [], work: String? = nil, notes: String? = nil, script: [ScriptLine] = [], style: TranslationStyle = TranslationStyle()
+        cast: [CastMember] = [], work: String? = nil, notes: String? = nil, script: [ScriptLine] = [], style: TranslationStyle = TranslationStyle(),
+        leavesOutWalla: Bool = false
     ) {
         self.lines = lines
         self.precedingContext = precedingContext
@@ -140,6 +143,7 @@ public struct TranslationRequest: Sendable, Equatable {
         self.notes = notes
         self.script = script
         self.style = style
+        self.leavesOutWalla = leavesOutWalla
     }
 
     public static func == (lhs: TranslationRequest, rhs: TranslationRequest) -> Bool {
@@ -148,6 +152,7 @@ public struct TranslationRequest: Sendable, Equatable {
             && lhs.precedingContext.map { [$0.source, $0.target] } == rhs.precedingContext.map { [$0.source, $0.target] }
             && lhs.maxCharactersPerLine == rhs.maxCharactersPerLine && lhs.maxLines == rhs.maxLines && lhs.cast == rhs.cast
             && lhs.work == rhs.work && lhs.notes == rhs.notes && lhs.script == rhs.script && lhs.style == rhs.style
+            && lhs.leavesOutWalla == rhs.leavesOutWalla
     }
 
     /// True when the target language changes "you", verbs or adjectives for someone's gender or number.
@@ -196,12 +201,23 @@ public struct CueTranslation: Sendable, Equatable {
     public var text: String
     /// Set when the line could be translated more than one way: `text` is the recommended variant.
     public var flag: TranslationFlag?
+    /// Crowd chatter under the dialogue, which subtitles leave out: `text` is empty and the cue goes.
+    public var isWalla: Bool
 
-    public init(cueID: Cue.ID, text: String, flag: TranslationFlag? = nil) {
+    public init(cueID: Cue.ID, text: String, flag: TranslationFlag? = nil, isWalla: Bool = false) {
         self.cueID = cueID
         self.text = text
         self.flag = flag
+        self.isWalla = isWalla
     }
+
+    /// Crowd chatter for a cue: nothing to show.
+    public static func walla(_ cueID: Cue.ID) -> CueTranslation {
+        CueTranslation(cueID: cueID, text: "", isWalla: true)
+    }
+
+    /// True when the line came back: translated, or marked as crowd chatter.
+    public var isAnswered: Bool { isWalla || !text.isEmpty }
 }
 
 /// Translations, with the people the translator identified on the way.

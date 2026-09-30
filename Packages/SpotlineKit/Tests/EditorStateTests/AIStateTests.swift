@@ -458,6 +458,23 @@ struct AIStateTests {
         #expect(sdh.track.cues.map(\.text) == ["[ar] (door opening)", "[ar] (laughs) He's alive."])
     }
 
+    @Test func crowdChatterGoesAfterTranslatingUnlessKept() async {
+        let editor = makeEditor(cues: [cue("Crowd: Look at him!", at: 0), cue("He's alive.", at: 2), cue("Crowd: Move on!", at: 4)])
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.track.cues.map(\.text) == ["[ar] He's alive."], "Crowd lines go, and are not reported as untranslated")
+        #expect(editor.sourceTrack?.cues.count == 3, "The source keeps them")
+        #expect(editor.undoManager.undoActionName == "Remove Crowd Chatter")
+        editor.perform(.undo)
+        #expect(editor.track.cues.map(\.text) == ["", "[ar] He's alive.", ""])
+
+        let kept = makeEditor(cues: [cue("Crowd: Look at him!", at: 0), cue("He's alive.", at: 2)])
+        kept.aiSettings.leavesOutWalla = false
+        #expect(kept.perform(.translateWithAI))
+        await finish(kept)
+        #expect(kept.track.cues.map(\.text) == ["[ar] Crowd: Look at him!", "[ar] He's alive."])
+    }
+
     @Test func joinShortLinesIsReviewed() {
         let editor = makeEditor(cues: [cue("Hello.", at: 0), cue("Are you the stable boy?", at: 1), cue("Yes.", at: 5)])
         #expect(editor.perform(.joinShortLines))

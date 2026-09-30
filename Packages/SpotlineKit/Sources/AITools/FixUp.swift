@@ -13,20 +13,25 @@ public struct TranscriptionPipeline: Sendable {
     public var wordStartLead: Double
     /// Keeps the transcriber's sound descriptions ("(door opens)"), for hearing-impaired subtitles.
     public var keepsSoundDescriptions: Bool
+    /// Leaves out crowd chatter under the dialogue, when set (Settings › AI).
+    public var walla: WallaFilter?
 
     public init(
-        preset: QCPreset, frameRate: FrameRate, shotChanges: [Int64] = [], wordStartLead: Double = 0, keepsSoundDescriptions: Bool = false
+        preset: QCPreset, frameRate: FrameRate, shotChanges: [Int64] = [], wordStartLead: Double = 0, keepsSoundDescriptions: Bool = false,
+        walla: WallaFilter? = nil
     ) {
         segmenter = CueSegmenter(preset: preset, frameRate: frameRate, shotChanges: shotChanges)
         self.wordStartLead = wordStartLead
         self.keepsSoundDescriptions = keepsSoundDescriptions
+        self.walla = walla
     }
 
     /// Cues for the words, in order. Words must be in time order. Hesitations,
     /// stutters and cues of nothing but an interjection are left out (`TranscriptCleanup`),
-    /// and sound descriptions unless they are kept.
+    /// and sound descriptions unless they are kept, and walla when it is filtered.
     public func cues(from words: [TranscribedWord]) -> [Cue] {
-        let spoken = keepsSoundDescriptions ? words : words.filter { !Self.isSoundDescription($0.text) }
+        let heard = walla?.words(words) ?? words
+        let spoken = keepsSoundDescriptions ? heard : heard.filter { !Self.isSoundDescription($0.text) }
         return segmenter.cues(from: TranscriptCleanup.words(corrected(spoken))).filter { !TranscriptCleanup.isOnlyInterjections($0.text) }
     }
 
@@ -68,6 +73,7 @@ public struct TranslationPipeline: Sendable {
             return text
         }
         return translations.map { translation in
+            guard !translation.isWalla else { return translation }
             var fixed = translation
             fixed.text = fix(translation.text, cueID: translation.cueID)
             if var flag = translation.flag {
@@ -257,6 +263,11 @@ extension SentenceSpans {
         for translation in translations {
             guard let group = byFirst[translation.cueID] else {
                 result.append(translation)
+                continue
+            }
+            // A sentence of crowd chatter is crowd chatter in every cue.
+            if translation.isWalla {
+                result += group.cueIDs.map(CueTranslation.walla)
                 continue
             }
             func parts(_ text: String) -> [String] {

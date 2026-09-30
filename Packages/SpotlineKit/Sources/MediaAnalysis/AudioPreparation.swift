@@ -40,6 +40,42 @@ public struct PreparedAudio: Sendable, Equatable {
     }
 }
 
+/// How loud the dialogue audio is, 30 ms at a time, on the media's timeline:
+/// for telling main dialogue from quieter voices behind it (`WallaFilter`).
+public struct SpeechLevels: Sendable, Equatable {
+    public static let frameSeconds = AudioChunker.frameSeconds
+    /// dBFS per frame from time zero; silence (-140) where no chunk has audio.
+    public var levels: [Float]
+
+    public init(levels: [Float]) {
+        self.levels = levels
+    }
+
+    public init(_ audio: PreparedAudio) {
+        let frameSize = Int(Double(PreparedAudio.sampleRate) * Self.frameSeconds)
+        var levels = [Float](repeating: Self.silence, count: Int((audio.duration.seconds / Self.frameSeconds).rounded(.up)))
+        for chunk in audio.chunks {
+            let first = Int((chunk.start.seconds * Double(PreparedAudio.sampleRate)).rounded()) / frameSize
+            for (index, level) in AudioChunker.frameLevels(chunk.samples, sampleRate: PreparedAudio.sampleRate).enumerated() {
+                let frame = first + index
+                if frame >= levels.count { levels.append(contentsOf: repeatElement(Self.silence, count: frame - levels.count + 1)) }
+                levels[frame] = max(levels[frame], level)
+            }
+        }
+        self.levels = levels
+    }
+
+    static let silence: Float = -140
+
+    /// The loudest frame between two times (at least the frame at `start`).
+    public func loudest(from start: MediaTime, to end: MediaTime) -> Float {
+        guard !levels.isEmpty else { return Self.silence }
+        let first = min(max(Int(start.seconds / Self.frameSeconds), 0), levels.count - 1)
+        let last = min(max(Int((end.seconds / Self.frameSeconds).rounded(.up)), first + 1), levels.count)
+        return levels[first..<last].max() ?? Self.silence
+    }
+}
+
 /// A stretch of speech, at `PreparedAudio.sampleRate`.
 public struct AudioChunk: Sendable, Equatable, Identifiable {
     public var id: Int

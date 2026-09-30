@@ -321,6 +321,7 @@ final class FakeClaude: URLProtocol, @unchecked Sendable {
         } else {
             let items = lines.filter { !$0.contains("SKIP") }.map { line -> [String: Any] in
                 let parts = line.components(separatedBy: " | ")
+                if parts[3].contains("WALLA") { return ["id": parts[0], "text": "", "walla": true] }
                 return ["id": parts[0], "text": "[ar] " + parts[3]]
             }
             let output = try! JSONSerialization.data(withJSONObject: ["translations": items])
@@ -353,5 +354,22 @@ struct ClaudeRetryTests {
         #expect(batch.translations.map(\.text) == ["[ar] One.", "[ar] Three.", "[ar] Five.", "[ar] Six."])
         #expect(skipped.map(\.source) == ["SKIP two.", "REFUSE four."])
         #expect(FakeClaude.lock.withLock { FakeClaude.requests } < 12, "Retries stop at single lines")
+    }
+
+    @Test func wallaIsAnAnswerNotALineToAskForAgain() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FakeClaude.self]
+        let translator = ClaudeTranslator(apiKey: "test", session: URLSession(configuration: configuration))
+        let request = TranslationRequest(
+            lines: ["One.", "WALLA two.", "Three."].enumerated().map { index, text in
+                .init(cueID: UUID(), source: text, start: MediaTime(value: Int64(index), timescale: 1), end: MediaTime(value: Int64(index) + 1, timescale: 1))
+            },
+            sourceLanguage: "en", targetLanguage: "en", leavesOutWalla: true
+        )
+        FakeClaude.lock.withLock { FakeClaude.requests = 0 }
+        let (batch, skipped) = try await translator.translateLines(request)
+        #expect(batch.translations.map(\.isWalla) == [false, true, false])
+        #expect(skipped.isEmpty)
+        #expect(FakeClaude.lock.withLock { FakeClaude.requests } == 1)
     }
 }

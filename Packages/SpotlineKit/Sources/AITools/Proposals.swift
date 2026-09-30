@@ -19,7 +19,8 @@ public enum Proposals {
     public static func translation(_ batch: TranslationBatch, cues: [Cue], title: String = "Translation") -> ProposedChangeSet {
         let byID = Dictionary(cues.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let changes: [ProposedChange] = batch.translations.compactMap { translation in
-            guard let cue = byID[translation.cueID] else { return nil }
+            // Crowd chatter's cue stays empty until the translation is done, then goes.
+            guard let cue = byID[translation.cueID], !translation.isWalla else { return nil }
             var after = cue
             after.text = translation.text
             after.flag = translation.flag

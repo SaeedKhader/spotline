@@ -396,7 +396,9 @@ extension BatchedCueTranslator {
             results = results.adding(translated)
             found(translated)
             for line in lines {
-                if let text = translated.translations.first(where: { $0.cueID == line.cueID })?.text { context.append((line.source, text)) }
+                if let translation = translated.translations.first(where: { $0.cueID == line.cueID }), !translation.isWalla {
+                    context.append((line.source, translation.text))
+                }
             }
         }
         progress(.lines(done: results.translations.count, total: request.lines.count, inFlight: []))
@@ -417,7 +419,7 @@ extension BatchedCueTranslator {
             guard request.lines.count > 1 else { return (TranslationBatch(), request.lines) }
             result = TranslationBatch()
         }
-        let done = Set(result.translations.filter { !$0.text.isEmpty }.map(\.cueID))
+        let done = Set(result.translations.filter(\.isAnswered).map(\.cueID))
         result.translations.removeAll { !done.contains($0.cueID) }
         let missing = request.lines.filter { !done.contains($0.cueID) }
         guard !missing.isEmpty else { return (result, []) }
@@ -540,6 +542,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         item["reasons"] = array(oneOf(reasonValues))
         item["confidence"] = ["type": "number"]
         item["note"] = string
+        if request.leavesOutWalla { item["walla"] = ["type": "boolean"] }
         item["variants"] = array(object([
             "text": string, "speaker": string, "speaker_gender": oneOf(personGenderValues),
             "listeners": array(string), "listener_gender": oneOf(genderValues), "listener_count": oneOf(countValues),
@@ -590,6 +593,16 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             it, "translation", how you spell it in \(target), their gender when the dialogue makes it clear, and every voice \
             label that is mostly theirs (one person often has several).
             """
+        if request.leavesOutWalla {
+            prompt += """
+
+                - Walla is background crowd chatter mixed under the dialogue: voices in a crowd, market, tavern, feast or \
+                battle that nobody in the scene is talking with ("Get a load of this fella!" from the crowd while the main \
+                characters talk). Subtitles leave it out. Set "walla" to true for such a line and leave "text" empty. A crowd \
+                line the scene is about is not walla: a chant or heckle a character reacts to, a herald's call, a line a \
+                character answers. Set "walla" to false for every other line, and when you are unsure.
+                """
+        }
         if TranslationStyle.endsLinesBare(request.targetLanguage) || request.style.namesInParentheses {
             var style: [String] = []
             if TranslationStyle.endsLinesBare(request.targetLanguage), request.style.dropsFinalPunctuation {
@@ -742,6 +755,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             var confidence: Double?
             var note: String?
             var variants: [Variant]?
+            var walla: Bool?
         }
 
         struct Person: Decodable {
@@ -773,6 +787,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         let ids = Dictionary(uniqueKeysWithValues: request.lines.enumerated().map { (lineID($0.offset), $0.element.cueID) })
         let translations: [CueTranslation] = output.translations.compactMap { item in
             guard let cueID = ids[item.id] else { return nil }
+            if request.leavesOutWalla, item.walla == true { return .walla(cueID) }
             let text = item.text.replacing("\\n", with: "\n")
             var translation = CueTranslation(cueID: cueID, text: text)
             translation.flag = flag(from: item, text: text, cast: request.cast, gendered: request.targetIsGendered)

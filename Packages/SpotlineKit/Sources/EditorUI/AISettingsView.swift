@@ -33,6 +33,9 @@ public struct AISettingsView: View {
                 Toggle("Sound descriptions, for hearing-impaired subtitles", isOn: $editor.aiSettings.includesSoundDescriptions)
                     .help("“(door opens)”, “(laughs)”: kept in transcriptions and translated when on; left out of both when off")
                     .accessibilityIdentifier(AccessibilityID.AISettings.soundDescriptions)
+                Toggle("Leave out background crowd chatter (walla)", isOn: $editor.aiSettings.leavesOutWalla)
+                    .help("Transcription leaves out voices far quieter than the dialogue around them, and Claude or GPT-6 Luna leave out crowd lines nobody in the scene is talking with")
+                    .accessibilityIdentifier(AccessibilityID.AISettings.leavesOutWalla)
                 Picker("Translation", selection: $editor.aiSettings.translation) {
                     ForEach(AISettings.TranslationProvider.allCases) { Text($0.title).tag($0) }
                 }
