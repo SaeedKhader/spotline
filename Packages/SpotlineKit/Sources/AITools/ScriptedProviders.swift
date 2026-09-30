@@ -47,6 +47,8 @@ public struct ScriptedTranslator: CueTranslator {
     ) async throws -> TranslationBatch {
         let prefix = "[\(Languages.base(request.targetLanguage))] "
         let translations = request.lines.map { line in
+            // A line starting "Crowd:", or far under the dialogue, is crowd chatter.
+            if request.leavesOutWalla, line.source.hasPrefix("Crowd:") || (line.quieterBy ?? 0) >= 10 { return CueTranslation.walla(line.cueID) }
             let text = prefix + line.source
             guard request.targetIsGendered, line.source.lowercased().contains("you") else {
                 return CueTranslation(cueID: line.cueID, text: text)

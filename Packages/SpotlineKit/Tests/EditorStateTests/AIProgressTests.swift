@@ -163,8 +163,14 @@ struct AIProgressTests {
         editor.perform(.transcribe)
         await waitUntil { editor.aiTask == nil }
         #expect(editor.perform(.transcribe))
-        #expect(editor.aiTask?.stages == ["Transcribing"])
+        // The audio is read again (from the cache) to tell crowd chatter from dialogue.
+        #expect(editor.aiTask?.stages == ["Preparing audio", "Transcribing"])
         #expect(editor.aiTask?.detail == "Using the saved transcript")
+        editor.perform(.cancelAITask)
+
+        editor.aiSettings.leavesOutWalla = false
+        #expect(editor.perform(.transcribe))
+        #expect(editor.aiTask?.stages == ["Transcribing"])
     }
 
     @Test func translationSaysWhatItFlagged() async {

@@ -45,6 +45,22 @@ final class AIToolsUITests: XCTestCase {
     }
 
     @MainActor
+    func testWallaIsLeftOutUnlessTurnedOff() throws {
+        let app = launchApp()
+        app.typeKey(",", modifierFlags: .command)
+        let aiTab = app.toolbars.buttons["AI"]
+        XCTAssertTrue(aiTab.waitForExistence(timeout: 10), "No AI tab in Settings")
+        aiTab.click()
+
+        let walla = app.descendants(matching: .any)[AccessibilityID.AISettings.leavesOutWalla]
+        XCTAssertTrue(walla.waitForExistence(timeout: 10), "No setting for crowd chatter")
+        XCTAssertEqual(walla.value as? Int, 1, "Crowd chatter is left out in a fresh app")
+        walla.click()
+        expectation(for: NSPredicate(format: "value == 0"), evaluatedWith: walla)
+        waitForExpectations(timeout: 10)
+    }
+
+    @MainActor
     func testTranscriptionFillsTheCueList() throws {
         let app = launchApp()
         _ = button(.stepForward, in: app)
