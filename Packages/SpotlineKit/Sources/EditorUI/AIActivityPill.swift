@@ -1,3 +1,4 @@
+import AppKit
 import EditorCommands
 import SpotlineAccessibility
 import SwiftUI
@@ -76,5 +77,32 @@ private struct AITaskSteps: View {
         }
         .padding(14)
         .frame(minWidth: 280, alignment: .leading)
+    }
+}
+
+/// The window toolbar's one item: the AI activity, centred in the title bar.
+@MainActor
+final class AIActivityToolbar: NSObject, NSToolbarDelegate {
+    static let item = NSToolbarItem.Identifier("aiActivity")
+    let editor: EditorState
+
+    init(editor: EditorState) {
+        self.editor = editor
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.item] }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.item] }
+
+    func toolbar(
+        _ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard itemIdentifier == Self.item else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        let view = NSHostingView(rootView: AIActivityPill(editor: editor))
+        view.sizingOptions = [.intrinsicContentSize]
+        item.view = view
+        item.label = "AI Activity"
+        item.isBordered = false
+        return item
     }
 }

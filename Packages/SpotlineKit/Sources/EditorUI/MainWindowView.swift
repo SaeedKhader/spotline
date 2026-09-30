@@ -42,11 +42,6 @@ public struct MainWindowView: View {
             .frame(minHeight: 170, idealHeight: 220)
         }
         .frame(minWidth: 960, minHeight: 600)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                AIActivityPill(editor: editor)
-            }
-        }
         .sheet(isPresented: Binding(
             get: { editor.isEmbeddedSubtitlesSheetShown },
             set: { if !$0 { editor.dismissEmbeddedSubtitles() } }
