@@ -62,6 +62,13 @@ struct CueEditorList: View {
                             switch item {
                             case .cue(let cue, let number):
                                 CueRow(editor: editor, cue: cue, number: number, directions: directions, focusedText: $focusedText)
+                                    .overlay {
+                                        if editor.aiTask?.inFlight.contains(cue.id) == true {
+                                            InFlightShimmer()
+                                                .allowsHitTesting(false)
+                                                .accessibilityIdentifier(AccessibilityID.CueList.inFlight(cue.id))
+                                        }
+                                    }
                             case .proposed(let change):
                                 ProposedCueRow(editor: editor, change: change, direction: directions.target)
                             }

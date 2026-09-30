@@ -409,16 +409,18 @@ extension Gender {
     }
 }
 
-/// Over the cue list while an AI tool is at work: its progress with Cancel,
-/// and how many of its changes wait for review, with Accept All and Reject All.
+/// Over the cue list while an AI tool is at work: its stages, what it is doing
+/// now and, only where something measures it, how far it has got, with Cancel.
+/// Then, for a few seconds, what it did ("640 lines translated · 12 flagged"). Also how many of a cleanup's changes
+/// wait for review, with Accept All and Reject All.
 struct AIReviewBar: View {
     let editor: EditorState
 
     var body: some View {
-        if editor.aiTask != nil || editor.pendingReview != nil {
+        if editor.aiTask != nil || editor.pendingReview != nil || editor.aiSummary != nil {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: editor.aiTask == nil && editor.pendingReview == nil ? "checkmark.circle" : "sparkles")
                         .foregroundStyle(Color.aiTint)
                     if let review = editor.pendingReview {
                         let count = review.changes.count
@@ -429,18 +431,13 @@ struct AIReviewBar: View {
                             .accessibilityIdentifier(AccessibilityID.CueList.aiReview)
                     }
                     if let task = editor.aiTask {
-                        let text = "\(task.title) \(Int((task.fraction * 100).rounded()))%"
-                        ProgressView(value: task.fraction)
-                            .progressViewStyle(.linear)
-                            .tint(Color.aiTint)
-                            .frame(width: 80)
-                        Text(text)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel("AI task")
-                            .accessibilityValue(text)
-                            .accessibilityIdentifier(AccessibilityID.CueList.aiTask)
+                        AITaskProgress(task: task)
                         CommandButton(command: .cancelAITask, systemImage: "stop.circle", editor: editor)
+                    } else if let summary = editor.aiSummary, editor.pendingReview == nil {
+                        Text(summary.fullText)
+                            .accessibilityLabel("AI summary")
+                            .accessibilityValue(summary.fullText)
+                            .accessibilityIdentifier(AccessibilityID.CueList.aiSummary)
                     }
                     Spacer(minLength: 8)
                     if editor.pendingReview != nil {
@@ -458,6 +455,104 @@ struct AIReviewBar: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier(AccessibilityID.CueList.aiBar)
+        }
+    }
+}
+
+/// A running AI tool: "Transcription · ElevenLabs Scribe is transcribing · 1:12"
+/// over a bar with a segment per stage.
+private struct AITaskProgress: View {
+    let task: AITaskStatus
+
+    var body: some View {
+        // Elapsed time and time left move on their own; everything else changes with the task.
+        SwiftUI.TimelineView(.periodic(from: .now, by: 1)) { context in
+            let text = details(now: context.date)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 0) {
+                    Text(task.title).fontWeight(.medium)
+                    Text(" · " + text)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .lineLimit(1)
+                .truncationMode(.middle)
+                StageBar(stages: task.stages.count, stage: task.stage, fraction: task.fraction)
+                    .frame(maxWidth: 260)
+            }
+            .help(task.stages.enumerated().map { ($0.offset == task.stage ? "▸ " : "   ") + $0.element }.joined(separator: "\n"))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("AI task")
+            .accessibilityValue("\(task.title): \(text)")
+            .accessibilityIdentifier(AccessibilityID.CueList.aiTask)
+        }
+    }
+
+    /// "Claude · 120 of 640 lines · about 4 min left".
+    private func details(now: Date) -> String {
+        var parts = [task.detail]
+        if let since = task.waitingSince { parts.append(AITaskStatus.elapsed(since: since, now: now)) }
+        if let end = task.estimatedEnd, let left = AITaskStatus.timeLeft(until: end, now: now) { parts.append(left) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// A thin bar with a segment per stage: stages done are full, the current one
+/// fills as far as it is measured, or pulses when nothing measures it.
+private struct StageBar: View {
+    let stages: Int
+    let stage: Int
+    let fraction: Double?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<max(stages, 1), id: \.self) { index in
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.aiTint.opacity(0.18))
+                        if index < stage {
+                            Capsule().fill(Color.aiTint)
+                        } else if index == stage {
+                            if let fraction {
+                                Capsule().fill(Color.aiTint)
+                                    .frame(width: max(geometry.size.width * min(max(fraction, 0), 1), 4))
+                                    .animation(.easeOut(duration: 0.3), value: fraction)
+                            } else {
+                                Capsule().fill(Color.aiTint.opacity(pulse ? 0.75 : 0.35))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(height: 4)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
+        }
+    }
+}
+
+/// Over the rows of the lines a translator is working on now: a soft sweep in the AI tint.
+struct InFlightShimmer: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        if reduceMotion {
+            Color.aiTint.opacity(0.08)
+        } else {
+            SwiftUI.TimelineView(.animation) { context in
+                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                GeometryReader { geometry in
+                    LinearGradient(colors: [.clear, Color.aiTint.opacity(0.16), .clear], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: geometry.size.width * 0.5)
+                        .offset(x: geometry.size.width * 1.5 * phase - geometry.size.width * 0.5)
+                }
+            }
+            .background(Color.aiTint.opacity(0.04))
+            .clipped()
         }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import MediaAnalysis
 import SubtitleCore
 
@@ -7,11 +8,20 @@ struct HTTPClient: Sendable {
     var session: URLSession
     var attempts = 4
 
-    func send(_ request: URLRequest) async throws -> Data {
+    /// Sends `request`. With `uploadProgress`, its body goes up as an upload that
+    /// reports bytes sent (from 0 again on each retry).
+    func send(_ request: URLRequest, uploadProgress: (@Sendable (_ sent: Int64, _ total: Int64) -> Void)? = nil) async throws -> Data {
         var delay: Duration = .seconds(2)
         for attempt in 1...attempts {
             do {
-                let (data, response) = try await session.data(for: request)
+                let (data, response): (Data, URLResponse)
+                if let uploadProgress, let body = request.httpBody {
+                    var upload = request
+                    upload.httpBody = nil
+                    (data, response) = try await session.upload(for: upload, from: body, delegate: UploadObserver(report: uploadProgress))
+                } else {
+                    (data, response) = try await session.data(for: request)
+                }
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if (200..<300).contains(status) { return data }
                 let retryable = status == 408 || status == 409 || status == 429 || status >= 500
@@ -23,6 +33,28 @@ struct HTTPClient: Sendable {
             delay *= 2
         }
         throw AIError.provider("The request failed.")
+    }
+
+    /// Passes on the bytes an upload has sent, at most once per percent.
+    private final class UploadObserver: NSObject, URLSessionTaskDelegate, Sendable {
+        let report: @Sendable (Int64, Int64) -> Void
+        private let lastPercent = Mutex(-1)
+
+        init(report: @escaping @Sendable (Int64, Int64) -> Void) {
+            self.report = report
+        }
+
+        func urlSession(
+            _ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64,
+            totalBytesExpectedToSend: Int64
+        ) {
+            let percent = totalBytesExpectedToSend > 0 ? Int(totalBytesSent * 100 / totalBytesExpectedToSend) : 0
+            let isNew = lastPercent.withLock { last in
+                defer { last = percent }
+                return percent != last
+            }
+            if isNew { report(totalBytesSent, totalBytesExpectedToSend) }
+        }
     }
 
     /// The provider's error message ({"error": {"message": …}}, ElevenLabs'
@@ -55,10 +87,11 @@ public struct OpenAITranscriber: Transcriber {
     }
 
     public func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
         let chunks = audio.chunks
+        progress(.parts(done: 0, total: chunks.count))
         let counter = ProgressCounter(total: chunks.count, report: progress, found: found)
         let words = try await withThrowingTaskGroup(of: [TranscribedWord].self) { group in
             var next = 0
@@ -153,6 +186,7 @@ public struct ElevenLabsTranscriber: Transcriber {
     /// synthesized speech with exact onsets (0.07 s) and two TV episodes (0.1 s).
     public var wordStartLead: Double { -0.05 }
     public static let model = "scribe_v2"
+    public var uploadsInOnePiece: Bool { true }
     let apiKey: String
     let http: HTTPClient
     var endpoint = URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!
@@ -163,11 +197,11 @@ public struct ElevenLabsTranscriber: Transcriber {
     }
 
     public func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
+        progress(.encoding)
         let encoded = try OpusEncoder.oggOpus(Self.samples(of: audio))
-        progress(0.1)
         let boundary = "spotline-\(UUID().uuidString)"
         var form = MultipartForm(boundary: boundary)
         form.add(name: "model_id", value: Self.model)
@@ -183,17 +217,20 @@ public struct ElevenLabsTranscriber: Transcriber {
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = form.finish()
+        // Once every byte is up, ElevenLabs works on the whole file and says nothing until it is done.
+        let uploaded: @Sendable (Int64, Int64) -> Void = { sent, total in
+            progress(total > 0 && sent >= total ? .waiting : .uploading(sent: sent, total: total))
+        }
         let data: Data
         do {
-            data = try await http.send(request)
+            data = try await http.send(request, uploadProgress: uploaded)
         } catch AIError.provider(let message) where Self.isRetentionRefusal(message) {
             // Only enterprise accounts may turn logging off; others transcribe as usual.
             request.url = endpoint
-            data = try await http.send(request)
+            data = try await http.send(request, uploadProgress: uploaded)
         }
         let words = try Self.words(from: data)
         found(words)
-        progress(1)
         return words
     }
 
@@ -261,13 +298,13 @@ public struct ElevenLabsTranscriber: Transcriber {
 /// time order: chunks finish out of order, so each waits for the ones before it.
 private actor ProgressCounter {
     let total: Int
-    let report: @Sendable (Double) -> Void
+    let report: @Sendable (AIProgress) -> Void
     let found: @Sendable ([TranscribedWord]) -> Void
     var done = 0
     var waiting: [Int: [TranscribedWord]] = [:]
     var nextToPass = 0
 
-    init(total: Int, report: @escaping @Sendable (Double) -> Void, found: @escaping @Sendable ([TranscribedWord]) -> Void) {
+    init(total: Int, report: @escaping @Sendable (AIProgress) -> Void, found: @escaping @Sendable ([TranscribedWord]) -> Void) {
         self.total = total
         self.report = report
         self.found = found
@@ -280,7 +317,7 @@ private actor ProgressCounter {
             if !words.isEmpty { found(words.sorted { $0.start < $1.start }) }
             nextToPass += 1
         }
-        report(Double(done) / Double(max(total, 1)))
+        report(.parts(done: done, total: total))
     }
 }
 
@@ -321,7 +358,7 @@ protocol BatchedCueTranslator: CueTranslator {
 
 extension BatchedCueTranslator {
     public func translate(
-        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        _ request: TranslationRequest, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable (TranslationBatch) -> Void
     ) async throws -> TranslationBatch {
         var results = TranslationBatch(cast: request.cast)
@@ -330,26 +367,30 @@ extension BatchedCueTranslator {
         for range in AppleTranslator.batches(of: request.lines.count, first: 10, size: batchSize) {
             try Task.checkCancellation()
             let lines = Array(request.lines[range])
+            progress(.lines(done: results.translations.count, total: request.lines.count, inFlight: lines.map(\.cueID)))
             var batch = request
             batch.lines = lines
             batch.precedingContext = Array(context.suffix(contextLines))
             // People named in earlier batches go along, so later lines use the same names.
             batch.cast = results.cast
-            let translated = try await translateLines(batch).batch
+            let translated = try await translateLines(batch) { progress(.retrying(inFlight: $0)) }.batch
             results = results.adding(translated)
             found(translated)
             for line in lines {
                 if let text = translated.translations.first(where: { $0.cueID == line.cueID })?.text { context.append((line.source, text)) }
             }
-            progress(Double(results.translations.count) / Double(max(request.lines.count, 1)))
         }
+        progress(.lines(done: results.translations.count, total: request.lines.count, inFlight: []))
         return results
     }
 
     /// Translates the lines, then asks again, in halves, for any the model left out or
     /// declined (a refusal is often about one line in the batch), down to single lines.
     /// Lines that never come back are `skipped`; the editor marks them "Not translated".
-    func translateLines(_ request: TranslationRequest) async throws -> (batch: TranslationBatch, skipped: [TranslationRequest.Line]) {
+    /// `retrying` gets the cues of the lines asked for again.
+    func translateLines(
+        _ request: TranslationRequest, retrying: @Sendable ([Cue.ID]) -> Void = { _ in }
+    ) async throws -> (batch: TranslationBatch, skipped: [TranslationRequest.Line]) {
         var result: TranslationBatch
         do {
             result = try await translateBatch(request)
@@ -369,7 +410,8 @@ extension BatchedCueTranslator {
             var retry = request
             retry.lines = Array(part)
             retry.cast = result.cast.isEmpty ? request.cast : { var cast = request.cast; cast.merge(result.cast); return cast }()
-            let (more, left) = try await translateLines(retry)
+            retrying(retry.lines.map(\.cueID))
+            let (more, left) = try await translateLines(retry, retrying: retrying)
             result = result.adding(more)
             skipped += left
         }

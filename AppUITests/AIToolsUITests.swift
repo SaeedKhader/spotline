@@ -47,6 +47,10 @@ final class AIToolsUITests: XCTestCase {
         XCTAssertTrue(second.waitForExistence(timeout: 20), "The second cue never came")
         waitForValue(of: second, toEqual: "Fine, thanks.")
         XCTAssertFalse(app.descendants(matching: .any)[AccessibilityID.CueList.aiReview].exists, "Transcription is not reviewed")
+        // The AI bar says what the transcription did once it is done.
+        let done = app.descendants(matching: .any)[AccessibilityID.CueList.aiSummary]
+        XCTAssertTrue(done.waitForExistence(timeout: 10), "No summary after transcribing")
+        waitForValue(of: done, toEqual: "2 cues transcribed")
         // One undo removes the last batch.
         app.typeKey("z", modifierFlags: .command)
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: second)
@@ -63,6 +67,10 @@ final class AIToolsUITests: XCTestCase {
         let texts = app.cueCells(.text)
         waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♀")
         XCTAssertFalse(app.descendants(matching: .any)[AccessibilityID.CueList.aiReview].exists, "Translation is not reviewed")
+        let done = app.descendants(matching: .any)[AccessibilityID.CueList.aiSummary]
+        XCTAssertTrue(done.waitForExistence(timeout: 10), "No summary after translating")
+        let flagged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value ENDSWITH ' · 2 flagged'"), object: done)
+        XCTAssertEqual(XCTWaiter().wait(for: [flagged], timeout: 10), .completed, "The summary does not count the flagged lines")
         // Both lines read more than one way; each shows its variants.
         let summary = app.descendants(matching: .any)[AccessibilityID.CueList.choicesSummary]
         XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices summary")

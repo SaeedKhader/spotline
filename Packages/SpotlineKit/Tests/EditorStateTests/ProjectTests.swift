@@ -317,7 +317,7 @@ struct CountingTranscriber: Transcriber {
     var name: String { "Counting transcriber" }
 
     func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
         counter.add("transcribe")

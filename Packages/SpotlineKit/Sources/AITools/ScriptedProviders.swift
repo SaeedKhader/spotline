@@ -19,15 +19,16 @@ public struct ScriptedTranscriber: Transcriber {
     ].map { TranscribedWord(text: $0.0, start: MediaTime(seconds: $0.1, timescale: 1000), end: MediaTime(seconds: $0.2, timescale: 1000)) })
 
     public func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
         // In two parts, as a real transcriber finishes chunk by chunk.
         let half = words.count / 2
+        progress(.parts(done: 0, total: 2))
         found(Array(words[..<half]))
-        progress(0.5)
+        progress(.parts(done: 1, total: 2))
         found(Array(words[half...]))
-        progress(1)
+        progress(.parts(done: 2, total: 2))
         return words
     }
 }
@@ -41,7 +42,7 @@ public struct ScriptedTranslator: CueTranslator {
     public init() {}
 
     public func translate(
-        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        _ request: TranslationRequest, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable (TranslationBatch) -> Void
     ) async throws -> TranslationBatch {
         let prefix = "[\(Languages.base(request.targetLanguage))] "
@@ -66,8 +67,9 @@ public struct ScriptedTranslator: CueTranslator {
             translations: translations,
             cast: request.targetIsGendered ? [CastMember(name: "Beth", gender: .female), CastMember(name: "Jerry", gender: .male)] : []
         )
+        progress(.lines(done: 0, total: request.lines.count, inFlight: request.lines.map(\.cueID)))
         found(batch)
-        progress(1)
+        progress(.lines(done: request.lines.count, total: request.lines.count, inFlight: []))
         return batch
     }
 }
