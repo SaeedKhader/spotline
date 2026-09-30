@@ -2,6 +2,25 @@ import Foundation
 import MediaAnalysis
 import SubtitleCore
 
+/// How far a provider has got, in the terms of what it is doing now, so the
+/// editor can say it: a fraction only where one is measured, else what it waits for.
+public enum AIProgress: Sendable, Equatable {
+    /// Working on this Mac: 0 to 1.
+    case fraction(Double)
+    /// Compressing the audio before it goes up.
+    case encoding
+    /// Sending the audio: bytes sent of the total.
+    case uploading(sent: Int64, total: Int64)
+    /// The provider has everything and is working; nothing says how far it has got.
+    case waiting
+    /// Audio sent in parts: parts done of the total.
+    case parts(done: Int, total: Int)
+    /// Lines translated of the total, and the cues of the lines being translated now.
+    case lines(done: Int, total: Int, inFlight: [Cue.ID])
+    /// Asking again for lines a model left out or declined.
+    case retrying(inFlight: [Cue.ID])
+}
+
 /// Turns prepared dialogue audio into timed words.
 public protocol Transcriber: Sendable {
     /// "Apple Speech (on this Mac)".
@@ -9,16 +28,19 @@ public protocol Transcriber: Sendable {
     /// Seconds by which the model's word start times come before the voice,
     /// corrected by `TranscriptionPipeline`. Measured with `spotline-bench`.
     var wordStartLead: Double { get }
-    /// `language` is a BCP 47 code, nil to let the provider detect it. `progress` gets 0 to 1.
+    /// True when the audio goes up in one piece, so sending it is a step of its own.
+    var uploadsInOnePiece: Bool { get }
+    /// `language` is a BCP 47 code, nil to let the provider detect it.
     /// `found` gets words as they are heard, in time order, so cues can be shown before the end.
     func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord]
 }
 
 extension Transcriber {
     public var wordStartLead: Double { 0 }
+    public var uploadsInOnePiece: Bool { false }
 }
 
 /// Translates cues with their context: neighbouring lines, glossary, memory and the cast.
@@ -26,7 +48,7 @@ public protocol CueTranslator: Sendable {
     var name: String { get }
     /// `found` gets each batch of translations as it is done.
     func translate(
-        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        _ request: TranslationRequest, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable (TranslationBatch) -> Void
     ) async throws -> TranslationBatch
 }

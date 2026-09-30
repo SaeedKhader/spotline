@@ -287,7 +287,7 @@ extension EditorState {
                 "warnings": JSONValue(issueList.filter { $0.severity == .warning }.count),
             ],
             "ai": [
-                "running": aiTask.map { ["title": .string($0.title), "progress": JSONValue($0.fraction)] } ?? .null,
+                "running": aiTask.map { ["title": .string($0.title), "stage": .string($0.detail), "progress": JSONValue($0.overallFraction)] } ?? .null,
                 "changes_awaiting_review": JSONValue(pendingReview?.changes.count ?? 0),
             ],
             "undo": undoManager.canUndo ? .string(undoManager.undoActionName) : .null,
@@ -399,7 +399,7 @@ extension EditorState {
             ]
         }
         return [
-            "running": aiTask.map { ["title": .string($0.title), "progress": JSONValue($0.fraction)] } ?? .null,
+            "running": aiTask.map { ["title": .string($0.title), "stage": .string($0.detail), "progress": JSONValue($0.overallFraction)] } ?? .null,
             "review": review,
             "last_error": JSONValue(lastAgentVisibleError),
         ]

@@ -412,7 +412,7 @@ private struct PausingTranscriber: Transcriber {
     let gate: AsyncStream<Void>
 
     func transcribe(
-        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (Double) -> Void,
+        _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
         found(Array(words.prefix(6)))
@@ -427,7 +427,7 @@ private struct SkippingTranslator: CueTranslator {
     var name: String { "Skipping" }
 
     func translate(
-        _ request: TranslationRequest, progress: @escaping @Sendable (Double) -> Void,
+        _ request: TranslationRequest, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable (TranslationBatch) -> Void
     ) async throws -> TranslationBatch {
         let batch = TranslationBatch(translations: request.lines.filter { !$0.source.contains("alone") }.map {
