@@ -118,12 +118,12 @@ final class AIToolsUITests: XCTestCase {
         XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices filter")
         waitForValue(of: summary, toEqual: "2 lines to choose")
         let cards = app.reviewCards(".choice")
-        XCTAssertEqual(cards.count, 2)
 
         // The Choices filter lists only them; one click on a reading uses it.
         summary.click()
         let reviewing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: summary)
         XCTAssertEqual(XCTWaiter().wait(for: [reviewing], timeout: 10), .completed, "No filter")
+        XCTAssertEqual(cards.count, 2)
         let male = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH 'review.card.' AND identifier ENDSWITH '.choice.variant.1'")
         ).firstMatch

@@ -62,7 +62,8 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
         window.identifier = NSUserInterfaceItemIdentifier("main")
-        window.setContentSize(NSSize(width: 1280, height: 820))
+        // Wide enough for the cue list (source and target when translating), the video and the review sidebar.
+        window.setContentSize(NSSize(width: 1440, height: 860))
         window.center()
         let controller = NSWindowController(window: window)
         controller.windowFrameAutosaveName = "MainWindow"

@@ -22,16 +22,17 @@ public struct MainWindowView: View {
             HSplitView {
                 // Translation mode shows source and target side by side.
                 CueEditorList(editor: editor)
-                    .frame(minWidth: editor.isTranslating ? 640 : 420, idealWidth: editor.isTranslating ? 820 : 560)
+                    .frame(minWidth: editor.isTranslating ? 520 : 380, idealWidth: editor.isTranslating ? 820 : 560)
                 VStack(spacing: 0) {
                     VideoSurfaceView(editor: editor)
                     Divider()
                     TransportBar(editor: editor)
                 }
-                .frame(minWidth: 360, minHeight: 240)
+                .frame(minWidth: 320, minHeight: 240)
                 if editor.isReviewSidebarVisible {
                     ReviewSidebar(editor: editor)
                         .frame(minWidth: 280, idealWidth: 330, maxWidth: 480)
+                        .clipped()
                 }
             }
             .frame(minHeight: 280)

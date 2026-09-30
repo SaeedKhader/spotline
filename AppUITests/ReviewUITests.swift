@@ -37,9 +37,10 @@ final class ReviewUITests: XCTestCase {
         XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 10), "No issue cards")
         // Cue 3: too long a line, too fast, too short. Cue 4: no text.
         XCTAssertEqual(cards.count, 2)
-        XCTAssertEqual(cards.element(boundBy: 1).value as? String, "No text")
+        XCTAssertTrue(cards.element(boundBy: 1).staticTexts["No text"].exists, "Cue 4's card does not say it has no text")
 
-        cards.element(boundBy: 1).click()
+        // The card's header, above its options (a click on an option would try it).
+        cards.element(boundBy: 1).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).click()
         waitForValue(of: app.timecode, toEqual: "00:00:03:00")
         // Its one suggestion: delete the empty cue (Return, or 1).
         let suggestion = app.descendants(matching: .any).matching(

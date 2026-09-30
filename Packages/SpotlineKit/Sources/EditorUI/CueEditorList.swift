@@ -205,6 +205,9 @@ private struct CueRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 32, alignment: .trailing)
                 .padding(.top, 6)
+                .accessibilityValue("\(number)")
+                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .number))
+                // After the number's identifier, so the dots are their own element.
                 .overlay(alignment: .topLeading) {
                     let kinds = reviewKinds
                     if !kinds.isEmpty {
@@ -221,8 +224,6 @@ private struct CueRow: View {
                         .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .review))
                     }
                 }
-                .accessibilityValue("\(number)")
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .number))
             VStack(alignment: .leading, spacing: 6) {
                 TimeField(editor: editor, cue: cue, edge: .start, showsFrame: isHovered || isSelected)
                 TimeField(editor: editor, cue: cue, edge: .end, showsFrame: isHovered || isSelected)
