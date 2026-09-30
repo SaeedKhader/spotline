@@ -39,8 +39,8 @@ final class ReviewUITests: XCTestCase {
         XCTAssertEqual(cards.count, 2)
         XCTAssertTrue(cards.element(boundBy: 1).staticTexts["No text"].exists, "Cue 4's card does not say it has no text")
 
-        // The card's header, above its options (a click on an option would try it).
-        cards.element(boundBy: 1).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).click()
+        // The card's issue text, not its options (a click on an option would try it).
+        cards.element(boundBy: 1).staticTexts["No text"].click()
         waitForValue(of: app.timecode, toEqual: "00:00:03:00")
         // Its one suggestion: delete the empty cue (Return, or 1).
         let suggestion = app.descendants(matching: .any).matching(
