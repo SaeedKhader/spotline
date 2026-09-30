@@ -67,11 +67,14 @@ public struct SpeechLevels: Sendable, Equatable {
 
     static let silence: Float = -140
 
-    /// The loudest frame between two times (at least the frame at `start`).
+    /// The loudest frame wholly between two times (else the frame at `start`), so
+    /// the voices just before and after do not count.
     public func loudest(from start: MediaTime, to end: MediaTime) -> Float {
         guard !levels.isEmpty else { return Self.silence }
-        let first = min(max(Int(start.seconds / Self.frameSeconds), 0), levels.count - 1)
-        let last = min(max(Int((end.seconds / Self.frameSeconds).rounded(.up)), first + 1), levels.count)
+        let inside = Int((start.seconds / Self.frameSeconds).rounded(.up))..<Int((end.seconds / Self.frameSeconds).rounded(.down))
+        let fallback = Int(start.seconds / Self.frameSeconds)
+        let first = min(max(inside.isEmpty ? fallback : inside.lowerBound, 0), levels.count - 1)
+        let last = min(max(inside.isEmpty ? fallback + 1 : inside.upperBound, first + 1), levels.count)
         return levels[first..<last].max() ?? Self.silence
     }
 }

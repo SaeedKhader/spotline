@@ -69,6 +69,9 @@ public struct TranslationRequest: Sendable, Equatable {
         public var memoryExample: (source: String, target: String)?
         /// Words the transcriber was unsure of in the source.
         public var unsureWords: [String]?
+        /// How far (dB) the line's voice is under the dialogue around it, when the audio
+        /// says: a sign of crowd chatter (`WallaFilter.quieterBy`).
+        public var quieterBy: Float?
 
         public init(
             cueID: Cue.ID, source: String, start: MediaTime, end: MediaTime, voices: [String]? = nil, speakerName: String? = nil,
@@ -88,6 +91,7 @@ public struct TranslationRequest: Sendable, Equatable {
             lhs.cueID == rhs.cueID && lhs.source == rhs.source && lhs.start == rhs.start && lhs.end == rhs.end
                 && lhs.voices == rhs.voices && lhs.speakerName == rhs.speakerName && lhs.unsureWords == rhs.unsureWords
                 && lhs.memoryExample?.source == rhs.memoryExample?.source && lhs.memoryExample?.target == rhs.memoryExample?.target
+                && lhs.quieterBy == rhs.quieterBy
         }
     }
 

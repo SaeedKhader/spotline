@@ -36,6 +36,21 @@ public struct WallaFilter: Sendable {
         return words.indices.filter { !dropped.contains($0) }.map { words[$0] }
     }
 
+    /// How far (dB) each span's loudest moment is under the dialogue around it
+    /// (the median of the other spans within `windowSeconds`); nil with too little
+    /// dialogue around. Spans must be in time order. For telling a translator which
+    /// lines sound like walla.
+    public func quieterBy(_ spans: [(start: MediaTime, end: MediaTime)]) -> [Float?] {
+        let loudest = spans.map { levels.loudest(from: $0.start, to: max($0.end, $0.start + MediaTime(value: 60, timescale: 1000))) }
+        return spans.indices.map { index in
+            let around = spans.indices.filter { other in
+                other != index && abs((spans[other].start - spans[index].start).seconds) <= windowSeconds
+            }.map { loudest[$0] }.sorted()
+            guard around.count >= minimumNeighbours else { return nil }
+            return around[around.count / 2] - loudest[index]
+        }
+    }
+
     struct Stretch {
         var speaker: String?
         var indexes: [Int]

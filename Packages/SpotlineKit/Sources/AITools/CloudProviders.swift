@@ -598,9 +598,11 @@ public struct ClaudeTranslator: BatchedCueTranslator {
 
                 - Walla is background crowd chatter mixed under the dialogue: voices in a crowd, market, tavern, feast or \
                 battle that nobody in the scene is talking with ("Get a load of this fella!" from the crowd while the main \
-                characters talk). Subtitles leave it out. Set "walla" to true for such a line and leave "text" empty. A crowd \
-                line the scene is about is not walla: a chant or heckle a character reacts to, a herald's call, a line a \
-                character answers. Set "walla" to false for every other line, and when you are unsure.
+                characters talk, shouts from spectators, onlookers' remarks). Subtitles leave it out. Set "walla" to true \
+                for such a line and leave "text" empty. Lines marked "dB under the dialogue" were that much quieter in the \
+                audio than the dialogue around them: voices in the background. From 10 dB under, a line is walla unless a \
+                character in the scene answers it or the scene turns on it (a herald's call, a chant the scene is about). \
+                Set "walla" to false for every other line.
                 """
         }
         if TranslationStyle.endsLinesBare(request.targetLanguage) || request.style.namesInParentheses {
@@ -702,6 +704,9 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         for (index, line) in request.lines.enumerated() {
             var voice = line.voices.map { $0.joined(separator: " then ") } ?? "?"
             if let name = line.speakerName { voice += " (\(name))" }
+            if request.leavesOutWalla, let quieter = line.quieterBy, quieter >= Self.wallaHintDecibels {
+                voice += ", \(Int(quieter)) dB under the dialogue"
+            }
             let time = String(format: "%.1fs", line.start.seconds)
             text += "\(lineID(index)) | \(time) | \(voice) | \(sourceLine(marking: line.unsureWords, in: line.source))\n"
         }
@@ -709,6 +714,9 @@ public struct ClaudeTranslator: BatchedCueTranslator {
     }
 
     static func lineID(_ index: Int) -> String { "L\(index + 1)" }
+
+    /// Lines this far (dB) under the dialogue around them are marked for the translator as background voices.
+    static let wallaHintDecibels: Float = 10
 
     /// A line with its breaks written "\\n", as the answer writes them. (A " / "
     /// for a break was copied into translations.)

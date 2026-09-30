@@ -93,6 +93,17 @@ struct WallaFilterTests {
         #expect(filtered.map(\.text).joined(separator: " ").contains("Line 3."))
     }
 
+    @Test func linesAreMeasuredAgainstTheDialogueAroundThem() {
+        let spans = [(0.0, 1.0), (2, 3), (4, 5), (6, 7), (8, 9)].map {
+            (start: MediaTime(seconds: $0.0, timescale: 1000), end: MediaTime(seconds: $0.1, timescale: 1000))
+        }
+        let quieter = WallaFilter(levels: levels(10, [(0, 1, -20), (2, 3, -22), (4, 5, -40), (6, 7, -20), (8, 9, -18)])).quieterBy(spans)
+        #expect(quieter[2].map { abs($0 - 20) < 0.01 } == true)
+        #expect(quieter[0].map { abs($0) < 2.01 } == true)
+        // Too little dialogue around says nothing.
+        #expect(WallaFilter(levels: levels(10, [])).quieterBy(Array(spans.prefix(2))) == [nil, nil])
+    }
+
     @Test func levelsFollowTheChunksOnTheMediaTimeline() {
         // A loud second at 2 s, a quiet one at 5 s, silence between.
         let loud = [Float](repeating: 0.5, count: PreparedAudio.sampleRate)
@@ -158,6 +169,20 @@ struct WallaTranslationTests {
         let schema = try #require(format["schema"] as? [String: Any])
         let translations = try #require((schema["properties"] as? [String: Any])?["translations"] as? [String: Any])
         #expect(((translations["items"] as? [String: Any])?["required"] as? [String])?.contains("walla") == true)
+    }
+
+    @Test func linesFarUnderTheDialogueAreMarkedForTheTranslator() throws {
+        func user(_ request: TranslationRequest) -> String {
+            ((ClaudeTranslator.body(for: request)["messages"] as? [[String: Any]])?.first?["content"] as? String) ?? ""
+        }
+        var request = request(walla: true)
+        request.lines[0].voices = ["speaker_4"]
+        request.lines[0].quieterBy = 14.6
+        request.lines[1].quieterBy = 6
+        #expect(user(request).contains("L1 | 0.0s | speaker_4, 14 dB under the dialogue | Get a load of this fella!"))
+        #expect(user(request).contains("L2 | 3.0s | ? | Ser Duncan the Tall."), "A little quieter is dialogue")
+        request.leavesOutWalla = false
+        #expect(!user(request).contains("under the dialogue"))
     }
 
     @Test func aLineMarkedWallaComesBackEmptyAndMarked() throws {
