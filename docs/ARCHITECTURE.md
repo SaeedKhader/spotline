@@ -251,6 +251,33 @@ Agreed with Saeed (2026-09-29) after an audit of M0 to M7:
 - **Dark everywhere.** `NSApp.appearance` is dark, so Settings, the glossary, sheets and alerts match the editor.
 - **Dash dialogue.** A cue whose lines all start with a dash (`SubtitleText.isDialogue`) shows on the video as one block aligned to the text's start (left, or right for Arabic and Hebrew), centred as a whole, so the dashes line up.
 
+### As built in the layout rethink (M12)
+Agreed with Saeed (2026-09-30), replacing parts of M3.5, M4 and M8:
+
+```
+┌──────────────────── title bar: AI activity (while a tool runs) ─┐
+├────────────────────────────────┬────────────────────────────────┤
+│ Scopes: All · Issues · Words · │ Video + subtitle overlay        │
+│ Choices · AI Changes   ↑↓      │                                 │
+│ Cue list = editor              ├────────────────────────────────┤
+│                                │ timecode  ⏮ ◀| ▶ |▶ ⏭    fps   │
+├────────────────────────────────┴────────────────────────────────┤
+│ Actions: in/out · add/split/merge/delete · snapping · analysis · zoom │
+├─────────────────────────────────────────────────────────────────┤
+│ Mini-map                                                        │
+├─────────────────────────────────────────────────────────────────┤
+│ Timeline: ruler · cues centred · playhead fixed in the middle · │
+│ waveform along the bottom                                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+- **One place for review.** A scope bar over the cue list (shown only when there is something to review) picks what the list shows: All, or only the cues with QC issues, words to check, translation choices or AI changes, each with its count (`EditorState.reviewScope`, `ReviewScope`). A scope opens each row's review box (issues, words, variants) with the scope's "all at once" action beside the scopes (Fix Overlaps, Confirm Remaining Words, Accept Remaining Choices, Reject/Accept All Changes); in All only the selected cue's boxes open and other rows get a dot. Previous/Next Cue to Review (⌥⌘↑/↓) walk the scope, or every kind in All. A cue being fixed stays listed until the user leaves it. This replaces the actions bar's counts, the AI bar's change count, the choice and word review headers and the issues panel. Review › Review Issues (⌥⌘I), AI › Review AI Changes and Review › Show All Cues pick scopes from the menus; a cleanup's proposals open the AI Changes scope.
+- **Four colours.** Besides the system neutrals: the accent colour for the selection and focus, purple (`aiTint`) for what an AI tool wrote or suggests, orange (`attentionTint`) for what needs checking (QC warnings, words to check, reading speed), red (`errorTint`) for errors and deleted text only. Plain timeline cues, the waveform, speech, shot changes and the playhead are neutral. AI-written text is purple without a box around it.
+- **Transport under the video**: timecode, previous shot change, step back, play, step forward, next shot change, frame rate. The actions bar keeps editing only.
+- **Timeline.** The playhead stays in the middle and the media moves under it. Dragging empty space (or scrolling) scrubs frame by frame; a click on the ruler goes to that time; a click on empty space deselects. Clicking a cue selects it and goes to it; dragging it moves it without jumping first. Cues sit in the middle, two lines each (every line cut short on its own, right-aligned for right-to-left text); the waveform grows up from the bottom. Before the start and after the end are hatched. The mini-map seeks.
+- **Leaving the text, leaving the cue.** A click on a cue's text edits it; elsewhere on its row selects the cue and leaves the text; below the last row, or empty timeline, deselects; on the video, leaves the text and keeps the cue. Esc leaves the text; a second Esc is Cue › Deselect Cue.
+- **AI activity in the title bar.** While a tool runs, the middle of the title bar shows its step, detail and progress bar with Stop; clicking it lists every step with Cancel. For a few seconds after, what it did.
+
 ## 7. Pro workflow features (backlog, roughly in order)
 
 - J/K/L shuttle, frame step, set in/out at playhead, "snap to shot change", nudge by frame, split/merge cues, ripple.

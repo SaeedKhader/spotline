@@ -17,7 +17,8 @@ struct AIActivityPill: View {
                         isShowingSteps.toggle()
                     } label: {
                         AITaskProgress(task: task)
-                            .frame(minWidth: 240, idealWidth: 360, maxWidth: 420)
+                            // A fixed size, so the title bar does not re-centre it as the text changes.
+                            .frame(width: 380, alignment: .leading)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -37,7 +38,9 @@ struct AIActivityPill: View {
         }
         .font(.callout)
         .padding(.horizontal, 12)
-        .padding(.vertical, 3)
+        .frame(height: 30)
+        // Toolbar items animate their layout; progress updates must not slide the activity around.
+        .transaction { $0.animation = nil }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.CueList.aiBar)
     }

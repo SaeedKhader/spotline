@@ -450,22 +450,23 @@ private struct StageBar: View {
 }
 
 /// A band of the AI tint sweeping left to right, over and over; still with Reduce Motion.
+/// Driven by the clock, not a repeating animation: a `repeatForever` started in
+/// `onAppear` also repeats every layout change made with it, which in the title
+/// bar sent the whole activity sliding back and forth.
 private struct StageShimmer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: CGFloat = 0
 
     var body: some View {
-        GeometryReader { geometry in
-            let band = max(geometry.size.width * 0.45, 12)
-            LinearGradient(colors: [Color.aiTint.opacity(0), Color.aiTint, Color.aiTint.opacity(0)], startPoint: .leading, endPoint: .trailing)
-                .frame(width: band)
-                .offset(x: -band + (geometry.size.width + band) * phase)
+        SwiftUI.TimelineView(.animation(paused: reduceMotion)) { context in
+            let phase = reduceMotion ? 0.5 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+            GeometryReader { geometry in
+                let band = max(geometry.size.width * 0.45, 12)
+                LinearGradient(colors: [Color.aiTint.opacity(0), Color.aiTint, Color.aiTint.opacity(0)], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: band)
+                    .offset(x: -band + (geometry.size.width + band) * phase)
+            }
         }
         .clipShape(Capsule())
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { phase = 1 }
-        }
     }
 }
 
