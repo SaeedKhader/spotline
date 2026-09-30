@@ -2,7 +2,7 @@ import EditorCommands
 import SpotlineAccessibility
 import XCTest
 
-/// Importing a styled ASS file, and reviewing QC issues in the cue list's Issues scope.
+/// Importing a styled ASS file, and reviewing QC issues in the review sidebar's Issues filter.
 final class ReviewUITests: XCTestCase {
     @MainActor
     func testImportsStyledASS() throws {
@@ -22,27 +22,71 @@ final class ReviewUITests: XCTestCase {
     }
 
     @MainActor
-    func testIssuesScopeListsIssuesAndSelectsCues() throws {
+    func testIssuesFilterListsCardsAndSelectsCues() throws {
         let app = launchApp(openSubtitles: true, subtitles: "styled-23.976.ass")
         _ = button(EditorCommand.stepForward, in: app)
+        // The review sidebar shows by itself while there is something to review.
+        XCTAssertTrue(app.descendants(matching: .any)[AccessibilityID.Review.root].waitForExistence(timeout: 10), "No review sidebar")
         waitForValue(of: app.descendants(matching: .any)[AccessibilityID.CueList.reviewSummary], toEqual: "2 cues need review")
 
-        // Review › Review Issues (Option-Command-I): only the cues with issues, each with its issues.
+        // Review › Review Issues (Option-Command-I): a card per cue with issues; the cue list keeps every cue.
         app.typeKey("i", modifierFlags: [.command, .option])
         waitForValue(of: app.descendants(matching: .any)[AccessibilityID.Issues.preset], toEqual: "Netflix (Adult)")
-        XCTAssertEqual(app.cueCells(.text).count, 2)
-        let items = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'issues.item.'"))
-        XCTAssertTrue(items.firstMatch.waitForExistence(timeout: 10), "No issues listed")
+        XCTAssertEqual(app.cueCells(.text).count, 4)
+        let cards = app.reviewCards(".issues")
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 10), "No issue cards")
         // Cue 3: too long a line, too fast, too short. Cue 4: no text.
-        XCTAssertEqual(items.count, 4)
-        XCTAssertEqual(items.element(boundBy: 3).value as? String, "No text")
+        XCTAssertEqual(cards.count, 2)
+        XCTAssertTrue(cards.element(boundBy: 1).staticTexts["No text"].exists, "Cue 4's card does not say it has no text")
 
-        items.element(boundBy: 3).click()
+        // The card's issue text, not its options (a click on an option would try it).
+        cards.element(boundBy: 1).staticTexts["No text"].click()
         waitForValue(of: app.timecode, toEqual: "00:00:03:00")
+        // Its one suggestion: delete the empty cue (Return, or 1).
+        let suggestion = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'review.card.' AND identifier ENDSWITH '.issues.suggestion.0'")
+        ).element(boundBy: 1)
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 10), "No suggestion on the empty cue's card")
+        XCTAssertEqual(suggestion.label, "Delete the Cue")
 
-        // Previous Cue to Review goes back to cue 3 (2 s).
+        // Previous Cue to Review goes back to cue 3's card (2 s).
         app.typeKey(.upArrow, modifierFlags: [.command, .option])
         waitForValue(of: app.timecode, toEqual: "00:00:02:00")
+
+        // The title bar button counts what is left and hides the sidebar; View › Show Review
+        // (Option-Command-0) shows it again.
+        let toggle = app.descendants(matching: .any)[AccessibilityID.Review.toggle]
+        waitForValue(of: toggle, toEqual: "2 to review")
+        toggle.click()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: cards.firstMatch)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 10), .completed, "The sidebar stayed")
+        app.typeKey("0", modifierFlags: [.command, .option])
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 10), "The sidebar did not come back")
+    }
+
+    @MainActor
+    func testAnIssueIsFixedRightInItsCard() throws {
+        let app = launchApp(openSubtitles: true, subtitles: "styled-23.976.ass")
+        _ = button(EditorCommand.stepForward, in: app)
+        let cards = app.reviewCards(".issues")
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 10), "No issue cards")
+        XCTAssertEqual(cards.count, 2)
+
+        // Cue 4 has no text: Edit opens its text (and timing) in the card; ⌘Return finishes.
+        let edit = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'review.card.' AND identifier ENDSWITH '.issues.edit'")
+        ).element(boundBy: 1)
+        XCTAssertTrue(edit.waitForExistence(timeout: 10), "No Edit on the card")
+        edit.click()
+        let text = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'review.card.' AND identifier ENDSWITH '.issues.text'")
+        ).firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 10), "No text in the card")
+        app.typeText("Goodbye")
+        waitForValue(of: app.cueCells(.text).element(boundBy: 3), toEqual: "Goodbye")
+        app.typeKey(.return, modifierFlags: .command)
+        let fixed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 1"), object: cards)
+        XCTAssertEqual(XCTWaiter().wait(for: [fixed], timeout: 10), .completed, "The card stayed after the fix")
     }
 
     /// The styled fixture's first cue (bottom, 0.5–1.5 s) and the EXIT sign (top, 1–2.5 s) overlap.

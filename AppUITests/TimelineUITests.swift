@@ -141,6 +141,9 @@ final class TimelineUITests: XCTestCase {
         audioTrack.click()
         let item = audioTrack.menus.menuItems.matching(NSPredicate(format: "title CONTAINS %@", title)).firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5), "Audio Track submenu did not open")
+        // A submenu item exists before it is laid out (its frame is infinite until then).
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: item)
+        _ = XCTWaiter().wait(for: [hittable], timeout: 5)
         item.click()
     }
 }

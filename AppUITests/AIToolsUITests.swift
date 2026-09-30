@@ -113,26 +113,25 @@ final class AIToolsUITests: XCTestCase {
         XCTAssertTrue(done.waitForExistence(timeout: 10), "No summary after translating")
         let flagged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value ENDSWITH ' · 2 flagged'"), object: done)
         XCTAssertEqual(XCTWaiter().wait(for: [flagged], timeout: 10), .completed, "The summary does not count the flagged lines")
-        // Both lines read more than one way; each shows its variants.
+        // Both lines read more than one way: a choice card each in the review sidebar.
         let summary = app.descendants(matching: .any)[AccessibilityID.CueList.choicesSummary]
-        XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices summary")
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices filter")
         waitForValue(of: summary, toEqual: "2 lines to choose")
-        // Outside the review, only the selected line shows its variants.
-        XCTAssertLessThanOrEqual(app.cueCells(.choices).count, 1)
+        let cards = app.reviewCards(".choice")
 
-        // The Choices scope shows only those lines, each with its variants; one click on a variant uses it.
+        // The Choices filter lists only them; one click on a reading uses it.
         summary.click()
         let reviewing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: summary)
-        XCTAssertEqual(XCTWaiter().wait(for: [reviewing], timeout: 10), .completed, "No review")
-        XCTAssertEqual(app.cueCells(.choices).count, 2)
+        XCTAssertEqual(XCTWaiter().wait(for: [reviewing], timeout: 10), .completed, "No filter")
+        XCTAssertEqual(cards.count, 2)
         let male = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH 'cueList.row.' AND identifier ENDSWITH '.choices.1'")
+            NSPredicate(format: "identifier BEGINSWITH 'review.card.' AND identifier ENDSWITH '.choice.variant.1'")
         ).firstMatch
-        XCTAssertTrue(male.waitForExistence(timeout: 10), "No variants")
+        XCTAssertTrue(male.waitForExistence(timeout: 10), "No readings")
         male.click()
         waitForValue(of: summary, toEqual: "1 line to choose")
 
-        // Accepting the rest keeps the translator's pick and ends the review.
+        // Accepting the rest keeps the translator's pick; the filter goes with the last choice.
         chooseAIMenuItem(.acceptRemainingChoices, in: app)
         let ended = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: summary)
         XCTAssertEqual(XCTWaiter().wait(for: [ended], timeout: 10), .completed, "Choices remain")
@@ -140,7 +139,52 @@ final class AIToolsUITests: XCTestCase {
         // The short last line was joined to the one before once the translation was in (M11).
         waitForValue(of: texts.element(boundBy: 1), toEqual: "[ar] Where are you going, John? ♀\n[ar] First cue")
         XCTAssertEqual(texts.count, 2)
-        XCTAssertEqual(app.cueCells(.choices).count, 0)
+        XCTAssertEqual(cards.count, 0)
+    }
+
+    @MainActor
+    func testReviewCardsAreDecidedWithTheKeyboardAndUndone() throws {
+        let app = launchApp(source: "translation-source-23.976.srt")
+        XCTAssertTrue(app.cueCells(.source).firstMatch.waitForExistence(timeout: 10), "No source cells")
+        chooseAIMenuItem(.translateWithAI, in: app)
+        let texts = app.cueCells(.text)
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♀")
+        let summary = app.descendants(matching: .any)[AccessibilityID.CueList.choicesSummary]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices filter")
+        summary.click()
+        let cards = app.reviewCards(".choice")
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 10), "No choice cards")
+
+        // Clicking a card (its header, above the readings) selects its cue and gives the sidebar the keys;
+        // 2 tries the second reading, and the card stays until Return confirms it.
+        cards.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).click()
+        app.typeKey("2", modifierFlags: [])
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♂")
+        waitForValue(of: summary, toEqual: "1 line to choose")
+        XCTAssertEqual(cards.count, 2, "The card stays until confirmed")
+        app.typeKey(.return, modifierFlags: [])
+        let confirmed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 1"), object: cards)
+        XCTAssertEqual(XCTWaiter().wait(for: [confirmed], timeout: 10), .completed, "Confirm did not settle the card")
+
+        // The note offers Undo, which lists the card again (the reading still in); ⌘Z takes the reading back.
+        let undo = app.buttons[AccessibilityID.Review.undoButton]
+        XCTAssertTrue(undo.waitForExistence(timeout: 10), "No Undo after deciding")
+        undo.click()
+        let reopened = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 2"), object: cards)
+        XCTAssertEqual(XCTWaiter().wait(for: [reopened], timeout: 10), .completed, "Undo did not list the card again")
+        XCTAssertEqual(texts.element(boundBy: 0).value as? String, "[ar] Where are you going? ♂")
+        app.typeKey("z", modifierFlags: .command)
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♀")
+        waitForValue(of: summary, toEqual: "2 lines to choose")
+
+        // Return keeps the translator's pick and moves on; the next Return settles the last.
+        cards.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).click()
+        app.typeKey(.return, modifierFlags: [])
+        waitForValue(of: summary, toEqual: "1 line to choose")
+        app.typeKey(.return, modifierFlags: [])
+        let ended = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: summary)
+        XCTAssertEqual(XCTWaiter().wait(for: [ended], timeout: 10), .completed, "Choices remain")
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♀")
     }
 
     @MainActor
@@ -151,7 +195,7 @@ final class AIToolsUITests: XCTestCase {
         let texts = app.cueCells(.text)
         waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♀")
         let summary = app.descendants(matching: .any)[AccessibilityID.CueList.choicesSummary]
-        XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices summary")
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices filter")
 
         chooseAIMenuItem(.clearTranslation, in: app)
         waitForValue(of: texts.element(boundBy: 0), toEqual: "")

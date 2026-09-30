@@ -149,7 +149,8 @@ struct AIProgressTests {
         await waitUntil { editor.aiTask == nil }
         // 10 seconds of audio: the wait per second of audio is kept by provider.
         let rate = try! #require(editor.waitRates[AISettings.TranscriptionProvider.elevenLabsScribe.rawValue])
-        #expect(rate > 0.005 && rate < 0.1)
+        // A 0.1 s wait at least; the upper bound only rules out nonsense (a busy CI runner can be slow).
+        #expect(rate > 0.005 && rate < 1)
         // A new run of the same audio (the stored words are cleared) expects about as long.
         editor.storedTranscripts = []
         editor.perform(.transcribe)

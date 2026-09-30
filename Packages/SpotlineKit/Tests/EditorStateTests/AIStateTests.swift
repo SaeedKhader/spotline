@@ -180,16 +180,15 @@ struct AIStateTests {
         let editor = makeEditor(cues: cues)
         #expect(editor.isOn(.reviewChoices) == false)
         #expect(editor.perform(.reviewChoices))
-        #expect(editor.isReviewingChoices)
-        #expect(editor.selectedCueID == cues[1].id, "The least sure line is selected")
-        // Up and down move through the flagged lines in the review's order.
-        #expect(editor.perform(.nextCue))
+        #expect(editor.isOn(.reviewChoices) == true)
+        #expect(editor.reviewItems.map(\.cueID) == cues.map(\.id), "Open choices, in time order")
         #expect(editor.selectedCueID == cues[0].id)
-        // A pick moves on to the next open choice.
-        editor.chooseVariant(0, forCue: cues[0].id)
-        #expect(editor.selectedCueID == cues[2].id)
+        // A pick goes in; confirming it moves on to the next open choice.
+        editor.decide(editor.currentReviewItem!, .variant(0))
+        editor.decide(editor.currentReviewItem!, .primary)
+        #expect(editor.selectedCueID == cues[1].id)
         #expect(editor.perform(.acceptRemainingChoices))
-        #expect(!editor.isReviewingChoices)
+        #expect(editor.reviewScope == .all)
         #expect(editor.cuesToChoose.isEmpty)
         #expect(editor.track.cues[2].text == "اجلس.", "Accepting keeps the translator's picks")
         #expect(!editor.canPerform(.reviewChoices))
@@ -230,11 +229,12 @@ struct AIStateTests {
         #expect(editor.wordsToCheckCount == 3)
         // The review shows the cues with words, least sure first.
         #expect(editor.perform(.reviewWords))
-        #expect(editor.isReviewingWords && editor.isOn(.reviewWords) == true)
+        #expect(editor.isOn(.reviewWords) == true)
         #expect(editor.cuesToCheck.map(\.id) == [other.id, line.id])
-        #expect(editor.selectedCueID == other.id)
-        // Confirming the last word of a cue moves to the next one.
-        editor.confirmUnsureWord(0, forCue: other.id)
+        #expect(editor.reviewItems.map(\.kind) == [.word(0), .word(1), .word(0)], "A card per word, in time order")
+        editor.select(other.id)
+        // Confirming the last word of a cue moves to the next card.
+        editor.decide(editor.currentReviewItem!, .primary)
         #expect(editor.cue(withID: other.id)?.unsureWords == nil)
         #expect(editor.selectedCueID == line.id)
         // Editing the text clears only the word edited out.
@@ -244,11 +244,11 @@ struct AIStateTests {
         #expect(editor.cue(withID: line.id)?.unsureWords?.count == 2)
         // Confirm Remaining keeps the rest and ends the review.
         #expect(editor.perform(.confirmRemainingWords))
-        #expect(editor.wordsToCheckCount == 0 && !editor.isReviewingWords)
+        #expect(editor.wordsToCheckCount == 0 && editor.reviewScope == .all)
         #expect(!editor.canPerform(.reviewWords))
     }
 
-    @Test func fixingAWordKeepsItsCueInPlaceUntilTheUserLeavesIt() {
+    @Test func fixingAWordFromItsCardSelectsItInTheText() {
         var aron = cue("Ser Aron taught me sword and shield.", at: 0)
         aron.unsureWords = [UnsureWord(text: "Aron", confidence: 0.38)]
         var egg = cue("Egg.", at: 3)
@@ -256,21 +256,17 @@ struct AIStateTests {
         let editor = makeEditor(cues: [aron, egg])
         #expect(editor.perform(.reviewWords))
         #expect(editor.selectedCueID == aron.id)
-        // Clicking the word asks the editor to select it.
-        editor.selectUnsureWord(0, forCue: aron.id)
+        // Fix asks the editor to select the word, to type over it.
+        editor.editReviewItem(editor.currentReviewItem!)
         #expect(editor.wordSelectionRequest?.cueID == aron.id && editor.wordSelectionRequest?.word == "Aron")
-        // Typing over it clears the word, but the cue stays listed and selected.
+        // Typing over it settles the card.
         editor.setText("Ser Arlan taught me sword and shield.", forCue: aron.id)
         #expect(editor.cue(withID: aron.id)?.unsureWords == nil)
-        #expect(editor.reviewedWordCues.map(\.id) == [aron.id, egg.id])
+        #expect(editor.reviewItems.map(\.cueID) == [egg.id])
         #expect(editor.selectedCueID == aron.id)
-        editor.select(egg.id)
-        #expect(editor.reviewedWordCues.map(\.id) == [egg.id])
-        // The last word fixed: the review stays while its cue is selected, and ends after.
+        // The last word fixed: the filter goes back to everything.
         editor.setText("Aegon.", forCue: egg.id)
-        #expect(editor.isReviewingWords)
-        editor.select(aron.id)
-        #expect(!editor.isReviewingWords)
+        #expect(editor.reviewScope == .all)
     }
 
     @Test func splittingKeepsEachWordWithItsHalf() {
@@ -304,7 +300,7 @@ struct AIStateTests {
         #expect(editor.perform(.translateWithAI))
         #expect(asked == [1])
         #expect(!editor.isTranslating && editor.aiTask == nil)
-        #expect(editor.isReviewingWords)
+        #expect(editor.isOn(.reviewWords) == true)
         #expect(editor.selectedCueID == unsure.id)
         editor.confirmTranslatingUnsureCues = { _ in .cancel }
         #expect(!editor.perform(.translateWithAI))

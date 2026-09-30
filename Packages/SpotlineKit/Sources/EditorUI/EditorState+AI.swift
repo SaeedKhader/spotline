@@ -81,11 +81,11 @@ extension EditorState {
         case EditorCommand.clearTranscript.id:
             return idle && (!storedTranscripts.isEmpty || !(sourceTrack ?? track).cues.isEmpty)
         case EditorCommand.reviewWords.id:
-            return isReviewingWords || !cuesToCheck.isEmpty
+            return !cuesToCheck.isEmpty
         case EditorCommand.confirmRemainingWords.id:
             return !cuesToCheck.isEmpty
         case EditorCommand.reviewChoices.id:
-            return isReviewingChoices || track.cues.contains { $0.flag?.isResolved == false }
+            return track.cues.contains { $0.flag?.isResolved == false }
         case EditorCommand.acceptRemainingChoices.id:
             return track.cues.contains { $0.flag?.isResolved == false }
         case EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id:
@@ -97,7 +97,7 @@ extension EditorState {
         case EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
             return pendingReview != nil
         case EditorCommand.reviewChanges.id:
-            return reviewScope == .changes || pendingReview != nil
+            return pendingReview != nil
         default:
             return false
         }
@@ -112,7 +112,7 @@ extension EditorState {
             if !unsure.isEmpty {
                 switch confirmTranslatingUnsureCues(unsure.count) {
                 case .review:
-                    if !isReviewingWords { toggleWordReview() }
+                    showReview(.words)
                     return true
                 case .cancel:
                     return false
@@ -126,9 +126,9 @@ extension EditorState {
         case EditorCommand.clearTranscript.id:
             guard confirmClearingTranscript(isTranslating) else { return false }
             clearTranscript()
-        case EditorCommand.reviewWords.id: toggleWordReview()
+        case EditorCommand.reviewWords.id: toggleReviewFilter(.words)
         case EditorCommand.confirmRemainingWords.id: confirmRemainingWords()
-        case EditorCommand.reviewChoices.id: toggleChoiceReview()
+        case EditorCommand.reviewChoices.id: toggleReviewFilter(.choices)
         case EditorCommand.acceptRemainingChoices.id: acceptRemainingChoices()
         case EditorCommand.maskProfanity.id: runCleanup(.maskProfanity)
         case EditorCommand.removeHearingImpaired.id: runCleanup(.removeHearingImpaired)
@@ -142,7 +142,7 @@ extension EditorState {
             rejectChanges(to: [id])
         case EditorCommand.acceptAllChanges.id: acceptChanges(to: nil)
         case EditorCommand.rejectAllChanges.id: rejectChanges(to: nil)
-        case EditorCommand.reviewChanges.id: toggleChangeReview()
+        case EditorCommand.reviewChanges.id: toggleReviewFilter(.changes)
         default: return false
         }
         return true
@@ -177,7 +177,6 @@ extension EditorState {
     private func finishReview(of ids: Set<Cue.ID>?, in review: ProposedChangeSet, selecting next: Cue.ID?) {
         let rest = ids.map { review.removing($0) }
         pendingReview = rest.flatMap { $0.isEmpty ? nil : $0 }
-        if pendingReview == nil, reviewScope == .changes { reviewScope = .all }
         if let ids, let selected = selectedCueID, ids.contains(selected) {
             if let next, pendingReview?.change(forCue: next) != nil {
                 select(next)
@@ -197,9 +196,9 @@ extension EditorState {
 
     func presentReview(_ review: ProposedChangeSet) {
         pendingReview = review
-        reviewScope = .changes
-        let first = review.changes.min { $0.cue.start < $1.cue.start }
-        if let first { select(first.cueID) }
+        reviewItemID = nil
+        if let first = review.changes.min(by: { $0.cue.start < $1.cue.start }) { select(first.cueID) }
+        showReview(.changes)
     }
 
     /// "transcription", "translation" or "an agent", for the tint's tooltip.
@@ -222,16 +221,6 @@ extension EditorState {
         track.cues.reduce(0) { $0 + ($1.unsureWords?.count ?? 0) }
     }
 
-    /// The cues the word review shows: those with words to check, in the order the
-    /// review started with, and the selected one even once its words are fixed, so
-    /// fixing a word does not move the cue away while typing.
-    public var reviewedWordCues: [Cue] {
-        let open = Set(cuesToCheck.map(\.id))
-        let known = Set(wordReviewOrder)
-        let listed = wordReviewOrder.compactMap(cue(withID:)).filter { open.contains($0.id) || $0.id == selectedCueID }
-        return listed + cuesToCheck.filter { !known.contains($0.id) }
-    }
-
     /// Selects a word to check in its cue's text, to type over it.
     public func selectUnsureWord(_ index: Int, forCue id: Cue.ID) {
         guard let word = cue(withID: id)?.unsureWords?[safe: index] else { return }
@@ -240,37 +229,22 @@ extension EditorState {
         textFocusRequest += 1
     }
 
-    /// Keeps a word as the transcriber heard it: one undoable edit. In the
-    /// review, a cue with nothing left to check makes way for the next.
+    /// Keeps a word as the transcriber heard it: one undoable edit.
     public func confirmUnsureWord(_ index: Int, forCue id: Cue.ID) {
         guard let cueIndex = track.cues.firstIndex(where: { $0.id == id }), let words = track.cues[cueIndex].unsureWords,
               words.indices.contains(index)
         else { return }
-        let next = isReviewingWords && words.count == 1 ? nextCueToCheck(after: id) : nil
-        if next == nil, isReviewingWords, words.count == 1, cuesToCheck.count == 1 { isReviewingWords = false }
         edit("Confirm Word") { track in
             var remaining = words
             remaining.remove(at: index)
             track.cues[cueIndex].unsureWords = remaining.isEmpty ? nil : remaining
         }
-        if let next, cue(withID: next)?.unsureWords?.isEmpty == false { select(next) }
     }
 
-    /// Keeps every word still to check, as one undoable edit, and leaves the review.
+    /// Keeps every word still to check, as one undoable edit.
     func confirmRemainingWords() {
         edit(EditorCommand.confirmRemainingWords.title) { track in
             for index in track.cues.indices { track.cues[index].unsureWords = nil }
-        }
-        isReviewingWords = false
-    }
-
-    /// Shows only the cues with words to check, least sure first, or every cue again.
-    func toggleWordReview() {
-        isReviewingWords.toggle()
-        if isReviewingWords {
-            isReviewingChoices = false
-            wordReviewOrder = cuesToCheck.map(\.id)
-            if let first = cuesToCheck.first, selectedCue?.unsureWords?.isEmpty != false { select(first.id) }
         }
     }
 
@@ -282,13 +256,6 @@ extension EditorState {
         playback.seek(toFrame: from.firstFrame(at: frameRate), rate: frameRate)
         playbackStopTime = (word.end ?? start) + lead
         playback.play(rate: 1)
-    }
-
-    /// The cue to check after `id` in the review's order.
-    private func nextCueToCheck(after id: Cue.ID) -> Cue.ID? {
-        let order = reviewedWordCues.map(\.id).filter { $0 == id || cue(withID: $0)?.unsureWords?.isEmpty == false }
-        guard let index = order.firstIndex(of: id) else { return order.first }
-        return order[(index + 1)...].first ?? order[..<index].first
     }
 
     // MARK: Translation choices
@@ -304,29 +271,13 @@ extension EditorState {
     /// about them are re-ranked in the same edit.
     public func chooseVariant(_ index: Int, forCue id: Cue.ID) {
         guard let flag = cue(withID: id)?.flag, flag.variants.indices.contains(index) else { return }
-        let next = isReviewingChoices ? nextChoice(after: id) : nil
         edit("Choose Translation") { track in track.choose(variant: index, forCue: id) }
-        if let next, cue(withID: next)?.flag?.isResolved == false { select(next) }
     }
 
-    /// Settles every open flag as it stands, as one undoable edit, and leaves the review.
+    /// Settles every open flag as it stands, as one undoable edit.
     func acceptRemainingChoices() {
+        reviewTrials = reviewTrials.filter { $0.value.item.kind != .choice }
         edit(EditorCommand.acceptRemainingChoices.title) { track in track.resolveFlags() }
-        isReviewingChoices = false
-    }
-
-    /// Shows only the cues with open flags, least confident first, or every cue again.
-    func toggleChoiceReview() {
-        isReviewingChoices.toggle()
-        if isReviewingChoices { isReviewingWords = false }
-        if isReviewingChoices, let first = cuesToChoose.first, selectedCue?.flag?.isResolved != false { select(first.id) }
-    }
-
-    /// The flagged cue after `id` in the review's order.
-    private func nextChoice(after id: Cue.ID) -> Cue.ID? {
-        let order = cuesToChoose.map(\.id)
-        guard let index = order.firstIndex(of: id) else { return order.first }
-        return order[(index + 1)...].first ?? order[..<index].first
     }
 
     // MARK: Running tools
@@ -429,6 +380,7 @@ extension EditorState {
                 let done = summary(written)
                 afterward?()
                 self.show(done)
+                if !self.reviewItems(in: .all).isEmpty { self.wantsReviewSidebar = true }
                 self.onAITaskEnd?(AITaskEnd(title: "\(title) finished", message: done.fullText, succeeded: true))
             } catch {
                 guard let self else { return }
@@ -850,8 +802,6 @@ extension EditorState {
             if let language { track.languageCode = language }
             sources = SourceState(sourceTrack: nil, sourceFile: nil, transcripts: [])
         }
-        isReviewingWords = false
-        isReviewingChoices = false
         translationPairDidChange()
     }
 

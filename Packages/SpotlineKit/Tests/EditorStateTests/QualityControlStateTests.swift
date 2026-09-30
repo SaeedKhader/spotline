@@ -97,7 +97,7 @@ struct QualityControlStateTests {
         #expect(editor.perform(.toggleIssuesPanel))
         #expect(editor.reviewScope == .issues)
         #expect(editor.isOn(.toggleIssuesPanel) == true)
-        #expect(editor.reviewListCues.map(\.id) == [empty.id])
+        #expect(editor.reviewItems.map(\.cueID) == [empty.id])
         #expect(editor.selectedCueID == empty.id, "The first cue with issues is selected")
         #expect(editor.perform(.toggleIssuesPanel))
         #expect(editor.reviewScope == .all)

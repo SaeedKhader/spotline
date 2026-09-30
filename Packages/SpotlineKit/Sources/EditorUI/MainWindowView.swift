@@ -5,8 +5,9 @@ import SubtitleCore
 import SubtitleTranslation
 import SwiftUI
 
-/// The editor window. Top: the cue list (each row edits its cue) on the left
-/// and the video, with the transport under it, on the right. Bottom: the
+/// The editor window. Top: the cue list (each row edits its cue) on the left,
+/// the video with the transport under it, and the review sidebar on the right
+/// (toggled from the title bar). Bottom: the
 /// editing actions, the mini-map of the whole media and the timeline. The
 /// title bar shows what a running AI tool is doing.
 public struct MainWindowView: View {
@@ -21,13 +22,18 @@ public struct MainWindowView: View {
             HSplitView {
                 // Translation mode shows source and target side by side.
                 CueEditorList(editor: editor)
-                    .frame(minWidth: editor.isTranslating ? 640 : 420, idealWidth: editor.isTranslating ? 820 : 560)
+                    .frame(minWidth: editor.isTranslating ? 520 : 380, idealWidth: editor.isTranslating ? 820 : 560)
                 VStack(spacing: 0) {
                     VideoSurfaceView(editor: editor)
                     Divider()
                     TransportBar(editor: editor)
                 }
-                .frame(minWidth: 400, minHeight: 240)
+                .frame(minWidth: 320, minHeight: 240)
+                if editor.isReviewSidebarVisible {
+                    ReviewSidebar(editor: editor)
+                        .frame(minWidth: 280, idealWidth: 330, maxWidth: 480)
+                        .clipped()
+                }
             }
             .frame(minHeight: 280)
             VStack(spacing: 0) {
