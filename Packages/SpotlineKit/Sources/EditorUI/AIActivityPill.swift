@@ -82,34 +82,52 @@ private struct AITaskSteps: View {
     }
 }
 
-/// The window toolbar's one item: the AI activity, centred in the title bar.
+/// The window toolbar: the AI activity centred in the title bar, and at its right
+/// end the button that shows and hides the review sidebar.
 @MainActor
-final class AIActivityToolbar: NSObject, NSToolbarDelegate {
-    static let item = NSToolbarItem.Identifier("aiActivity")
+final class EditorToolbar: NSObject, NSToolbarDelegate {
+    static let activity = NSToolbarItem.Identifier("aiActivity")
+    static let review = NSToolbarItem.Identifier("review")
     let editor: EditorState
 
     init(editor: EditorState) {
         self.editor = editor
     }
 
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.item] }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.item] }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, Self.activity, .flexibleSpace, Self.review]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
 
     func toolbar(
         _ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
-        guard itemIdentifier == Self.item else { return nil }
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        let view = NSHostingView(rootView: AIActivityPill(editor: editor))
+        switch itemIdentifier {
+        case Self.activity:
+            return hostedItem(itemIdentifier, AIActivityPill(editor: editor), size: AIActivityPill.size, label: "AI Activity")
+        case Self.review:
+            return hostedItem(itemIdentifier, ReviewToggleButton(editor: editor), size: ReviewToggleButton.size, label: "Review")
+        default:
+            return nil
+        }
+    }
+
+    /// A toolbar item showing a SwiftUI view at a fixed size (the item does not follow its content's size).
+    private func hostedItem(_ identifier: NSToolbarItem.Identifier, _ content: some View, size: CGSize, label: String) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        let view = NSHostingView(rootView: content)
         view.sizingOptions = []
-        view.frame = NSRect(origin: .zero, size: AIActivityPill.size)
+        view.frame = NSRect(origin: .zero, size: size)
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            view.widthAnchor.constraint(equalToConstant: AIActivityPill.size.width),
-            view.heightAnchor.constraint(equalToConstant: AIActivityPill.size.height),
+            view.widthAnchor.constraint(equalToConstant: size.width),
+            view.heightAnchor.constraint(equalToConstant: size.height),
         ])
         item.view = view
-        item.label = "AI Activity"
+        item.label = label
         item.isBordered = false
         return item
     }

@@ -40,16 +40,11 @@ public final class EditorState {
         didSet {
             if track.languageCode != oldValue.languageCode { translationPairDidChange() }
             guard track.cues != oldValue.cues else { return }
-            // The review ends when no choice is left open.
-            if isReviewingChoices, !track.cues.contains(where: { $0.flag?.isResolved == false }) { isReviewingChoices = false }
-            // The cue being fixed keeps the review open until the user leaves it.
-            if isReviewingWords, !track.cues.contains(where: { $0.unsureWords?.isEmpty == false }),
-               !(selectedCueID.map(wordReviewOrder.contains) ?? false) {
-                isReviewingWords = false
-            }
             updateSourceCues()
             updateIssues()
             updateCurrentCue()
+            // A filter with nothing left in it goes back to everything.
+            if reviewScope != .all, reviewItems.isEmpty { reviewScope = .all }
         }
     }
 
@@ -167,22 +162,33 @@ public final class EditorState {
             projectDidChange?(.other)
         }
     }
-    /// Which cues the cue list shows: all of them, or only those with one kind of thing to review.
+    /// What the review sidebar lists: everything to review, or one kind of it.
     public internal(set) var reviewScope: ReviewScope = .all
-    /// True while the cue list shows only the lines AI translation flagged, least confident first.
-    public internal(set) var isReviewingChoices: Bool {
-        get { reviewScope == .choices }
-        set { setReviewScope(.choices, newValue) }
+    /// The review card last picked; it stays marked while its cue is selected (`currentReviewItem`).
+    public internal(set) var reviewItemID: String?
+    /// Whether the review sidebar shows (View › Show Review, the title bar button). An AI tool
+    /// finishing with something to review, or a review command, shows it.
+    public internal(set) var wantsReviewSidebar: Bool {
+        didSet { if wantsReviewSidebar != oldValue { settings?.set(wantsReviewSidebar, forKey: Self.reviewSidebarKey) } }
     }
-    /// True while the cue list shows only the cues with words to check (AI › Review Words to Check).
-    public internal(set) var isReviewingWords: Bool {
-        get { reviewScope == .words }
-        set { setReviewScope(.words, newValue) }
-    }
-
-    /// Turns a scope on, or off (back to every cue) if it is the one showing.
-    private func setReviewScope(_ scope: ReviewScope, _ isOn: Bool) {
-        if isOn { reviewScope = scope } else if reviewScope == scope { reviewScope = .all }
+    static let reviewSidebarKey = "ReviewSidebarShown"
+    /// Cards settled since the media was opened, for "Show settled".
+    public internal(set) var settledReviews: [SettledReview] = []
+    /// The card settled last, for the sidebar's Undo note; cleared once another edit follows.
+    public internal(set) var lastSettledReview: SettledReview?
+    /// Whether settled cards stay listed, faded.
+    public var showsSettledReviews = false
+    /// Asks the sidebar to take the keyboard focus (after editing in a card).
+    public internal(set) var reviewFocusRequest = 0
+    /// Cards whose options are being tried, by `ReviewItem.id`: picking one applies it, and
+    /// the card stays listed (even once fixed) until it is confirmed.
+    public internal(set) var reviewTrials: [String: ReviewTrial] = [:]
+    /// The card whose cue is being edited in the sidebar (Fix, Edit, E); it stays
+    /// on screen while typing, even once the edit settles it.
+    public internal(set) var reviewEditingItem: ReviewItem? {
+        // The card's text editor goes with it, focused or not: typing is over, so single-key
+        // shortcuts (Space, J, K, L…) work again.
+        didSet { if reviewEditingItem == nil, oldValue != nil { isEditingText = false } }
     }
     /// Where playback pauses by itself: after a word played for checking.
     @ObservationIgnored var playbackStopTime: MediaTime?
@@ -191,13 +197,7 @@ public final class EditorState {
     static let qcPresetKey = "QCPreset"
     /// Show times as HH:MM:SS,mmm instead of SMPTE frames.
     public private(set) var showsMilliseconds = false
-    public internal(set) var selectedCueID: Cue.ID? {
-        // A word review with nothing left to check ends once the user leaves the cue they fixed last.
-        didSet { if isReviewingWords, selectedCueID != oldValue, wordsToCheckCount == 0 { isReviewingWords = false } }
-    }
-    /// The cues the word review shows, in the order it started with, so a cue
-    /// being fixed stays in place (`reviewedWordCues`).
-    @ObservationIgnored var wordReviewOrder: [Cue.ID] = []
+    public internal(set) var selectedCueID: Cue.ID?
     /// Asks the selected cue's text editor to select a word to check, to type over it.
     public internal(set) var wordSelectionRequest: WordSelectionRequest?
     /// The file the subtitles were last imported from or exported to.
@@ -320,6 +320,11 @@ public final class EditorState {
     /// The cue whose text the current typing session changes. Keystrokes in one
     /// session undo together.
     @ObservationIgnored private var textEditCueID: Cue.ID?
+    /// Counts changes to the undo history (edits, undos, redos), so the review sidebar's
+    /// Undo note acts only while its decision is the last thing done.
+    @ObservationIgnored var historySerial = 0
+    /// The undo history when the last card was settled.
+    @ObservationIgnored var lastSettledHistory = 0
     /// True while the translator notes are being typed, so the typing undoes as one step.
     @ObservationIgnored var translatorNotesSession = false
 
@@ -359,6 +364,7 @@ public final class EditorState {
         self.settings = settings
         self.translationStore = translationStore
         self.qcPreset = settings?.string(forKey: Self.qcPresetKey).flatMap(QCPreset.named) ?? .standard
+        self.wantsReviewSidebar = settings?.object(forKey: Self.reviewSidebarKey) as? Bool ?? true
         self.aiSettings = AISettings.load(from: settings)
         self.aiProviders = launchOptions.isUITestMode ? .scripted : .live()
         self.undoManager = UndoManager()
@@ -456,9 +462,11 @@ public final class EditorState {
         case EditorCommand.mergeWithNext.id:
             selectedCueIndex.map { $0 < track.cues.count - 1 } ?? false
         case EditorCommand.previousIssue.id, EditorCommand.nextIssue.id:
-            !cueIDsToReview(in: reviewScope).isEmpty
+            !reviewItems.isEmpty
         case EditorCommand.showAllCues.id:
-            reviewScope != .all
+            !reviewItems(in: .all).isEmpty && (reviewScope != .all || !isReviewSidebarVisible)
+        case EditorCommand.toggleReviewSidebar.id:
+            true
         case EditorCommand.deselectCue.id:
             selectedCueID != nil
         case EditorCommand.fixOverlaps.id:
@@ -468,7 +476,9 @@ public final class EditorState {
         case EditorCommand.toggleMilliseconds.id:
             true
         case EditorCommand.toggleIssuesPanel.id:
-            reviewScope == .issues || !issues.isEmpty
+            issues.values.contains { $0.contains { !$0.kind.isFrameIssue } }
+        case EditorCommand.reviewFrames.id:
+            issues.values.contains { $0.contains(where: \.kind.isFrameIssue) }
         case EditorCommand.openSourceSubtitles.id:
             true
         case EditorCommand.addNamesToGlossary.id:
@@ -532,10 +542,12 @@ public final class EditorState {
         case EditorCommand.toggleSnapping.id: isSnappingEnabled
         case EditorCommand.toggleSpeechHighlight.id: isSpeechHighlighted
         case EditorCommand.toggleMilliseconds.id: showsMilliseconds
-        case EditorCommand.toggleIssuesPanel.id: reviewScope == .issues
-        case EditorCommand.reviewChanges.id: reviewScope == .changes
-        case EditorCommand.reviewChoices.id: isReviewingChoices
-        case EditorCommand.reviewWords.id: isReviewingWords
+        case EditorCommand.toggleReviewSidebar.id: isReviewSidebarVisible
+        case EditorCommand.toggleIssuesPanel.id: isShowingReview(.issues)
+        case EditorCommand.reviewFrames.id: isShowingReview(.frames)
+        case EditorCommand.reviewChanges.id: isShowingReview(.changes)
+        case EditorCommand.reviewChoices.id: isShowingReview(.choices)
+        case EditorCommand.reviewWords.id: isShowingReview(.words)
         case EditorCommand.togglePositionTop.id: selectedCue.map { $0.position == .top }
         default: nil
         }
@@ -585,19 +597,23 @@ public final class EditorState {
         case EditorCommand.togglePositionTop.id:
             if let cue = selectedCue { setPosition(cue.position == .top ? .bottom : .top, forCue: cue.id) }
         case EditorCommand.previousIssue.id:
-            return selectIssue(forward: false)
+            return stepReviewItem(forward: false)
         case EditorCommand.nextIssue.id:
-            return selectIssue(forward: true)
+            return stepReviewItem(forward: true)
         case EditorCommand.toggleMilliseconds.id:
             showsMilliseconds.toggle()
         case EditorCommand.toggleIssuesPanel.id:
-            setReviewScope(.issues, reviewScope != .issues)
-            if reviewScope == .issues, let first = cueIDsToReview(in: .issues).first,
-               selectedCueID.map({ issues[$0] == nil }) ?? true {
-                select(first)
-            }
+            toggleReviewFilter(.issues)
+        case EditorCommand.reviewFrames.id:
+            toggleReviewFilter(.frames)
         case EditorCommand.showAllCues.id:
-            reviewScope = .all
+            showReview(.all)
+        case EditorCommand.toggleReviewSidebar.id:
+            if isReviewSidebarVisible {
+                wantsReviewSidebar = false
+            } else {
+                showReview(reviewScope)
+            }
         case EditorCommand.deselectCue.id:
             select(nil)
         case EditorCommand.openSourceSubtitles.id:
@@ -716,6 +732,9 @@ public final class EditorState {
         shuttleRate = 0
         selectedCueID = nil
         reviewScope = .all
+        settledReviews = []
+        lastSettledReview = nil
+        reviewTrials = [:]
         playbackStopTime = nil
         track = SubtitleTrack()
         subtitleFile = nil
@@ -794,8 +813,7 @@ public final class EditorState {
 
     /// Selects the previous or next cue. While typing, the cursor moves to its text.
     private func selectNeighbour(offset: Int) {
-        // While reviewing choices, the neighbours are the flagged cues in the list's order.
-        let cues = isReviewingChoices ? cuesToChoose : track.cues
+        let cues = track.cues
         guard !cues.isEmpty else { return }
         let current = selectedCueID.flatMap { id in cues.firstIndex { $0.id == id } }
         let index = current.map { $0 + offset } ?? (offset > 0 ? 0 : cues.count - 1)
@@ -803,18 +821,6 @@ public final class EditorState {
         let keepTyping = isEditingText
         select(cues[index].id)
         if keepTyping { textFocusRequest += 1 }
-    }
-
-    /// Selects the next (or previous) cue the review scope lists (in All, any cue
-    /// with something to review), in the list's order. Returns false when there is none that way.
-    private func selectIssue(forward: Bool) -> Bool {
-        let order = reviewScope == .all ? track.cues.map(\.id) : reviewListCues.map(\.id)
-        let marked = cueIDsToReview(in: reviewScope)
-        let current = selectedCueID.flatMap(order.firstIndex(of:)) ?? (forward ? -1 : order.count)
-        let candidates = forward ? Array((current + 1)..<order.count) : Array((0..<max(current, 0)).reversed())
-        guard let index = candidates.first(where: { marked.contains(order[$0]) }) else { return false }
-        select(order[index])
-        return true
     }
 
     /// L plays forward and speeds up with each press (1×, 2×, 4×, 8×); J does the same backward.
@@ -1038,14 +1044,52 @@ public final class EditorState {
     /// Two or more lines split between lines; one line splits at the word nearest its middle.
     func splitCue(_ id: Cue.ID, at time: MediaTime?) -> Bool {
         guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return false }
-        let cue = track.cues[index]
+        // With word times: at the gap between words nearest the playhead, each half with its words.
+        if let (first, second) = splitAtWords(track.cues[index], near: time) {
+            edit("Split Cue") { track in
+                track.cues[index] = first
+                track.cues.insert(second, at: index + 1)
+            }
+            return true
+        }
+        guard let (first, second) = halves(of: track.cues[index], at: time) else { return false }
+        edit("Split Cue") { track in
+            track.cues[index] = first
+            track.cues.insert(second, at: index + 1)
+        }
+        return true
+    }
+
+    /// The cue split where its words are spoken: at the gap between words nearest `time` (inside
+    /// the cue), else at the best pause; the first half up through the pause, each half's words
+    /// rebalanced into lines. Nil without word times for the cue (a translation, an imported file).
+    func splitAtWords(_ cue: Cue, near time: MediaTime?) -> (Cue, Cue)? {
+        guard !isTranslating, let words = storedTranscripts.last?.words, !words.isEmpty else { return nil }
+        let split: PauseSplit?
+        if let time, cue.start < time, time < cue.end {
+            split = PauseSplitter.split(of: cue, words: words, near: time, rate: frameRate, shotChanges: shotChangeFrames, gapFrames: qcPreset.minimumGapFrames)
+        } else {
+            split = PauseSplitter.splits(of: cue, words: words, rate: frameRate, shotChanges: shotChangeFrames, gapFrames: qcPreset.minimumGapFrames)
+                .first { $0.pause != nil }
+        }
+        guard let split, var (first, second) = halves(of: cue, at: split.secondStart) else { return nil }
+        first.end = split.firstEnd
+        first.text = QualityControl.rebalanced(split.first, preset: qcPreset) ?? split.first
+        first.unsureWords = Self.words(cue.unsureWords, in: first.text)
+        second.text = QualityControl.rebalanced(split.second, preset: qcPreset) ?? split.second
+        second.unsureWords = Self.words(cue.unsureWords, in: second.text)
+        return (first, second)
+    }
+
+    /// The two cues splitting `cue` at `time` makes (see `splitCue(_:at:)`); nil when it cannot split there.
+    func halves(of cue: Cue, at time: MediaTime?) -> (Cue, Cue)? {
         let oneFrame = MediaTime(frame: 1, rate: frameRate)
         var at = time ?? cue.start
         if !(cue.start + oneFrame <= at && at + oneFrame <= cue.end) {
             let middle = cue.start + MediaTime(value: (cue.duration.value), timescale: cue.duration.timescale * 2)
             at = middle.snapped(to: frameRate)
         }
-        guard cue.start < at, at < cue.end else { return false }
+        guard cue.start < at, at < cue.end else { return nil }
         let (firstText, secondText) = Self.splitText(cue.text)
         var first = cue
         first.end = at
@@ -1066,11 +1110,7 @@ public final class EditorState {
             second.sourceCueID = ids[half]
             second.joinedSourceCueIDs = ids.count - half > 1 ? Array(ids[(half + 1)...]) : nil
         }
-        edit("Split Cue") { track in
-            track.cues[index] = first
-            track.cues.insert(second, at: index + 1)
-        }
-        return true
+        return (first, second)
     }
 
     /// The ones of `words` that `text` still has, nil when none.
@@ -1097,23 +1137,32 @@ public final class EditorState {
         if let id = selectedCueID { mergeWithNext(id) }
     }
 
-    /// Joins a cue and the next one: their lines, until the later end.
-    func mergeWithNext(_ id: Cue.ID) {
+    /// Joins a cue and the next one: their lines (or `text`), until the later end.
+    func mergeWithNext(_ id: Cue.ID, text: String? = nil) {
         guard let index = track.cues.firstIndex(where: { $0.id == id }), index + 1 < track.cues.count else { return }
         let next = track.cues[index + 1]
+        let merged = Self.merged(
+            track.cues[index], with: next,
+            text: text ?? QualityControl.mergedText(track.cues[index], next, preset: .init(id: "", name: "", summary: "", minimumGapFrames: 0), speaker: speaker(of:))
+        )
         edit("Merge Cues") { track in
-            var merged = track.cues[index]
-            merged.end = max(merged.end, next.end)
-            merged.text = [merged.text, next.text].filter { !$0.isEmpty }.joined(separator: "\n")
-            merged.flag = nil
-            let unsure = (merged.unsureWords ?? []) + (next.unsureWords ?? [])
-            merged.unsureWords = unsure.isEmpty ? nil : unsure
-            let voices = (merged.voices ?? []) + (next.voices ?? []).filter { !(merged.voices ?? []).contains($0) }
-            merged.voices = voices.isEmpty ? nil : voices
-            merged.joinSources(of: next)
             track.cues[index] = merged
             track.cues.remove(at: index + 1)
         }
+    }
+
+    /// A cue and the next one as one: their lines (or `text`), until the later end.
+    static func merged(_ cue: Cue, with next: Cue, text: String? = nil) -> Cue {
+        var merged = cue
+        merged.end = max(merged.end, next.end)
+        merged.text = text ?? [merged.text, next.text].filter { !$0.isEmpty }.joined(separator: "\n")
+        merged.flag = nil
+        let unsure = (merged.unsureWords ?? []) + (next.unsureWords ?? [])
+        merged.unsureWords = unsure.isEmpty ? nil : unsure
+        let voices = (merged.voices ?? []) + (next.voices ?? []).filter { !(merged.voices ?? []).contains($0) }
+        merged.voices = voices.isEmpty ? nil : voices
+        merged.joinSources(of: next)
+        return merged
     }
 
     /// Adds an empty cue after `id`: two frames after it ends (a common
@@ -1198,6 +1247,7 @@ public final class EditorState {
         change(&edited)
         edited.cues.sort { $0.start < $1.start }
         guard edited != track else { return }
+        historySerial += 1
         if !coalescing {
             endTextEditSession()
             registerUndo(restoring: before, actionName: actionName)
@@ -1265,6 +1315,7 @@ public final class EditorState {
 
     /// Undo and redo: puts back `snapshot` and registers the reverse.
     private func restore(_ snapshot: Snapshot, actionName: String) {
+        historySerial += 1
         let change: ProjectChange = undoManager.isUndoing ? .undo : .redo
         registerUndo(
             restoring: Snapshot(track: track, selectedCueID: selectedCueID, sources: snapshot.sources.map { _ in sourceState }),

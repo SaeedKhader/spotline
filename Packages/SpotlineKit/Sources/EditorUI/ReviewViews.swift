@@ -5,107 +5,6 @@ import SubtitleCore
 import SubtitleTranslation
 import SwiftUI
 
-/// The text an AI tool proposes for a cue, in place of the cue's text editor
-/// until it is accepted or rejected: the new text in the tint colour, as a word
-/// diff when the cue had text (removed words struck out in red), with ✓ and ✗.
-struct ProposedText: View {
-    let editor: EditorState
-    let change: ProposedChange
-    let direction: TextDirection
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top, spacing: 6) {
-                Group {
-                    if let before = change.before, !before.text.isEmpty {
-                        DiffText(old: before.text, new: change.cue.text)
-                    } else {
-                        Text(change.cue.text)
-                            .foregroundStyle(Color.aiTint)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .font(SpotlineStyle.cueFont)
-                .environment(\.layoutDirection, direction.layoutDirection)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                ReviewButtons(editor: editor, cueID: change.cueID)
-            }
-            ProposalDetails(editor: editor, change: change)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .frame(minHeight: 58, alignment: .top)
-        .background(Color.aiTint.opacity(0.1), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(Color.aiTint.opacity(0.5)))
-        .help("Proposed by \(editor.pendingReview?.title ?? "an AI tool"): accept or reject")
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Proposed text")
-        .accessibilityValue(change.cue.text)
-        .accessibilityIdentifier(AccessibilityID.CueList.cell(change.cueID, .proposal))
-    }
-}
-
-/// A proposed change that leaves the text alone (timing), or removes the cue:
-/// a line under the text with ✓ and ✗.
-struct ProposalBox: View {
-    let editor: EditorState
-    let change: ProposedChange
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(Color.aiTint)
-            if case .delete = change.kind {
-                Text("Remove this cue")
-                    .foregroundStyle(Color.errorTint)
-            }
-            ProposalDetails(editor: editor, change: change)
-            Spacer(minLength: 0)
-            ReviewButtons(editor: editor, cueID: change.cueID)
-        }
-        .font(.callout)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color.aiTint.opacity(0.1), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Proposed change")
-        .accessibilityValue(change.cue.text)
-        .accessibilityIdentifier(AccessibilityID.CueList.cell(change.cueID, .proposal))
-    }
-}
-
-/// What else a change does, as one caption: timing, and the tool's note.
-struct ProposalDetails: View {
-    let editor: EditorState
-    let change: ProposedChange
-
-    var body: some View {
-        let parts = self.parts
-        if !parts.isEmpty || change.note != nil {
-            HStack(spacing: 6) {
-                if !parts.isEmpty {
-                    Text(parts.joined(separator: " · "))
-                        .foregroundStyle(.secondary)
-                }
-                if let note = change.note {
-                    Text(note)
-                        .foregroundStyle(Color.attentionTint)
-                }
-            }
-            .font(.caption)
-        }
-    }
-
-    private var parts: [String] {
-        guard let before = change.before, change.kind != .delete else { return [] }
-        return [
-            before.start != change.cue.start || before.end != change.cue.end
-                ? "\(editor.label(for: change.cue.start)) – \(editor.label(for: change.cue.end))" : nil,
-        ].compactMap { $0 }
-    }
-}
-
 /// Words of `old` that go struck out in red, words of `new` in the AI tint.
 struct DiffText: View {
     let old: String
@@ -139,34 +38,9 @@ struct DiffText: View {
     }
 }
 
-/// Accept (✓) and reject (✗) for one proposed change.
-struct ReviewButtons: View {
-    let editor: EditorState
-    let cueID: Cue.ID
-
-    var body: some View {
-        HStack(spacing: 6) {
-            button(.acceptChange, systemImage: "checkmark.circle.fill", tint: Color.accentColor) { editor.acceptChanges(to: [cueID]) }
-            button(.rejectChange, systemImage: "xmark.circle.fill", tint: .secondary) { editor.rejectChanges(to: [cueID]) }
-        }
-        .font(.title3)
-    }
-
-    private func button(_ command: EditorCommand, systemImage: String, tint: some ShapeStyle, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(command.title, systemImage: systemImage)
-                .labelStyle(.iconOnly)
-                .foregroundStyle(tint)
-        }
-        .buttonStyle(.borderless)
-        .help(command.title)
-        .accessibilityIdentifier(AccessibilityID.CueList.reviewAction(cueID, command.id))
-    }
-}
-
-/// A cue a tool proposes to add (transcription), laid out like the cues around
-/// it: its place, start and end and text, marked as proposed until
-/// it is accepted or rejected.
+/// A cue a tool proposes to add, laid out like the cues around it: its place,
+/// start and end and text, marked as proposed until it is accepted or rejected
+/// in the review sidebar.
 struct ProposedCueRow: View {
     let editor: EditorState
     let change: ProposedChange
@@ -195,7 +69,6 @@ struct ProposedCueRow: View {
                     .accessibilityLabel("Proposed text")
                     .accessibilityValue(cue.text)
                     .accessibilityIdentifier(AccessibilityID.CueList.proposedCell(cue.id, .text))
-                ReviewButtons(editor: editor, cueID: cue.id)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -227,85 +100,6 @@ struct ProposedCueRow: View {
         }
         .padding(.vertical, 4)
         .environment(\.layoutDirection, .leftToRight)
-    }
-}
-
-/// A line AI translation could translate more than one way, under its text
-/// while the choice is open: why the translator chose what it did and how sure
-/// it was, then every variant, the one in use marked. One click uses another.
-struct ChoiceBox: View {
-    let editor: EditorState
-    let cue: Cue
-    let flag: TranslationFlag
-    let direction: TextDirection
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch")
-                    .foregroundStyle(Color.aiTint)
-                Text("\(Int((flag.confidence * 100).rounded()))%")
-                    .monospacedDigit()
-                    .foregroundStyle(flag.confidence < 0.75 ? Color.attentionTint : Color.secondary)
-                    .help("How sure the translator was of its pick")
-                if !flag.note.isEmpty {
-                    Text(flag.note)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .help(flag.note)
-                }
-            }
-            .font(.caption)
-            ForEach(Array(flag.variants.enumerated()), id: \.offset) { index, variant in
-                VariantOption(editor: editor, cueID: cue.id, index: index, variant: variant, isChosen: index == flag.chosen, direction: direction)
-            }
-        }
-        .padding(6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.aiTint.opacity(0.06), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Translation choice")
-        .accessibilityValue(flag.note)
-        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .choices))
-    }
-}
-
-/// One variant of a flagged line: who it assumes ("Beth ♀ to Morty ♂") and its text.
-private struct VariantOption: View {
-    let editor: EditorState
-    let cueID: Cue.ID
-    let index: Int
-    let variant: TranslationVariant
-    let isChosen: Bool
-    let direction: TextDirection
-
-    var body: some View {
-        let text = SubtitleText.visibleLines(of: variant.text).joined(separator: " / ")
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: isChosen ? "largecircle.fill.circle" : "circle")
-                .foregroundStyle(isChosen ? Color.aiTint : Color.secondary)
-            Text(variant.summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(width: 130, alignment: .leading)
-            Text(text)
-                .lineLimit(2)
-                .environment(\.layoutDirection, direction.layoutDirection)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .font(.callout)
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
-        .onTapGesture { editor.chooseVariant(index, forCue: cueID) }
-        .help(isChosen ? "In use" : "Use this translation")
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(isChosen ? [.isButton, .isSelected] : .isButton)
-        .accessibilityLabel(variant.summary)
-        .accessibilityValue(variant.text)
-        .accessibilityIdentifier(AccessibilityID.CueList.variant(cueID, index))
-        .accessibilityAction { editor.chooseVariant(index, forCue: cueID) }
     }
 }
 
@@ -488,89 +282,5 @@ struct InFlightShimmer: View {
             .background(Color.aiTint.opacity(0.04))
             .clipped()
         }
-    }
-}
-
-/// Under a cue with words the transcriber was unsure of: each word with how
-/// sure it was, a button to hear it and one to keep it. Fixing the text in the
-/// editor above clears the word too.
-struct WordCheckBox: View {
-    let editor: EditorState
-    let cue: Cue
-    let words: [UnsureWord]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "ear").foregroundStyle(Color.attentionTint)
-                Text(words.count == 1 ? "The transcription wasn't sure of this word" : "The transcription wasn't sure of these words")
-                    .foregroundStyle(.secondary)
-            }
-            .font(.caption)
-            ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                WordToCheck(editor: editor, cueID: cue.id, index: index, word: word)
-            }
-            Text("Listen, then click the word to fix it in the text above, or confirm it.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.attentionTint.opacity(0.07), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Words to check")
-        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .words))
-    }
-}
-
-/// One word to check: the word, how sure the transcriber was, Play and Confirm.
-private struct WordToCheck: View {
-    let editor: EditorState
-    let cueID: Cue.ID
-    let index: Int
-    let word: UnsureWord
-
-    var body: some View {
-        let percent = word.confidence.map { "\(Int(($0 * 100).rounded()))%" }
-        HStack(spacing: 8) {
-            Button {
-                editor.selectUnsureWord(index, forCue: cueID)
-            } label: {
-                Text("“\(word.text)”")
-                    .underline(color: Color.attentionTint)
-                    .font(.callout)
-            }
-            .help("Select the word in the text to type over it")
-            .accessibilityIdentifier(AccessibilityID.CueList.selectWord(cueID, index))
-            if let percent {
-                Text(percent)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .help("How sure the transcription was")
-            }
-            Spacer(minLength: 8)
-            Button {
-                editor.playUnsureWord(index, forCue: cueID)
-            } label: {
-                Label("Play", systemImage: "play.circle")
-            }
-            .disabled(word.start == nil || !editor.hasMedia)
-            .help("Hear the word")
-            .accessibilityIdentifier(AccessibilityID.CueList.playWord(cueID, index))
-            Button {
-                editor.confirmUnsureWord(index, forCue: cueID)
-            } label: {
-                Label("Confirm", systemImage: "checkmark.circle")
-            }
-            .help("The word is right")
-            .accessibilityIdentifier(AccessibilityID.CueList.confirmWord(cueID, index))
-        }
-        .buttonStyle(.borderless)
-        .labelStyle(.titleAndIcon)
-        .font(.caption)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(word.text)
-        .accessibilityValue(percent.map { "\(word.text), \($0)" } ?? word.text)
-        .accessibilityIdentifier(AccessibilityID.CueList.word(cueID, index))
     }
 }

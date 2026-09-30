@@ -140,7 +140,7 @@ extension EditorCommand {
     public static let joinShortLines = EditorCommand(
         id: "cue.joinShortLines", title: "Join Short Lines", category: .review
     )
-    /// Steps through the cues the review scope lists (in All, every cue with something to review).
+    /// Steps through the review sidebar's cards under its filter.
     public static let previousIssue = EditorCommand(
         id: "navigation.previousIssue", title: "Previous Cue to Review", category: .review,
         defaultShortcut: KeyShortcut(.upArrow, modifiers: [.command, .option])
@@ -149,14 +149,24 @@ extension EditorCommand {
         id: "navigation.nextIssue", title: "Next Cue to Review", category: .review,
         defaultShortcut: KeyShortcut(.downArrow, modifiers: [.command, .option])
     )
-    /// The cue list shows every cue again, leaving a review scope.
+    /// The review sidebar lists everything to review again, leaving a filter.
     public static let showAllCues = EditorCommand(
-        id: "review.showAll", title: "Show All Cues", category: .review
+        id: "review.showAll", title: "Review Everything", category: .review
     )
-    /// A toggle: the cue list shows only the cues with QC issues, each with its issues. See `EditorState.isOn(_:)`.
+    /// A toggle: the review sidebar lists only the cues with QC issues. See `EditorState.isOn(_:)`.
     public static let toggleIssuesPanel = EditorCommand(
         id: "review.toggleIssuesPanel", title: "Review Issues", category: .review,
         defaultShortcut: KeyShortcut(.character("i"), modifiers: [.command, .option])
+    )
+    /// A toggle: the review sidebar right of the video, where every kind of review is decided
+    /// (also the button at the right end of the title bar).
+    public static let toggleReviewSidebar = EditorCommand(
+        id: "view.toggleReview", title: "Show Review", category: .view,
+        defaultShortcut: KeyShortcut(.character("0"), modifiers: [.command, .option])
+    )
+    /// A toggle: the review sidebar lists only the cues with frame issues (shot changes, gaps).
+    public static let reviewFrames = EditorCommand(
+        id: "review.reviewFrames", title: "Review Frame Issues", category: .review
     )
     public static let shuttleBackward = EditorCommand(
         id: "playback.shuttleBackward", title: "Shuttle Backward", category: .playback,
@@ -286,8 +296,8 @@ extension EditorCommand {
     public static let clearTranscript = EditorCommand(
         id: "ai.clearTranscript", title: "Clear Transcript…", category: .ai
     )
-    /// Shows only the lines AI translation could translate more than one way, least
-    /// confident first, each with its variants to pick from; or every cue again.
+    /// A toggle: the review sidebar lists only the lines AI translation could translate
+    /// more than one way, each with its variants to pick from.
     public static let reviewChoices = EditorCommand(
         id: "ai.reviewChoices", title: "Review Translation Choices", category: .ai,
         defaultShortcut: KeyShortcut(.character("v"), modifiers: [.command, .control])
@@ -296,7 +306,7 @@ extension EditorCommand {
     public static let acceptRemainingChoices = EditorCommand(
         id: "ai.acceptRemainingChoices", title: "Accept Remaining Choices", category: .ai
     )
-    /// Shows only the cues with words the transcriber was unsure of, least sure first, or every cue again.
+    /// A toggle: the review sidebar lists only the words the transcriber was unsure of.
     public static let reviewWords = EditorCommand(
         id: "ai.reviewWords", title: "Review Words to Check", category: .ai,
         defaultShortcut: KeyShortcut(.character("w"), modifiers: [.command, .control])
@@ -328,7 +338,7 @@ extension EditorCommand {
         id: "ai.acceptAll", title: "Accept All Changes", category: .ai,
         defaultShortcut: KeyShortcut(.returnKey, modifiers: [.command, .option])
     )
-    /// A toggle: the cue list shows only the cues an AI tool proposes changes to.
+    /// A toggle: the review sidebar lists only the changes an AI tool proposes.
     public static let reviewChanges = EditorCommand(
         id: "ai.reviewChanges", title: "Review AI Changes", category: .ai
     )
@@ -344,10 +354,10 @@ extension EditorCommand {
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
         previousCue, nextCue, deselectCue, previousShotChange, nextShotChange,
-        showAllCues, toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps, joinShortLines,
+        showAllCues, toggleIssuesPanel, reviewFrames, previousIssue, nextIssue, fixOverlaps, joinShortLines,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
-        toggleMilliseconds,
+        toggleMilliseconds, toggleReviewSidebar,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
         transcribe, translateWithAI, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,

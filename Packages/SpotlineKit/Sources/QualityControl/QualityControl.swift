@@ -81,7 +81,9 @@ public enum QualityControl {
                         add(.lineTooLong(line: number, characters: line.count), "Line \(number + 1) has \(line.count) characters (max \(max))")
                     }
                 }
-                if let max = preset.maxCharactersPerSecond, cue.readingSpeed > max {
+                // A speed the user accepted stays accepted until the cue reads faster.
+                if let max = preset.maxCharactersPerSecond, cue.readingSpeed > max,
+                   cue.acceptedReadingSpeed.map({ cue.readingSpeed > $0 + 0.005 }) ?? true {
                     add(.readingSpeed(cue.readingSpeed), "Reading speed \(Int(cue.readingSpeed.rounded())) c/s (max \(max.compact))")
                 }
             }
@@ -144,7 +146,7 @@ extension Double {
 
 extension MediaTime {
     /// Seconds to two decimals, e.g. "0.83 s".
-    var shortSeconds: String {
+    public var shortSeconds: String {
         let hundredths = Int((seconds * 100).rounded())
         let fraction = hundredths % 100
         let decimals = fraction == 0 ? "" : fraction % 10 == 0 ? ".\(fraction / 10)" : fraction < 10 ? ".0\(fraction)" : ".\(fraction)"

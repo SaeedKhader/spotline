@@ -13,7 +13,7 @@ import SwiftUI
 public final class SpotlineDocument: NSDocument, ProjectActions {
     public let editor: EditorState
     /// Supplies the title bar's AI activity item.
-    private lazy var activityToolbar = AIActivityToolbar(editor: editor)
+    private lazy var toolbarDelegate = EditorToolbar(editor: editor)
     private let workspace: EditorWorkspace
     private let encodingCache = ProjectFile.EncodingCache()
     /// Where a save is writing, so the video's path from the project is right after Save As.
@@ -52,13 +52,13 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
 
     override public func makeWindowControllers() {
         let window = NSWindow(contentViewController: NSHostingController(rootView: MainWindowView(editor: editor)))
-        // The AI activity in the middle of the title bar. An AppKit toolbar, not SwiftUI's
+        // The AI activity in the middle of the title bar, the review button at its right. An AppKit toolbar, not SwiftUI's
         // (bridged from the view), which let the top of the window's content run under it.
         let toolbar = NSToolbar(identifier: "MainWindow")
-        toolbar.delegate = activityToolbar
+        toolbar.delegate = toolbarDelegate
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
-        toolbar.centeredItemIdentifiers = [AIActivityToolbar.item]
+        toolbar.centeredItemIdentifiers = [EditorToolbar.activity]
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
         window.identifier = NSUserInterfaceItemIdentifier("main")

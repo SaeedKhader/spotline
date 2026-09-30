@@ -54,11 +54,9 @@ public enum AccessibilityID {
         public static func cell(_ cueID: UUID, _ column: Column) -> String { "\(row(cueID)).\(column.rawValue)" }
         /// A row's button for an editor command, e.g. `cueList.row.<id>.command.cue.delete`.
         public static func action(_ cueID: UUID, _ commandID: String) -> String { "\(row(cueID)).\(command(commandID))" }
-        /// The review scope bar over the cue list, while there is something to review.
-        public static let reviewBar = "cueList.reviewBar"
-        /// The scope bar's "All" scope (every cue); its value is e.g. "42 cues".
+        /// The review sidebar's "All" filter chip; its value is e.g. "12 to review".
         public static let allScope = "cueList.all"
-        /// The scope bar's Issues scope; its value is e.g. "7 cues need review".
+        /// The review sidebar's Issues filter chip; its value is e.g. "7 cues need review".
         public static let reviewSummary = "cueList.review"
         /// The hint shown while there are no cues; its value says what to do first.
         public static let emptyState = "cueList.empty"
@@ -75,29 +73,18 @@ public enum AccessibilityID {
         public static let aiSummary = "cueList.ai.summary"
         /// Over a row whose line a translator is working on now.
         public static func inFlight(_ cueID: UUID) -> String { "\(row(cueID)).inFlight" }
-        /// The scope bar's AI Changes scope; its value is e.g. "Fix Spacing and Punctuation: 12 changes to review".
+        /// The review sidebar's AI Changes filter chip; its value is e.g. "Fix Spacing and Punctuation: 12 changes to review".
         public static let aiReview = "cueList.ai.review"
-        /// A cue an AI tool proposes to add, shown between the real rows until accepted or rejected.
+        /// A cue an AI tool proposes to add, shown between the real rows until accepted or rejected (in the review sidebar).
         public static func proposedRow(_ cueID: UUID) -> String { "cueList.proposed.\(cueID.uuidString)" }
         /// A proposed cue's field, e.g. `cueList.proposed.<id>.text`.
         public static func proposedCell(_ cueID: UUID, _ column: Column) -> String { "\(proposedRow(cueID)).\(column.rawValue)" }
-        /// The accept or reject button of a proposed change, keyed by `ai.acceptChange` or `ai.rejectChange`.
-        public static func reviewAction(_ cueID: UUID, _ commandID: String) -> String { "cueList.review.\(cueID.uuidString).\(command(commandID))" }
-        /// One variant (0-based) of a line that reads more than one way; its label says who it
-        /// assumes, its value is its text, and it is selected when in use.
-        public static func variant(_ cueID: UUID, _ index: Int) -> String { "\(cell(cueID, .choices)).\(index)" }
-        /// The scope bar's Choices scope: how many lines still read more than one way; it opens their review.
+        /// The review sidebar's Frames filter chip: how many cues are too close to a shot change or the next cue.
+        public static let framesSummary = "cueList.frames"
+        /// The review sidebar's Choices filter chip: how many lines still read more than one way.
         public static let choicesSummary = "cueList.choices"
-        /// The scope bar's Words scope: how many words the transcriber was unsure of; it opens their review.
+        /// The review sidebar's Words filter chip: how many words the transcriber was unsure of.
         public static let wordsSummary = "cueList.words"
-        /// The n-th word to check in a cue (0-based); its value is the word and how sure the transcriber was.
-        public static func word(_ cueID: UUID, _ index: Int) -> String { "\(cell(cueID, .words)).\(index)" }
-        /// Plays the n-th word to check.
-        public static func playWord(_ cueID: UUID, _ index: Int) -> String { "\(word(cueID, index)).play" }
-        /// Selects the n-th word to check in the cue's text, to type over it.
-        public static func selectWord(_ cueID: UUID, _ index: Int) -> String { "\(word(cueID, index)).select" }
-        /// Confirms the n-th word to check is right.
-        public static func confirmWord(_ cueID: UUID, _ index: Int) -> String { "\(word(cueID, index)).confirm" }
 
         public enum Column: String, CaseIterable, Sendable {
             case number
@@ -108,17 +95,13 @@ public enum AccessibilityID {
             case position
             /// Review warnings; the value lists them.
             case issues
-            /// The words the transcriber was unsure of, under the text.
-            case words
+            /// The dot beside the number of a cue with something to review; its value names the kinds.
+            case review
             case text
             /// In translation mode, the source cue's text (read-only).
             case source
-            /// The variants of a line AI translation could translate more than one way, while the choice is open.
-            case choices
             /// A row hover action listing the variants of a line whose choice is made.
             case variantsMenu
-            /// An AI tool's proposed change to the cue, shown as a diff; its value is the proposed text.
-            case proposal
         }
     }
 
@@ -137,12 +120,44 @@ public enum AccessibilityID {
         }
     }
 
-    /// QC issues, reviewed in the cue list's Issues scope (Review › Review Issues).
+    /// QC issues, reviewed in the review sidebar's Issues filter (Review › Review Issues).
     public enum Issues {
-        /// The QC preset's name, in the scope bar while reviewing issues; its help explains the limits.
+        /// The QC preset's name, in the review sidebar while its Issues filter is on; its help explains the limits.
         public static let preset = "issues.preset"
-        /// One issue, under its cue's text while reviewing issues; its label is the cue number and its value the message.
-        public static func item(_ cueID: UUID, _ offset: Int) -> String { "issues.item.\(cueID.uuidString).\(offset)" }
+    }
+
+    /// The review sidebar right of the video (View › Show Review): a card per thing to decide.
+    public enum Review {
+        public static let root = "review"
+        /// Shown when nothing is left under the filter.
+        public static let emptyState = "review.empty"
+        /// The "Show settled" checkbox.
+        public static let showSettled = "review.showSettled"
+        /// The note after a decision, with Undo; its value says what was decided.
+        public static let undoNote = "review.undo"
+        public static let undoButton = "review.undo.button"
+        /// One card, by `ReviewItem.id` ("<cue id>.choice", "<cue id>.word.0.Duncan", "<cue id>.change",
+        /// "<cue id>.issues"); its label is the kind and cue number, its value what to decide.
+        /// Selected while it is the current card.
+        public static func card(_ itemID: String) -> String { "review.card.\(itemID)" }
+        /// A card's button: `accept`, `reject`, `confirm`, `keep`, `edit`, `play`, `ignore` (a reading speed no fix can bring down), or `done` while editing in the card.
+        public static func action(_ itemID: String, _ action: Action) -> String { "\(card(itemID)).\(action.rawValue)" }
+        /// The n-th reading (0-based) on a choice card; its label says who it assumes,
+        /// its value is its text, and it is selected when in use.
+        public static func variant(_ itemID: String, _ index: Int) -> String { "\(card(itemID)).variant.\(index)" }
+        /// The n-th (0-based) suggested fix on an issue card; its label says what it does,
+        /// its value what the text becomes, for text fixes.
+        public static func suggestion(_ itemID: String, _ index: Int) -> String { "\(card(itemID)).suggestion.\(index)" }
+        /// The cue's text, edited in its card (after Fix, Edit or E); its value is the text.
+        public static func text(_ itemID: String) -> String { "\(card(itemID)).text" }
+        /// The title bar button that shows and hides the sidebar; its value is how many things are left to review.
+        public static let toggle = "review.toggle"
+        /// A settled card, while Show settled is on; its value says how it was settled.
+        public static func settled(_ itemID: String) -> String { "review.settled.\(itemID)" }
+
+        public enum Action: String, CaseIterable, Sendable {
+            case accept, reject, confirm, keep, edit, play, done, ignore
+        }
     }
 
     /// Settings › AI.

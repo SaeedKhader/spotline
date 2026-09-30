@@ -71,6 +71,13 @@ extension XCUIApplication {
 
     var timecode: XCUIElement { staticTexts[AccessibilityID.Transport.timecode] }
 
+    /// Review sidebar cards whose ID ends in `suffix` (".issues", ".choice", ".change", or any card with ""), in order.
+    func reviewCards(_ suffix: String) -> XCUIElementQuery {
+        descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'review.card.' AND identifier ENDSWITH %@", suffix)
+        )
+    }
+
     /// Timeline cue blocks, in cue order.
     var timelineCueBlocks: XCUIElementQuery {
         descendants(matching: .any).matching(

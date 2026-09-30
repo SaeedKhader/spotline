@@ -14,8 +14,8 @@ import SubtitleTranslation
 /// (Arabic and Hebrew right to left); the selected row lists translation memory
 /// suggestions.
 ///
-/// Over the rows, the review scope bar picks which cues show: all, or only those
-/// with one kind of thing to review, each with its review box open.
+/// What there is to review is decided in the review sidebar; here a cue with
+/// something open gets a dot beside its number.
 ///
 /// Click a cue's text to edit it; click elsewhere on its row to select it (the
 /// playhead moves to it) and leave the text; click empty space below the rows
@@ -30,7 +30,6 @@ struct CueEditorList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ReviewScopeBar(editor: editor)
             if editor.track.cues.isEmpty && editor.proposedInserts.isEmpty {
                 CueListEmptyState(editor: editor)
             } else {
@@ -125,17 +124,9 @@ struct CueEditorList: View {
         } }
     }
 
-    /// The cues, with the new cues an AI tool proposes in their places. In a
-    /// review scope, only that scope's cues (words to check and choices least sure first).
+    /// The cues, with the new cues an AI tool proposes in their places.
     private var listItems: [CueListItem] {
-        let cues: [CueListItem]
-        if editor.reviewScope == .all {
-            cues = editor.track.cues.enumerated().map { CueListItem.cue($0.element, number: $0.offset + 1) }
-        } else {
-            let numbers = Dictionary(editor.track.cues.enumerated().map { ($0.element.id, $0.offset + 1) }, uniquingKeysWith: { first, _ in first })
-            cues = editor.reviewListCues.map { CueListItem.cue($0, number: numbers[$0.id] ?? 0) }
-            guard editor.reviewScope == .changes else { return cues }
-        }
+        let cues = editor.track.cues.enumerated().map { CueListItem.cue($0.element, number: $0.offset + 1) }
         let inserts = editor.proposedInserts
         guard !inserts.isEmpty else { return cues }
         var items: [CueListItem] = []
@@ -182,7 +173,7 @@ extension TextDirection {
     var layoutDirection: LayoutDirection { self == .rightToLeft ? .rightToLeft : .leftToRight }
 }
 
-/// One cue: its number, start and end, reading speed, review warnings, text and actions.
+/// One cue: its number (with a dot when there is something to review), start and end, reading speed, text and actions.
 private struct CueRow: View {
     let editor: EditorState
     let cue: Cue
@@ -196,19 +187,15 @@ private struct CueRow: View {
     private var isSelected: Bool { editor.selectedCueID == cue.id }
     private var isCurrent: Bool { editor.currentCueID == cue.id }
 
-    /// Review boxes open in their own scope, and on the selected cue in All; other rows get a dot.
-    private func showsReview(_ scope: ReviewScope) -> Bool {
-        editor.reviewScope == scope || (editor.reviewScope == .all && isSelected)
-    }
-
-    /// The colour of the dot beside the number of a row with something to review and its box closed.
-    private var reviewDot: Color? {
-        let hasIssues = editor.issues[cue.id] != nil
-        let hasWords = cue.unsureWords?.isEmpty == false
-        let hasChoice = cue.flag.map { !$0.isResolved } ?? false
-        if (hasIssues && !showsReview(.issues)) || (hasWords && !showsReview(.words)) { return .attentionTint }
-        if hasChoice && !showsReview(.choices) { return .aiTint }
-        return nil
+    /// What there is to review on the cue, for its dots: orange for a check
+    /// (issues, words), purple for an AI suggestion (a choice, a change).
+    private var reviewKinds: [String] {
+        [
+            editor.issues[cue.id] != nil ? "issues" : nil,
+            cue.unsureWords?.isEmpty == false ? "words" : nil,
+            cue.flag?.isResolved == false ? "choice" : nil,
+            editor.proposedChange(forCue: cue.id) != nil ? "change" : nil,
+        ].compactMap { $0 }
     }
 
     var body: some View {
@@ -219,9 +206,19 @@ private struct CueRow: View {
                 .frame(width: 32, alignment: .trailing)
                 .padding(.top, 6)
                 .overlay(alignment: .topLeading) {
-                    if let reviewDot {
-                        Circle().fill(reviewDot).frame(width: 6, height: 6).padding(.top, 12).padding(.leading, -2)
-                            .accessibilityHidden(true)
+                    let kinds = reviewKinds
+                    if !kinds.isEmpty {
+                        VStack(spacing: 3) {
+                            if kinds.contains("issues") || kinds.contains("words") { Circle().fill(Color.attentionTint).frame(width: 6, height: 6) }
+                            if kinds.contains("choice") || kinds.contains("change") { Circle().fill(Color.aiTint).frame(width: 6, height: 6) }
+                        }
+                        .padding(.top, 10)
+                        .padding(.leading, -2)
+                        .help("To review in the review sidebar (\(EditorCommand.toggleReviewSidebar.menuHint("View")))")
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("To review")
+                        .accessibilityValue(kinds.joined(separator: ", "))
+                        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .review))
                     }
                 }
                 .accessibilityValue("\(number)")
@@ -236,26 +233,14 @@ private struct CueRow: View {
                     HStack(alignment: .top, spacing: 8) {
                         SourceText(editor: editor, cueID: cue.id, source: editor.sourceCues[cue.id], direction: directions.source)
                             .frame(maxWidth: .infinity)
-                        targetText
+                        textEditor
                             .frame(maxWidth: .infinity)
                     }
                     if isSelected {
                         MemorySuggestions(editor: editor, cueID: cue.id, direction: directions.target)
                     }
                 } else {
-                    targetText
-                }
-                if let change = editor.proposedChange(forCue: cue.id), !change.changesText {
-                    ProposalBox(editor: editor, change: change)
-                }
-                if editor.reviewScope == .issues, let issues = editor.issues[cue.id] {
-                    IssueBox(editor: editor, cue: cue, number: number, issues: issues)
-                }
-                if let words = cue.unsureWords, !words.isEmpty, showsReview(.words) {
-                    WordCheckBox(editor: editor, cue: cue, words: words)
-                }
-                if let flag = cue.flag, !flag.isResolved, showsReview(.choices) {
-                    ChoiceBox(editor: editor, cue: cue, flag: flag, direction: directions.target)
+                    textEditor
                 }
                 if isHovered || isSelected {
                     actions
@@ -270,15 +255,6 @@ private struct CueRow: View {
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.CueList.row(cue.id))
-    }
-
-    /// The cue's text, or the text an AI tool proposes for it, shown in its place until accepted or rejected.
-    @ViewBuilder private var targetText: some View {
-        if let change = editor.proposedChange(forCue: cue.id), change.changesText {
-            ProposedText(editor: editor, change: change, direction: directions.target)
-        } else {
-            textEditor
-        }
     }
 
     /// The cue's text (the target, in translation mode), typed in its language's direction.
@@ -527,8 +503,9 @@ private struct RowButton: View {
     }
 }
 
-/// A cue's start (S) or end (E), editable by typing a timecode or HH:MM:SS,mmm.
-private struct TimeField: View {
+/// A cue's start (S) or end (E), editable by typing a timecode or HH:MM:SS,mmm
+/// (in the cue list, and in an issue card being edited).
+struct TimeField: View {
     enum Edge { case start, end }
 
     let editor: EditorState
@@ -560,6 +537,8 @@ private struct TimeField: View {
                     editor.isEditingText = focused
                     if !focused { commit() }
                 }
+                // Removed while focused (an issue card's edit finished): typing is over.
+                .onDisappear { if isFocused { editor.isEditingText = false } }
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, edge == .start ? .inPoint : .outPoint))
         }
         .padding(.vertical, 4)
@@ -579,41 +558,6 @@ private struct TimeField: View {
         case .start: editor.setTiming(start: typed, end: cue.end, forCue: cue.id, actionName: "Set In")
         case .end: editor.setTiming(start: cue.start, end: typed, forCue: cue.id, actionName: "Set Out")
         }
-    }
-}
-
-/// Under a cue's text while reviewing issues: each issue under the QC preset.
-/// Fixing the cue clears them; clicking one selects the cue.
-private struct IssueBox: View {
-    let editor: EditorState
-    let cue: Cue
-    let number: Int
-    let issues: [QCIssue]
-
-    var body: some View {
-        let isError = issues.contains { $0.severity == .error }
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(Array(issues.enumerated()), id: \.offset) { offset, issue in
-                HStack(spacing: 6) {
-                    IssueIcon(severity: issue.severity)
-                    Text(issue.message)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture { editor.select(cue.id) }
-                .accessibilityElement(children: .ignore)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel("Cue \(number)")
-                .accessibilityValue(issue.message)
-                .accessibilityIdentifier(AccessibilityID.Issues.item(cue.id, offset))
-                .accessibilityAction { editor.select(cue.id) }
-            }
-        }
-        .font(.callout)
-        .padding(6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background((isError ? Color.errorTint : Color.attentionTint).opacity(0.07), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-        .environment(\.layoutDirection, .leftToRight)
     }
 }
 
