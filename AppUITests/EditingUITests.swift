@@ -93,4 +93,67 @@ final class EditingUITests: XCTestCase {
         waitForValue(of: app.timecode, toEqual: "00:00:03:12")
         waitForValue(of: app.staticTexts[AccessibilityID.Video.subtitle], toEqual: "Third cue")
     }
+
+    /// Delete Cue in the actions bar is enabled exactly while a cue is selected.
+    @MainActor
+    private func waitForSelection(_ isSelected: Bool, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let delete = app.buttons[AccessibilityID.command(EditorCommand.deleteCue.id)]
+        let state = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == %@", NSNumber(value: isSelected)), object: delete)
+        XCTAssertEqual(XCTWaiter().wait(for: [state], timeout: 10), .completed, isSelected ? "No cue selected" : "A cue is still selected", file: file, line: line)
+    }
+
+    @MainActor
+    func testEscapeLeavesTheTextThenDeselects() throws {
+        let app = launchApp(openSubtitles: true)
+        let text = app.cueCells(.text).element(boundBy: 0)
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        text.click()
+        app.typeText("!")
+        waitForSelection(true, in: app)
+
+        // The first Esc leaves the text: typing no longer changes it, and the cue stays selected.
+        app.typeKey(.escape, modifierFlags: [])
+        waitForSelection(true, in: app)
+        let typed = text.value as? String
+        app.typeKey(.escape, modifierFlags: [])
+        waitForSelection(false, in: app)
+        XCTAssertEqual(text.value as? String, typed)
+    }
+
+    @MainActor
+    func testClickingBelowTheRowsDeselects() throws {
+        let app = launchApp(openSubtitles: true)
+        let number = app.cueCells(.number).element(boundBy: 1)
+        XCTAssertTrue(number.waitForExistence(timeout: 10))
+        number.click()
+        waitForSelection(true, in: app)
+
+        // Just under the last row (scrolled into view first: the selected row is taller).
+        let list = app.descendants(matching: .any)[AccessibilityID.CueList.root]
+        list.scroll(byDeltaX: 0, deltaY: -1000)
+        let last = app.cueCells(.text).element(boundBy: 2)
+        let below = last.frame.maxY + 60
+        XCTAssertLessThan(below, list.frame.maxY, "No empty space under the rows")
+        list.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: list.frame.width / 2, dy: below - list.frame.minY))
+            .click()
+        waitForSelection(false, in: app)
+    }
+
+    @MainActor
+    func testClickingTheVideoLeavesTheTextButKeepsTheCue() throws {
+        let app = launchApp(openSubtitles: true)
+        let text = app.cueCells(.text).element(boundBy: 0)
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        text.click()
+        app.typeText("?")
+        waitForValue(of: text, toEqual: "First cue?")
+
+        app.descendants(matching: .any)[AccessibilityID.Video.surface].click()
+        // Space now plays instead of typing.
+        app.typeKey(" ", modifierFlags: [])
+        waitForSelection(true, in: app)
+        XCTAssertEqual(text.value as? String, "First cue?")
+        app.typeKey(" ", modifierFlags: [])
+    }
 }

@@ -87,12 +87,20 @@ struct QualityControlStateTests {
         #expect(Set(list.map(\.id)).count == 3)
     }
 
-    @Test func issuesPanelToggles() {
-        let editor = makeEditor()
+    @Test func issuesScopeToggles() {
+        let clean = makeEditor([Cue(start: f(0), end: f(50), text: "Fine")])
+        #expect(!clean.canPerform(.toggleIssuesPanel), "Nothing to review")
+
+        let empty = Cue(start: f(0), end: f(30), text: "")
+        let editor = makeEditor([empty, Cue(start: f(100), end: f(150), text: "Fine")])
         #expect(editor.isOn(.toggleIssuesPanel) == false)
         #expect(editor.perform(.toggleIssuesPanel))
-        #expect(editor.isIssuesPanelShown)
+        #expect(editor.reviewScope == .issues)
         #expect(editor.isOn(.toggleIssuesPanel) == true)
+        #expect(editor.reviewListCues.map(\.id) == [empty.id])
+        #expect(editor.selectedCueID == empty.id, "The first cue with issues is selected")
+        #expect(editor.perform(.toggleIssuesPanel))
+        #expect(editor.reviewScope == .all)
     }
 
     @Test func assStylesSurviveImportAndExport() throws {

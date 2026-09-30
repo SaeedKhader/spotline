@@ -19,7 +19,12 @@ public enum AccessibilityID {
         public static let emptyState = "video.empty"
     }
 
-    /// The actions bar above the timeline (transport, editing buttons, timecode).
+    /// The editing strip above the mini-map (In and Out, add, split, merge, delete, snapping, zoom).
+    public enum ActionsBar {
+        public static let root = "actionsBar"
+    }
+
+    /// The strip under the video: timecode, transport buttons and frame rate.
     public enum Transport {
         public static let root = "transport"
         public static let timecode = "transport.timecode"
@@ -49,7 +54,11 @@ public enum AccessibilityID {
         public static func cell(_ cueID: UUID, _ column: Column) -> String { "\(row(cueID)).\(column.rawValue)" }
         /// A row's button for an editor command, e.g. `cueList.row.<id>.command.cue.delete`.
         public static func action(_ cueID: UUID, _ commandID: String) -> String { "\(row(cueID)).\(command(commandID))" }
-        /// The count of cues that need review, in the actions bar; its value is e.g. "7 cues need review".
+        /// The review scope bar over the cue list, while there is something to review.
+        public static let reviewBar = "cueList.reviewBar"
+        /// The scope bar's "All" scope (every cue); its value is e.g. "42 cues".
+        public static let allScope = "cueList.all"
+        /// The scope bar's Issues scope; its value is e.g. "7 cues need review".
         public static let reviewSummary = "cueList.review"
         /// The hint shown while there are no cues; its value says what to do first.
         public static let emptyState = "cueList.empty"
@@ -58,7 +67,7 @@ public enum AccessibilityID {
         public static func glossaryTerm(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).glossary.\(index)" }
         /// The n-th translation memory suggestion under the selected cue (0-based); its value is the suggested text.
         public static func memoryMatch(_ cueID: UUID, _ index: Int) -> String { "\(row(cueID)).memory.\(index)" }
-        /// The bar over the cue list while an AI tool runs or its changes wait for review.
+        /// The AI activity in the title bar while an AI tool runs, and for a few seconds after.
         public static let aiBar = "cueList.ai"
         /// The running AI tool; its value is e.g. "Transcription: Uploading 6.1 of 18 MB".
         public static let aiTask = "cueList.ai.task"
@@ -66,7 +75,7 @@ public enum AccessibilityID {
         public static let aiSummary = "cueList.ai.summary"
         /// Over a row whose line a translator is working on now.
         public static func inFlight(_ cueID: UUID) -> String { "\(row(cueID)).inFlight" }
-        /// Proposed AI changes waiting for review; its value is e.g. "Transcription: 12 changes".
+        /// The scope bar's AI Changes scope; its value is e.g. "Fix Spacing and Punctuation: 12 changes to review".
         public static let aiReview = "cueList.ai.review"
         /// A cue an AI tool proposes to add, shown between the real rows until accepted or rejected.
         public static func proposedRow(_ cueID: UUID) -> String { "cueList.proposed.\(cueID.uuidString)" }
@@ -77,14 +86,10 @@ public enum AccessibilityID {
         /// One variant (0-based) of a line that reads more than one way; its label says who it
         /// assumes, its value is its text, and it is selected when in use.
         public static func variant(_ cueID: UUID, _ index: Int) -> String { "\(cell(cueID, .choices)).\(index)" }
-        /// Over the cue list while it shows only the lines to choose for; its value explains the review.
-        public static let choiceReview = "cueList.choiceReview"
-        /// In the actions bar: how many lines still read more than one way; it opens the review.
+        /// The scope bar's Choices scope: how many lines still read more than one way; it opens their review.
         public static let choicesSummary = "cueList.choices"
-        /// In the actions bar: how many words the transcriber was unsure of; it opens their review.
+        /// The scope bar's Words scope: how many words the transcriber was unsure of; it opens their review.
         public static let wordsSummary = "cueList.words"
-        /// Over the cue list while it shows only the cues with words to check; its value explains the review.
-        public static let wordReview = "cueList.wordReview"
         /// The n-th word to check in a cue (0-based); its value is the word and how sure the transcriber was.
         public static func word(_ cueID: UUID, _ index: Int) -> String { "\(cell(cueID, .words)).\(index)" }
         /// Plays the n-th word to check.
@@ -132,12 +137,11 @@ public enum AccessibilityID {
         }
     }
 
-    /// The issues panel under the cue list (View › Show Issues).
+    /// QC issues, reviewed in the cue list's Issues scope (Review › Review Issues).
     public enum Issues {
-        public static let root = "issues"
-        /// The QC preset's name, beside the review count in the actions bar; its help explains the limits.
+        /// The QC preset's name, in the scope bar while reviewing issues; its help explains the limits.
         public static let preset = "issues.preset"
-        /// One issue; its label is the cue number and its value the message.
+        /// One issue, under its cue's text while reviewing issues; its label is the cue number and its value the message.
         public static func item(_ cueID: UUID, _ offset: Int) -> String { "issues.item.\(cueID.uuidString).\(offset)" }
     }
 

@@ -14,25 +14,25 @@ import SubtitleTranslation
 /// (Arabic and Hebrew right to left); the selected row lists translation memory
 /// suggestions.
 ///
-/// Click a row to select it (the playhead moves to it); Up and Down select the
-/// previous and next cue, Return edits the text and Esc goes back to the list.
+/// Over the rows, the review scope bar picks which cues show: all, or only those
+/// with one kind of thing to review, each with its review box open.
+///
+/// Click a cue's text to edit it; click elsewhere on its row to select it (the
+/// playhead moves to it) and leave the text; click empty space below the rows
+/// to deselect. Up and Down select the previous and next cue, Return edits the
+/// text, Esc goes back to the list and a second Esc deselects.
 struct CueEditorList: View {
     let editor: EditorState
     @FocusState private var focusedText: Cue.ID?
     @FocusState private var isListFocused: Bool
+    /// The rows' height, so the space under them can fill the rest of the list.
+    @State private var rowsHeight: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
-            AIReviewBar(editor: editor)
-            if editor.isReviewingChoices { ChoiceReviewHeader(editor: editor) }
-            if editor.isReviewingWords { WordReviewHeader(editor: editor) }
+            ReviewScopeBar(editor: editor)
             if editor.track.cues.isEmpty && editor.proposedInserts.isEmpty {
                 CueListEmptyState(editor: editor)
-            } else if editor.isIssuesPanelShown {
-                VSplitView {
-                    rows.frame(minHeight: 120)
-                    IssuesPanel(editor: editor).frame(minHeight: 80, idealHeight: 180)
-                }
             } else {
                 rows
             }
@@ -54,14 +54,18 @@ struct CueEditorList: View {
         let directions = TextDirections(
             source: editor.isTranslating ? editor.sourceDirection : .leftToRight, target: editor.targetDirection
         )
-        return ScrollViewReader { proxy in
+        return GeometryReader { geometry in ScrollViewReader { proxy in
             ScrollView {
+                VStack(spacing: 0) {
                 LazyVStack(spacing: 0) {
                     ForEach(listItems) { item in
                         Group {
                             switch item {
                             case .cue(let cue, let number):
-                                CueRow(editor: editor, cue: cue, number: number, directions: directions, focusedText: $focusedText)
+                                CueRow(
+                                    editor: editor, cue: cue, number: number, directions: directions, focusedText: $focusedText,
+                                    leaveText: { isListFocused = true }
+                                )
                                     .overlay {
                                         if editor.aiTask?.inFlight.contains(cue.id) == true {
                                             InFlightShimmer()
@@ -82,6 +86,17 @@ struct CueEditorList: View {
                         Divider()
                     }
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
+                // The space under the last row: a click there leaves the text and deselects.
+                Color.clear
+                    .frame(height: max(geometry.size.height - rowsHeight, 80))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        editor.perform(.deselectCue)
+                        isListFocused = true
+                    }
+                    .accessibilityHidden(true)
+                }
             }
             .focusable()
             .focusEffectDisabled()
@@ -93,22 +108,34 @@ struct CueEditorList: View {
                 focusedText = id
                 return .handled
             }
+            // Esc in the text goes back to the list (the text editor passes Esc up to
+            // here); Esc in the list deselects.
+            .onKeyPress(.escape) {
+                if editor.isEditingText || focusedText != nil {
+                    focusedText = nil
+                    isListFocused = true
+                    return .handled
+                }
+                return editor.perform(.deselectCue) ? .handled : .ignored
+            }
             .onChange(of: editor.selectedCueID) { _, id in
                 guard let id else { return }
                 withAnimation(editor.launchOptions.isUITestMode ? nil : .default) { proxy.scrollTo(id) }
             }
-        }
+        } }
     }
 
-    /// The cues, with the new cues an AI tool proposes in their places. While
-    /// reviewing translation choices or words to check, only those cues, least sure first.
+    /// The cues, with the new cues an AI tool proposes in their places. In a
+    /// review scope, only that scope's cues (words to check and choices least sure first).
     private var listItems: [CueListItem] {
-        if editor.isReviewingChoices || editor.isReviewingWords {
+        let cues: [CueListItem]
+        if editor.reviewScope == .all {
+            cues = editor.track.cues.enumerated().map { CueListItem.cue($0.element, number: $0.offset + 1) }
+        } else {
             let numbers = Dictionary(editor.track.cues.enumerated().map { ($0.element.id, $0.offset + 1) }, uniquingKeysWith: { first, _ in first })
-            let cues = editor.isReviewingWords ? editor.reviewedWordCues : editor.cuesToChoose
-            return cues.map { CueListItem.cue($0, number: numbers[$0.id] ?? 0) }
+            cues = editor.reviewListCues.map { CueListItem.cue($0, number: numbers[$0.id] ?? 0) }
+            guard editor.reviewScope == .changes else { return cues }
         }
-        let cues = editor.track.cues.enumerated().map { CueListItem.cue($0.element, number: $0.offset + 1) }
         let inserts = editor.proposedInserts
         guard !inserts.isEmpty else { return cues }
         var items: [CueListItem] = []
@@ -162,10 +189,27 @@ private struct CueRow: View {
     let number: Int
     let directions: TextDirections
     var focusedText: FocusState<Cue.ID?>.Binding
+    /// Gives the list the keyboard focus, as Esc leaves the text.
+    let leaveText: () -> Void
     @State private var isHovered = false
 
     private var isSelected: Bool { editor.selectedCueID == cue.id }
     private var isCurrent: Bool { editor.currentCueID == cue.id }
+
+    /// Review boxes open in their own scope, and on the selected cue in All; other rows get a dot.
+    private func showsReview(_ scope: ReviewScope) -> Bool {
+        editor.reviewScope == scope || (editor.reviewScope == .all && isSelected)
+    }
+
+    /// The colour of the dot beside the number of a row with something to review and its box closed.
+    private var reviewDot: Color? {
+        let hasIssues = editor.issues[cue.id] != nil
+        let hasWords = cue.unsureWords?.isEmpty == false
+        let hasChoice = cue.flag.map { !$0.isResolved } ?? false
+        if (hasIssues && !showsReview(.issues)) || (hasWords && !showsReview(.words)) { return .attentionTint }
+        if hasChoice && !showsReview(.choices) { return .aiTint }
+        return nil
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -174,6 +218,12 @@ private struct CueRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 32, alignment: .trailing)
                 .padding(.top, 6)
+                .overlay(alignment: .topLeading) {
+                    if let reviewDot {
+                        Circle().fill(reviewDot).frame(width: 6, height: 6).padding(.top, 12).padding(.leading, -2)
+                            .accessibilityHidden(true)
+                    }
+                }
                 .accessibilityValue("\(number)")
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .number))
             VStack(alignment: .leading, spacing: 6) {
@@ -198,10 +248,13 @@ private struct CueRow: View {
                 if let change = editor.proposedChange(forCue: cue.id), !change.changesText {
                     ProposalBox(editor: editor, change: change)
                 }
-                if let words = cue.unsureWords, !words.isEmpty {
+                if editor.reviewScope == .issues, let issues = editor.issues[cue.id] {
+                    IssueBox(editor: editor, cue: cue, number: number, issues: issues)
+                }
+                if let words = cue.unsureWords, !words.isEmpty, showsReview(.words) {
                     WordCheckBox(editor: editor, cue: cue, words: words)
                 }
-                if let flag = cue.flag, !flag.isResolved {
+                if let flag = cue.flag, !flag.isResolved, showsReview(.choices) {
                     ChoiceBox(editor: editor, cue: cue, flag: flag, direction: directions.target)
                 }
                 if isHovered || isSelected {
@@ -251,16 +304,15 @@ private struct CueRow: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .frame(minHeight: 58)
+                // Text an AI tool wrote is in the AI tint until someone edits it.
+                .foregroundStyle(cue.isAIGenerated == true ? AnyShapeStyle(Color.aiTint) : AnyShapeStyle(.primary))
                 .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-                // Text an AI tool wrote is tinted until someone edits it.
-                .background(cue.isAIGenerated == true ? Color.aiTint.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius)
-                        .strokeBorder(cue.isAIGenerated == true ? AnyShapeStyle(Color.aiTint.opacity(0.5)) : AnyShapeStyle(.separator))
-                )
+                .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(.separator))
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
                     focusedText.wrappedValue = nil
+                    // After this key press, so the list does not take the same Esc as a second one.
+                    Task { @MainActor in leaveText() }
                     return .handled
                 }
                 .environment(\.layoutDirection, directions.target.layoutDirection)
@@ -281,7 +333,7 @@ private struct CueRow: View {
     private var rowBackground: some View {
         Group {
             if case .delete = editor.proposedChange(forCue: cue.id)?.kind {
-                Color.red.opacity(isSelected ? 0.2 : 0.1)
+                Color.errorTint.opacity(isSelected ? 0.2 : 0.1)
             } else if isSelected {
                 Color.accentColor.opacity(0.16)
             } else if isCurrent {
@@ -299,7 +351,7 @@ private struct CueRow: View {
         return HStack(spacing: 6) {
             Text("\(speed)c/s")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(tooFast ? .orange : .secondary)
+                .foregroundStyle(tooFast ? Color.attentionTint : Color.secondary)
                 .help("Reading speed in characters per second")
                 .accessibilityValue("\(speed)")
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .readingSpeed))
@@ -397,7 +449,7 @@ private struct SourceText: View {
     }
 }
 
-/// "Winterfell → وينترفيل": green when the translation uses the agreed term, orange when not.
+/// "Winterfell → وينترفيل": plain with a tick when the translation uses the agreed term, orange when not.
 private struct GlossaryChip: View {
     let match: Glossary.Match
 
@@ -410,8 +462,8 @@ private struct GlossaryChip: View {
         .font(.caption)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .foregroundStyle(match.isUsed ? Color.green : Color.orange)
-        .background((match.isUsed ? Color.green : Color.orange).opacity(0.12), in: Capsule())
+        .foregroundStyle(match.isUsed ? Color.secondary : Color.attentionTint)
+        .background((match.isUsed ? Color.secondary : Color.attentionTint).opacity(0.12), in: Capsule())
         .help(match.entry.note.isEmpty ? "Glossary" : "Glossary: \(match.entry.note)")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(match.entry.source)
@@ -434,7 +486,7 @@ private struct MemorySuggestions: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(match.percent)
                             .font(.caption.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(match.isExact ? Color.green : Color.yellow)
+                            .foregroundStyle(match.isExact ? Color.primary : Color.secondary)
                             .frame(width: 38, alignment: .trailing)
                         Text(SubtitleText.visibleLines(of: match.entry.target).joined(separator: " / "))
                             .lineLimit(2)
@@ -530,71 +582,38 @@ private struct TimeField: View {
     }
 }
 
-/// Every issue under the QC preset, in cue order. Click one to select its cue.
-private struct IssuesPanel: View {
+/// Under a cue's text while reviewing issues: each issue under the QC preset.
+/// Fixing the cue clears them; clicking one selects the cue.
+private struct IssueBox: View {
     let editor: EditorState
+    let cue: Cue
+    let number: Int
+    let issues: [QCIssue]
 
     var body: some View {
-        let items = editor.issueList
-        Group {
-            if items.isEmpty {
-                Text("No issues under \(editor.qcPreset.name)")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(items) { item in
-                                IssueRow(editor: editor, item: item)
-                                    .id(item.id)
-                            }
-                        }
-                    }
-                    .onChange(of: editor.selectedCueID) { _, id in
-                        guard let first = items.first(where: { $0.cueID == id }) else { return }
-                        proxy.scrollTo(first.id)
-                    }
+        let isError = issues.contains { $0.severity == .error }
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(issues.enumerated()), id: \.offset) { offset, issue in
+                HStack(spacing: 6) {
+                    IssueIcon(severity: issue.severity)
+                    Text(issue.message)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { editor.select(cue.id) }
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Cue \(number)")
+                .accessibilityValue(issue.message)
+                .accessibilityIdentifier(AccessibilityID.Issues.item(cue.id, offset))
+                .accessibilityAction { editor.select(cue.id) }
             }
         }
-        .background(.background.opacity(0.4))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(AccessibilityID.Issues.root)
-    }
-}
-
-private struct IssueRow: View {
-    let editor: EditorState
-    let item: IssueListItem
-
-    var body: some View {
-        let isSelected = editor.selectedCueID == item.cueID
-        HStack(spacing: 8) {
-            IssueIcon(severity: item.issue.severity)
-            Text("\(item.cueNumber)")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .trailing)
-            Text(editor.label(for: item.start))
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(.secondary)
-            Text(item.issue.message)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
         .font(.callout)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture { editor.select(item.cueID) }
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Cue \(item.cueNumber)")
-        .accessibilityValue(item.issue.message)
-        .accessibilityIdentifier(AccessibilityID.Issues.item(item.cueID, item.offset))
-        .accessibilityAction { editor.select(item.cueID) }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background((isError ? Color.errorTint : Color.attentionTint).opacity(0.07), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
+        .environment(\.layoutDirection, .leftToRight)
     }
 }
 
@@ -604,7 +623,7 @@ private struct IssueIcon: View {
 
     var body: some View {
         Image(systemName: severity == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-            .foregroundStyle(severity == .error ? Color.red : Color.orange)
+            .foregroundStyle(severity == .error ? Color.errorTint : Color.attentionTint)
     }
 }
 

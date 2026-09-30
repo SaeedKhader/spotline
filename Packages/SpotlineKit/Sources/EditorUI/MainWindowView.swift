@@ -6,8 +6,9 @@ import SubtitleTranslation
 import SwiftUI
 
 /// The editor window. Top: the cue list (each row edits its cue) on the left
-/// and the video on the right. Bottom: the actions bar, the mini-map of the
-/// whole media and the timeline.
+/// and the video, with the transport under it, on the right. Bottom: the
+/// editing actions, the mini-map of the whole media and the timeline. The
+/// title bar shows what a running AI tool is doing.
 public struct MainWindowView: View {
     let editor: EditorState
 
@@ -21,8 +22,12 @@ public struct MainWindowView: View {
                 // Translation mode shows source and target side by side.
                 CueEditorList(editor: editor)
                     .frame(minWidth: editor.isTranslating ? 640 : 420, idealWidth: editor.isTranslating ? 820 : 560)
-                VideoSurfaceView(editor: editor)
-                    .frame(minWidth: 400, minHeight: 240)
+                VStack(spacing: 0) {
+                    VideoSurfaceView(editor: editor)
+                    Divider()
+                    TransportBar(editor: editor)
+                }
+                .frame(minWidth: 400, minHeight: 240)
             }
             .frame(minHeight: 280)
             VStack(spacing: 0) {
@@ -69,6 +74,11 @@ struct VideoSurfaceView: View {
                 HostedVideoView(view: videoView)
             }
             SubtitleOverlayHost(editor: editor)
+            // A click on the picture ends typing in the cue list; the cue stays selected.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { NSApp.keyWindow?.makeFirstResponder(nil) }
+                .accessibilityHidden(true)
             if !editor.hasMedia {
                 // A project whose video was moved: opening it again relinks the project.
                 let missing = editor.missingMediaName
@@ -270,6 +280,16 @@ struct AnalysisStatusView: View {
 }
 
 extension EditorState {
+    /// Cues with something for the user to check: QC issues and words the transcriber was unsure of.
+    var attentionCueIDs: Set<Cue.ID> {
+        Set(issues.keys).union(track.cues.lazy.filter { $0.unsureWords?.isEmpty == false }.map(\.id))
+    }
+
+    /// Cues with an AI suggestion to decide: a proposed change or a translation choice.
+    var suggestionCueIDs: Set<Cue.ID> {
+        Set(pendingReview?.changes.map(\.cueID) ?? []).union(track.cues.lazy.filter { $0.flag?.isResolved == false }.map(\.id))
+    }
+
     var timelineContent: TimelineContent {
         TimelineContent(
             cues: track.cues,
@@ -283,6 +303,8 @@ extension EditorState {
             speech: isSpeechHighlighted ? speech : nil,
             speechAnalyzedUntil: speechJob?.analyzedUntil,
             analyzedUntil: analyzedUntil,
+            attentionCueIDs: attentionCueIDs,
+            suggestionCueIDs: suggestionCueIDs,
             scale: timelineScale,
             scrollRequest: timelineScrollRequest
         )

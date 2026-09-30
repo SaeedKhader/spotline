@@ -2,7 +2,7 @@ import EditorCommands
 import SpotlineAccessibility
 import XCTest
 
-/// Importing a styled ASS file, the QC summary and the issues panel.
+/// Importing a styled ASS file, and reviewing QC issues in the cue list's Issues scope.
 final class ReviewUITests: XCTestCase {
     @MainActor
     func testImportsStyledASS() throws {
@@ -22,14 +22,15 @@ final class ReviewUITests: XCTestCase {
     }
 
     @MainActor
-    func testIssuesPanelListsIssuesAndSelectsCues() throws {
+    func testIssuesScopeListsIssuesAndSelectsCues() throws {
         let app = launchApp(openSubtitles: true, subtitles: "styled-23.976.ass")
         _ = button(EditorCommand.stepForward, in: app)
         waitForValue(of: app.descendants(matching: .any)[AccessibilityID.CueList.reviewSummary], toEqual: "2 cues need review")
-        waitForValue(of: app.descendants(matching: .any)[AccessibilityID.Issues.preset], toEqual: "Netflix (Adult)")
 
-        // Review › Show Issues (Option-Command-I).
+        // Review › Review Issues (Option-Command-I): only the cues with issues, each with its issues.
         app.typeKey("i", modifierFlags: [.command, .option])
+        waitForValue(of: app.descendants(matching: .any)[AccessibilityID.Issues.preset], toEqual: "Netflix (Adult)")
+        XCTAssertEqual(app.cueCells(.text).count, 2)
         let items = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'issues.item.'"))
         XCTAssertTrue(items.firstMatch.waitForExistence(timeout: 10), "No issues listed")
         // Cue 3: too long a line, too fast, too short. Cue 4: no text.
@@ -39,7 +40,7 @@ final class ReviewUITests: XCTestCase {
         items.element(boundBy: 3).click()
         waitForValue(of: app.timecode, toEqual: "00:00:03:00")
 
-        // Previous Cue with Issues goes back to cue 3 (2 s).
+        // Previous Cue to Review goes back to cue 3 (2 s).
         app.typeKey(.upArrow, modifierFlags: [.command, .option])
         waitForValue(of: app.timecode, toEqual: "00:00:02:00")
     }

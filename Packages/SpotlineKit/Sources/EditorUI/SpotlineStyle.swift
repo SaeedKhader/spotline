@@ -11,19 +11,22 @@ enum SpotlineStyle {
     static let cornerRadius: CGFloat = 7
 }
 
+/// The app's colours. Besides the system neutrals there are four, each with one meaning:
+/// the accent colour marks the selection and focus; `aiTint` marks what an AI tool
+/// wrote or suggests; `attentionTint` marks what needs the user's check (QC issues,
+/// words to check); red marks errors and deleted text only. Nothing else is coloured.
 extension Color {
-    /// Text and cues an AI tool wrote, until someone edits them. Distinct from
-    /// the accent colour, which marks the selection.
+    /// Text and cues an AI tool wrote, until someone edits them, and AI suggestions to decide.
     static var aiTint: Color { Color(nsColor: .aiTint) }
+    /// Something to check: QC warnings, words the transcriber was unsure of, a fast reading speed.
+    static var attentionTint: Color { Color(nsColor: .attentionTint) }
+    /// Errors (a QC error, an overlap) and deleted text.
+    static var errorTint: Color { Color(nsColor: .systemRed) }
 }
 
 extension NSColor {
     static var aiTint: NSColor { .systemPurple }
-}
-
-extension Color {
-    /// Words the transcriber was unsure of: apart from QC warnings (orange) and AI text (purple).
-    static var hearingTint: Color { Color(nsColor: .systemTeal) }
+    static var attentionTint: NSColor { .systemOrange }
 }
 
 extension KeyShortcut {

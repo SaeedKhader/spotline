@@ -10,6 +10,7 @@ final class MainWindowUITests: XCTestCase {
             AccessibilityID.Video.surface,
             AccessibilityID.CueList.root,
             AccessibilityID.Transport.root,
+            AccessibilityID.ActionsBar.root,
             AccessibilityID.MiniMap.root,
             AccessibilityID.Timeline.root,
         ] {

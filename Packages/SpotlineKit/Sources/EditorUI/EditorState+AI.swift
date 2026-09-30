@@ -96,6 +96,8 @@ extension EditorState {
             return selectedCueID.flatMap { pendingReview?.change(forCue: $0) } != nil
         case EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
             return pendingReview != nil
+        case EditorCommand.reviewChanges.id:
+            return reviewScope == .changes || pendingReview != nil
         default:
             return false
         }
@@ -140,6 +142,7 @@ extension EditorState {
             rejectChanges(to: [id])
         case EditorCommand.acceptAllChanges.id: acceptChanges(to: nil)
         case EditorCommand.rejectAllChanges.id: rejectChanges(to: nil)
+        case EditorCommand.reviewChanges.id: toggleChangeReview()
         default: return false
         }
         return true
@@ -174,6 +177,7 @@ extension EditorState {
     private func finishReview(of ids: Set<Cue.ID>?, in review: ProposedChangeSet, selecting next: Cue.ID?) {
         let rest = ids.map { review.removing($0) }
         pendingReview = rest.flatMap { $0.isEmpty ? nil : $0 }
+        if pendingReview == nil, reviewScope == .changes { reviewScope = .all }
         if let ids, let selected = selectedCueID, ids.contains(selected) {
             if let next, pendingReview?.change(forCue: next) != nil {
                 select(next)
@@ -193,6 +197,7 @@ extension EditorState {
 
     func presentReview(_ review: ProposedChangeSet) {
         pendingReview = review
+        reviewScope = .changes
         let first = review.changes.min { $0.cue.start < $1.cue.start }
         if let first { select(first.cueID) }
     }

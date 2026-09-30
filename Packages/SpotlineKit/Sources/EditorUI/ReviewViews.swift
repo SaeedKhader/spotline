@@ -58,7 +58,7 @@ struct ProposalBox: View {
                 .foregroundStyle(Color.aiTint)
             if case .delete = change.kind {
                 Text("Remove this cue")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.errorTint)
             }
             ProposalDetails(editor: editor, change: change)
             Spacer(minLength: 0)
@@ -90,7 +90,7 @@ struct ProposalDetails: View {
                 }
                 if let note = change.note {
                     Text(note)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.attentionTint)
                 }
             }
             .font(.caption)
@@ -106,7 +106,7 @@ struct ProposalDetails: View {
     }
 }
 
-/// Words of `old` that go struck out in red, words of `new` in the tint colour.
+/// Words of `old` that go struck out in red, words of `new` in the AI tint.
 struct DiffText: View {
     let old: String
     let new: String
@@ -125,7 +125,7 @@ struct DiffText: View {
                 result += AttributedString(text)
             case .removed(let text):
                 var piece = AttributedString(text)
-                piece.foregroundColor = .red
+                piece.foregroundColor = .errorTint
                 piece.strikethroughStyle = .single
                 result += piece
             case .added(let text):
@@ -146,7 +146,7 @@ struct ReviewButtons: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            button(.acceptChange, systemImage: "checkmark.circle.fill", tint: .green) { editor.acceptChanges(to: [cueID]) }
+            button(.acceptChange, systemImage: "checkmark.circle.fill", tint: Color.accentColor) { editor.acceptChanges(to: [cueID]) }
             button(.rejectChange, systemImage: "xmark.circle.fill", tint: .secondary) { editor.rejectChanges(to: [cueID]) }
         }
         .font(.title3)
@@ -246,7 +246,7 @@ struct ChoiceBox: View {
                     .foregroundStyle(Color.aiTint)
                 Text("\(Int((flag.confidence * 100).rounded()))%")
                     .monospacedDigit()
-                    .foregroundStyle(flag.confidence < 0.75 ? Color.orange : Color.secondary)
+                    .foregroundStyle(flag.confidence < 0.75 ? Color.attentionTint : Color.secondary)
                     .help("How sure the translator was of its pick")
                 if !flag.note.isEmpty {
                     Text(flag.note)
@@ -334,35 +334,6 @@ struct VariantsMenu: View {
     }
 }
 
-/// Over the cue list while it shows only the lines to choose for.
-struct ChoiceReviewHeader: View {
-    let editor: EditorState
-
-    var body: some View {
-        let count = editor.cuesToChoose.count
-        let text = "\(count == 1 ? "1 line reads" : "\(count) lines read") more than one way, least sure first. "
-            + "Pick a translation, or keep the rest with \(EditorCommand.acceptRemainingChoices.menuHint("AI"))."
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.branch")
-                    .foregroundStyle(Color.aiTint)
-                Text(text)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .font(.callout)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.aiTint.opacity(0.08))
-            Divider()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(text)
-        .accessibilityIdentifier(AccessibilityID.CueList.choiceReview)
-    }
-}
-
 extension TranslationVariant {
     /// Who the variant assumes, in a few words: "Beth ♀ to Morty ♂", "to two women".
     var summary: String {
@@ -409,59 +380,9 @@ extension Gender {
     }
 }
 
-/// Over the cue list while an AI tool is at work: which step it is on, what it is doing
-/// now and, only where something measures it, how far it has got, with Cancel.
-/// Then, for a few seconds, what it did ("640 lines translated · 12 flagged"). Also how many of a cleanup's changes
-/// wait for review, with Accept All and Reject All.
-struct AIReviewBar: View {
-    let editor: EditorState
-
-    var body: some View {
-        if editor.aiTask != nil || editor.pendingReview != nil || editor.aiSummary != nil {
-            VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    Image(systemName: editor.aiTask == nil && editor.pendingReview == nil ? "checkmark.circle" : "sparkles")
-                        .foregroundStyle(Color.aiTint)
-                    if let review = editor.pendingReview {
-                        let count = review.changes.count
-                        let text = "\(review.title): \(count == 1 ? "1 change" : "\(count) changes") to review"
-                        Text(text)
-                            .accessibilityLabel("Review")
-                            .accessibilityValue(text)
-                            .accessibilityIdentifier(AccessibilityID.CueList.aiReview)
-                    }
-                    if let task = editor.aiTask {
-                        AITaskProgress(task: task)
-                        CommandButton(command: .cancelAITask, systemImage: "stop.circle", editor: editor)
-                    } else if let summary = editor.aiSummary, editor.pendingReview == nil {
-                        Text(summary.fullText)
-                            .accessibilityLabel("AI summary")
-                            .accessibilityValue(summary.fullText)
-                            .accessibilityIdentifier(AccessibilityID.CueList.aiSummary)
-                    }
-                    Spacer(minLength: 8)
-                    if editor.pendingReview != nil {
-                        CommandButton(command: .rejectAllChanges, editor: editor)
-                        CommandButton(command: .acceptAllChanges, editor: editor)
-                            .buttonStyle(.borderedProminent)
-                            .tint(Color.aiTint)
-                    }
-                }
-                .font(.callout)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.aiTint.opacity(0.08))
-                Divider()
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier(AccessibilityID.CueList.aiBar)
-        }
-    }
-}
-
 /// A running AI tool: "Transcription · Step 4 of 4: ElevenLabs Scribe is
 /// transcribing · 0:09 of about 1:20" over a bar with a segment per step.
-private struct AITaskProgress: View {
+struct AITaskProgress: View {
     let task: AITaskStatus
 
     var body: some View {
@@ -478,7 +399,6 @@ private struct AITaskProgress: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 StageBar(stages: task.stages.count, stage: task.stage, fraction: task.fraction(at: context.date))
-                    .frame(maxWidth: 280)
             }
             .help(task.stages.enumerated().map { ($0.offset == task.stage ? "▸ " : "   ") + $0.element }.joined(separator: "\n"))
             .accessibilityElement(children: .ignore)
@@ -529,22 +449,23 @@ private struct StageBar: View {
 }
 
 /// A band of the AI tint sweeping left to right, over and over; still with Reduce Motion.
+/// Driven by the clock, not a repeating animation: a `repeatForever` started in
+/// `onAppear` also repeats every layout change made with it, which in the title
+/// bar sent the whole activity sliding back and forth.
 private struct StageShimmer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: CGFloat = 0
 
     var body: some View {
-        GeometryReader { geometry in
-            let band = max(geometry.size.width * 0.45, 12)
-            LinearGradient(colors: [Color.aiTint.opacity(0), Color.aiTint, Color.aiTint.opacity(0)], startPoint: .leading, endPoint: .trailing)
-                .frame(width: band)
-                .offset(x: -band + (geometry.size.width + band) * phase)
+        SwiftUI.TimelineView(.animation(paused: reduceMotion)) { context in
+            let phase = reduceMotion ? 0.5 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+            GeometryReader { geometry in
+                let band = max(geometry.size.width * 0.45, 12)
+                LinearGradient(colors: [Color.aiTint.opacity(0), Color.aiTint, Color.aiTint.opacity(0)], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: band)
+                    .offset(x: -band + (geometry.size.width + band) * phase)
+            }
         }
         .clipShape(Capsule())
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { phase = 1 }
-        }
     }
 }
 
@@ -581,7 +502,7 @@ struct WordCheckBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Image(systemName: "ear").foregroundStyle(Color.hearingTint)
+                Image(systemName: "ear").foregroundStyle(Color.attentionTint)
                 Text(words.count == 1 ? "The transcription wasn't sure of this word" : "The transcription wasn't sure of these words")
                     .foregroundStyle(.secondary)
             }
@@ -595,7 +516,7 @@ struct WordCheckBox: View {
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.hearingTint.opacity(0.07), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
+        .background(Color.attentionTint.opacity(0.07), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Words to check")
         .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .words))
@@ -616,7 +537,7 @@ private struct WordToCheck: View {
                 editor.selectUnsureWord(index, forCue: cueID)
             } label: {
                 Text("“\(word.text)”")
-                    .underline(color: Color.hearingTint)
+                    .underline(color: Color.attentionTint)
                     .font(.callout)
             }
             .help("Select the word in the text to type over it")
@@ -651,34 +572,5 @@ private struct WordToCheck: View {
         .accessibilityLabel(word.text)
         .accessibilityValue(percent.map { "\(word.text), \($0)" } ?? word.text)
         .accessibilityIdentifier(AccessibilityID.CueList.word(cueID, index))
-    }
-}
-
-/// Over the cue list while it shows only the cues with words to check.
-struct WordReviewHeader: View {
-    let editor: EditorState
-
-    var body: some View {
-        let count = editor.cuesToCheck.count
-        let text = "\(count == 1 ? "1 cue has" : "\(count) cues have") words the transcription wasn't sure of, least sure first. "
-            + "Fix or confirm each, or keep the rest with \(EditorCommand.confirmRemainingWords.menuHint("AI"))."
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "ear")
-                    .foregroundStyle(Color.hearingTint)
-                Text(text)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .font(.callout)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.hearingTint.opacity(0.08))
-            Divider()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(text)
-        .accessibilityIdentifier(AccessibilityID.CueList.wordReview)
     }
 }

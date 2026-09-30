@@ -103,7 +103,9 @@ public final class EditorState {
     // MARK: AI state
 
     /// What the last AI tool proposed, shown as a diff in the cue list until each change is accepted or rejected.
-    public internal(set) var pendingReview: ProposedChangeSet?
+    public internal(set) var pendingReview: ProposedChangeSet? {
+        didSet { if pendingReview == nil, reviewScope == .changes { reviewScope = .all } }
+    }
     /// The AI tool running now, with its progress; nil when none.
     public internal(set) var aiTask: AITaskStatus? {
         didSet { if aiTask != oldValue { onAITaskChange?(aiTask) } }
@@ -165,12 +167,23 @@ public final class EditorState {
             projectDidChange?(.other)
         }
     }
-    /// Whether the issues panel under the cue list is open.
-    public private(set) var isIssuesPanelShown = false
+    /// Which cues the cue list shows: all of them, or only those with one kind of thing to review.
+    public internal(set) var reviewScope: ReviewScope = .all
     /// True while the cue list shows only the lines AI translation flagged, least confident first.
-    public internal(set) var isReviewingChoices = false
+    public internal(set) var isReviewingChoices: Bool {
+        get { reviewScope == .choices }
+        set { setReviewScope(.choices, newValue) }
+    }
     /// True while the cue list shows only the cues with words to check (AI › Review Words to Check).
-    public internal(set) var isReviewingWords = false
+    public internal(set) var isReviewingWords: Bool {
+        get { reviewScope == .words }
+        set { setReviewScope(.words, newValue) }
+    }
+
+    /// Turns a scope on, or off (back to every cue) if it is the one showing.
+    private func setReviewScope(_ scope: ReviewScope, _ isOn: Bool) {
+        if isOn { reviewScope = scope } else if reviewScope == scope { reviewScope = .all }
+    }
     /// Where playback pauses by itself: after a word played for checking.
     @ObservationIgnored var playbackStopTime: MediaTime?
     /// Where the chosen QC preset is remembered; nil in tests.
@@ -443,13 +456,19 @@ public final class EditorState {
         case EditorCommand.mergeWithNext.id:
             selectedCueIndex.map { $0 < track.cues.count - 1 } ?? false
         case EditorCommand.previousIssue.id, EditorCommand.nextIssue.id:
-            !issues.isEmpty
+            !cueIDsToReview(in: reviewScope).isEmpty
+        case EditorCommand.showAllCues.id:
+            reviewScope != .all
+        case EditorCommand.deselectCue.id:
+            selectedCueID != nil
         case EditorCommand.fixOverlaps.id:
             issues.values.contains { $0.contains { $0.kind.isTimingConflict } }
         case EditorCommand.joinShortLines.id:
             track.cues.count > 1 && pendingReview == nil && aiTask == nil
-        case EditorCommand.toggleMilliseconds.id, EditorCommand.toggleIssuesPanel.id:
+        case EditorCommand.toggleMilliseconds.id:
             true
+        case EditorCommand.toggleIssuesPanel.id:
+            reviewScope == .issues || !issues.isEmpty
         case EditorCommand.openSourceSubtitles.id:
             true
         case EditorCommand.addNamesToGlossary.id:
@@ -467,7 +486,7 @@ public final class EditorState {
              EditorCommand.clearTranslation.id, EditorCommand.clearTranscript.id, EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
-             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
+             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id:
             canPerformAI(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
@@ -513,7 +532,8 @@ public final class EditorState {
         case EditorCommand.toggleSnapping.id: isSnappingEnabled
         case EditorCommand.toggleSpeechHighlight.id: isSpeechHighlighted
         case EditorCommand.toggleMilliseconds.id: showsMilliseconds
-        case EditorCommand.toggleIssuesPanel.id: isIssuesPanelShown
+        case EditorCommand.toggleIssuesPanel.id: reviewScope == .issues
+        case EditorCommand.reviewChanges.id: reviewScope == .changes
         case EditorCommand.reviewChoices.id: isReviewingChoices
         case EditorCommand.reviewWords.id: isReviewingWords
         case EditorCommand.togglePositionTop.id: selectedCue.map { $0.position == .top }
@@ -571,7 +591,15 @@ public final class EditorState {
         case EditorCommand.toggleMilliseconds.id:
             showsMilliseconds.toggle()
         case EditorCommand.toggleIssuesPanel.id:
-            isIssuesPanelShown.toggle()
+            setReviewScope(.issues, reviewScope != .issues)
+            if reviewScope == .issues, let first = cueIDsToReview(in: .issues).first,
+               selectedCueID.map({ issues[$0] == nil }) ?? true {
+                select(first)
+            }
+        case EditorCommand.showAllCues.id:
+            reviewScope = .all
+        case EditorCommand.deselectCue.id:
+            select(nil)
         case EditorCommand.openSourceSubtitles.id:
             if let url = chooseSubtitlesToImport() { openSourceSubtitles(from: url) }
         case EditorCommand.closeSourceSubtitles.id:
@@ -598,7 +626,7 @@ public final class EditorState {
              EditorCommand.clearTranslation.id, EditorCommand.clearTranscript.id, EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
-             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
+             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id:
             return performAI(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
@@ -687,8 +715,7 @@ public final class EditorState {
         endTextEditSession()
         shuttleRate = 0
         selectedCueID = nil
-        isReviewingChoices = false
-        isReviewingWords = false
+        reviewScope = .all
         playbackStopTime = nil
         track = SubtitleTrack()
         subtitleFile = nil
@@ -751,15 +778,16 @@ public final class EditorState {
 
     // MARK: - Selection
 
-    /// Selects a cue and moves the playhead to its first frame.
-    public func select(_ id: Cue.ID?) {
+    /// Selects a cue and moves the playhead to its first frame (unless `seeking`
+    /// is false: the timeline goes there only once a click turns out not to be a drag).
+    public func select(_ id: Cue.ID?, seeking: Bool = true) {
         guard id != selectedCueID else { return }
         endTextEditSession()
         // Leaving a translated cue stores it, so the rest of the file can reuse it.
         if let previous = selectedCueID { recordTranslation(of: previous) }
         selectedCueID = id
         // A proposed new cue is not in the track yet, but can be selected to review it.
-        if let cue = selectedCue ?? id.flatMap({ pendingReview?.change(forCue: $0)?.cue }), hasMedia {
+        if seeking, let cue = selectedCue ?? id.flatMap({ pendingReview?.change(forCue: $0)?.cue }), hasMedia {
             playback.seek(toFrame: cue.start.firstFrame(at: frameRate), rate: frameRate)
         }
     }
@@ -777,13 +805,15 @@ public final class EditorState {
         if keepTyping { textFocusRequest += 1 }
     }
 
-    /// Selects the next (or previous) cue that needs review. Returns false when there is none that way.
+    /// Selects the next (or previous) cue the review scope lists (in All, any cue
+    /// with something to review), in the list's order. Returns false when there is none that way.
     private func selectIssue(forward: Bool) -> Bool {
-        let cues = track.cues
-        let current = selectedCueIndex ?? (forward ? -1 : cues.count)
-        let candidates = forward ? Array((current + 1)..<cues.count) : Array((0..<max(current, 0)).reversed())
-        guard let index = candidates.first(where: { issues[cues[$0].id] != nil }) else { return false }
-        select(cues[index].id)
+        let order = reviewScope == .all ? track.cues.map(\.id) : reviewListCues.map(\.id)
+        let marked = cueIDsToReview(in: reviewScope)
+        let current = selectedCueID.flatMap(order.firstIndex(of:)) ?? (forward ? -1 : order.count)
+        let candidates = forward ? Array((current + 1)..<order.count) : Array((0..<max(current, 0)).reversed())
+        guard let index = candidates.first(where: { marked.contains(order[$0]) }) else { return false }
+        select(order[index])
         return true
     }
 
