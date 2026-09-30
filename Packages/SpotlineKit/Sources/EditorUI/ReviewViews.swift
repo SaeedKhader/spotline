@@ -399,7 +399,6 @@ struct AITaskProgress: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 StageBar(stages: task.stages.count, stage: task.stage, fraction: task.fraction(at: context.date))
-                    .frame(maxWidth: 280)
             }
             .help(task.stages.enumerated().map { ($0.offset == task.stage ? "▸ " : "   ") + $0.element }.joined(separator: "\n"))
             .accessibilityElement(children: .ignore)
