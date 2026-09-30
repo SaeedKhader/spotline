@@ -458,6 +458,43 @@ struct AIStateTests {
         #expect(sdh.track.cues.map(\.text) == ["[ar] (door opening)", "[ar] (laughs) He's alive."])
     }
 
+    @Test func crowdChatterGoesAfterTranslatingUnlessKept() async {
+        let editor = makeEditor(cues: [cue("Crowd: Look at him!", at: 0), cue("He's alive.", at: 2), cue("Crowd: Move on!", at: 4)])
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.track.cues.map(\.text) == ["[ar] He's alive."], "Crowd lines go, and are not reported as untranslated")
+        #expect(editor.sourceTrack?.cues.count == 3, "The source keeps them")
+        #expect(editor.undoManager.undoActionName == "Remove Crowd Chatter")
+        editor.perform(.undo)
+        #expect(editor.track.cues.map(\.text) == ["", "[ar] He's alive.", ""])
+
+        let kept = makeEditor(cues: [cue("Crowd: Look at him!", at: 0), cue("He's alive.", at: 2)])
+        kept.aiSettings.leavesOutWalla = false
+        #expect(kept.perform(.translateWithAI))
+        await finish(kept)
+        #expect(kept.track.cues.map(\.text) == ["[ar] Crowd: Look at him!", "[ar] He's alive."])
+    }
+
+    @Test func cloudTranslatorsHearWhichLinesAreFarUnderTheDialogue() async {
+        let editor = makeEditor(cues: [cue("One.", at: 0), cue("Two.", at: 2), cue("Take my horse.", at: 4), cue("Four.", at: 6), cue("Five.", at: 8)])
+        // Dialogue at about -10 dBFS, and a voice 30 dB under it from 4 to 5 s.
+        var samples = [Float](repeating: 0.3, count: PreparedAudio.sampleRate * 10)
+        for index in (PreparedAudio.sampleRate * 4)..<(PreparedAudio.sampleRate * 5) { samples[index] = 0.01 }
+        let audio = PreparedAudio(
+            source: .mix, audioStreamIndex: 0, duration: MediaTime(value: 10, timescale: 1),
+            chunks: [AudioChunk(id: 0, start: .zero, samples: samples)]
+        )
+        editor.prepareAudio = { _, _, progress in
+            progress(1)
+            return audio
+        }
+        editor.aiSettings.translation = .openAILuna
+        #expect(editor.perform(.translateWithAI))
+        #expect(editor.aiTask?.stages == ["Preparing audio", "Translating"])
+        await finish(editor)
+        #expect(editor.track.cues.map(\.text) == ["[ar] One.", "[ar] Two.", "[ar] Four.", "[ar] Five."])
+    }
+
     @Test func joinShortLinesIsReviewed() {
         let editor = makeEditor(cues: [cue("Hello.", at: 0), cue("Are you the stable boy?", at: 1), cue("Yes.", at: 5)])
         #expect(editor.perform(.joinShortLines))

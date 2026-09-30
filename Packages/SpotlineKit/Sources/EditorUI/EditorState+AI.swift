@@ -482,18 +482,21 @@ extension EditorState {
         }
         let stream = status.audioStreamIndex
         let language = transcriptionLanguage
-        let pipeline = TranscriptionPipeline(
+        let basePipeline = TranscriptionPipeline(
             preset: qcPreset, frameRate: frameRate, shotChanges: shotChangeFrames, wordStartLead: transcriber.wordStartLead,
             keepsSoundDescriptions: aiSettings.includesSoundDescriptions
         )
+        let leavesOutWalla = aiSettings.leavesOutWalla
         let existing = track.cues
         let prepare = prepareAudio
-        let accumulator = TranscriptAccumulator(pipeline: pipeline)
         let provider = aiSettings.transcription
         // Words this project already got from the provider are used again, not paid for and uploaded again.
         let stored = storedTranscript(provider: provider, audioStream: stream, language: language)
         let status = if stored != nil {
-            AITaskStatus(title: "Transcription", provider: transcriber.name, stages: ["Transcribing"], detail: "Using the saved transcript")
+            AITaskStatus(
+                title: "Transcription", provider: transcriber.name, stages: (leavesOutWalla ? ["Preparing audio"] : []) + ["Transcribing"],
+                detail: "Using the saved transcript"
+            )
         } else {
             AITaskStatus(
                 title: "Transcription", provider: transcriber.name,
@@ -502,10 +505,25 @@ extension EditorState {
         }
         startAITask(status, summary: Self.transcriptionSummary) { [weak self] report, propose in
             let words: [TranscribedWord]
+            let accumulator: TranscriptAccumulator
+            var pipeline = basePipeline
+            func prepared() async throws -> PreparedAudio {
+                let audio = try await prepare(url, stream) { report(.stage("Preparing audio", detail: "Preparing audio · \(AITaskStatus.percent($0))", fraction: $0)) }
+                // Walla is told from the dialogue around it by how loud each voice is.
+                if leavesOutWalla { pipeline.walla = WallaFilter(levels: SpeechLevels(audio)) }
+                return audio
+            }
             if let stored {
+                // Without the audio (the video is gone), the saved words are used as they are.
+                if leavesOutWalla {
+                    do { _ = try await prepared() } catch is CancellationError { throw CancellationError() } catch {}
+                    report(.stage("Transcribing", detail: "Using the saved transcript", fraction: nil))
+                }
+                accumulator = TranscriptAccumulator(pipeline: pipeline)
                 words = stored
             } else {
-                let audio = try await prepare(url, stream) { report(.stage("Preparing audio", detail: "Preparing audio · \(AITaskStatus.percent($0))", fraction: $0)) }
+                let audio = try await prepared()
+                accumulator = TranscriptAccumulator(pipeline: pipeline)
                 // How long the provider takes once it has the audio is timed, to say how long it usually takes next time.
                 let seconds = audio.duration.seconds
                 if let rate = self?.waitRates[provider.rawValue] { report(.usualWait(rate * seconds)) }
@@ -632,29 +650,58 @@ extension EditorState {
             lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
             glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) },
             maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast,
-            work: workTitle, notes: track.translatorNotes, script: script, style: aiSettings.translationStyle
+            work: workTitle, notes: track.translatorNotes, script: script, style: aiSettings.translationStyle,
+            leavesOutWalla: aiSettings.leavesOutWalla
         )
         let fixUp = TranslationPipeline(preset: qcPreset)
         let joinsLines = aiSettings.joinsLinesAfterTranslating
         // A sentence over several cues goes as one line, and its translation is shared out again.
-        let (grouped, groups) = SentenceSpans.grouping(request)
+        let (ungrouped, groups) = SentenceSpans.grouping(request)
+        // Cloud translators hear how loud each line is next to the dialogue around it,
+        // from the audio (usually cached from transcribing), to tell crowd chatter.
+        let hintsFrom = aiSettings.leavesOutWalla && aiSettings.translation.isCloud ? status.mediaURL : nil
+        let stream = status.audioStreamIndex
+        let prepare = prepareAudio
+        let sourceSpans = source.cues.sorted { $0.start < $1.start }.map { ($0.id, $0.start, $0.end) }
+        let sourceIDs = Dictionary(ungrouped.lines.map { ($0.cueID, sourceCues[$0.cueID]?.id) }, uniquingKeysWith: { first, _ in first })
         let status = AITaskStatus(
-            title: "Translation", provider: translator.name, stages: ["Translating"],
-            detail: "\(AITaskStatus.shortName(translator.name)) · 0 of \(grouped.lines.count) lines"
+            title: "Translation", provider: translator.name, stages: (hintsFrom != nil ? ["Preparing audio"] : []) + ["Translating"],
+            detail: "\(AITaskStatus.shortName(translator.name)) · 0 of \(ungrouped.lines.count) lines"
         )
+        // Lines the translator marked as crowd chatter, removed once it is done.
+        let walla = Mutex<Set<Cue.ID>>([])
         startAITask(
             status, afterward: { [weak self] in
                 if !keepsSounds { self?.removeCuesOfSoundsOnly() }
+                self?.removeWalla(walla.withLock { $0 })
                 if joinsLines { self?.joinTranslatedLines() }
             }, summary: Self.translationSummary
         ) { [weak self] report, propose in
-            let found = TranslationCollector()
-            let whole = try await translator.translate(grouped, progress: { report(.provider($0)) }) { batch in
-                propose(Proposals.translation(found.add(fixUp.spread(fixUp.fix(batch, request: grouped), groups: groups, request: grouped)), cues: cues))
+            var grouped = ungrouped
+            if let url = hintsFrom {
+                do {
+                    let audio = try await prepare(url, stream) { report(.stage("Preparing audio", detail: "Preparing audio · \(AITaskStatus.percent($0))", fraction: $0)) }
+                    let quieter = WallaFilter(levels: SpeechLevels(audio)).quieterBy(sourceSpans.map { ($0.1, $0.2) })
+                    let byID = Dictionary(zip(sourceSpans.map(\.0), quieter), uniquingKeysWith: { first, _ in first })
+                    for index in grouped.lines.indices {
+                        grouped.lines[index].quieterBy = sourceIDs[grouped.lines[index].cueID].flatMap { $0 }.flatMap { byID[$0] }.flatMap { $0 }
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // Without the audio, the translator goes by the words alone.
+                }
+                report(.stage("Translating", detail: "\(AITaskStatus.shortName(translator.name)) · 0 of \(grouped.lines.count) lines", fraction: nil))
             }
-            let translations = fixUp.spread(whole, groups: groups, request: grouped)
+            let request = grouped
+            let found = TranslationCollector()
+            let whole = try await translator.translate(request, progress: { report(.provider($0)) }) { batch in
+                propose(Proposals.translation(found.add(fixUp.spread(fixUp.fix(batch, request: request), groups: groups, request: request)), cues: cues))
+            }
+            let translations = fixUp.spread(whole, groups: groups, request: request)
             // Lines the translator never sent back (a model declined them) stay empty: say so.
-            let done = Set(translations.translations.filter { !$0.text.isEmpty }.map(\.cueID))
+            walla.withLock { $0 = Set(translations.translations.filter(\.isWalla).map(\.cueID)) }
+            let done = Set(translations.translations.filter(\.isAnswered).map(\.cueID))
             if let first = cues.first(where: { !done.contains($0.id) }), let self {
                 let count = cues.count - cues.filter { done.contains($0.id) }.count
                 self.reportError(
@@ -665,7 +712,7 @@ extension EditorState {
                     )
                 )
             }
-            return Proposals.translation(fixUp.spread(fixUp.fix(whole, request: grouped), groups: groups, request: grouped), cues: cues)
+            return Proposals.translation(fixUp.spread(fixUp.fix(whole, request: request), groups: groups, request: request), cues: cues)
         }
     }
 
@@ -701,6 +748,14 @@ extension EditorState {
         }.map(\.id))
         guard !ids.isEmpty else { return }
         edit("Remove Sound Descriptions") { track in track.cues.removeAll { ids.contains($0.id) } }
+    }
+
+    /// Removes the cues the translator marked as crowd chatter (walla) that are
+    /// still empty: subtitles leave it out. One undoable edit.
+    func removeWalla(_ ids: Set<Cue.ID>) {
+        let empty = Set(track.cues.filter { ids.contains($0.id) && SubtitleText.visibleLines(of: $0.text).joined().allSatisfy(\.isWhitespace) }.map(\.id))
+        guard !empty.isEmpty else { return }
+        edit("Remove Crowd Chatter") { track in track.cues.removeAll { empty.contains($0.id) } }
     }
 
     // MARK: Joining lines
