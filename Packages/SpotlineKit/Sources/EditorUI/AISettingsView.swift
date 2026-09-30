@@ -37,6 +37,13 @@ public struct AISettingsView: View {
                     ForEach(AISettings.TranslationProvider.allCases) { Text($0.title).tag($0) }
                 }
                 .accessibilityIdentifier(AccessibilityID.AISettings.translationProvider)
+                if editor.aiSettings.translation.isCloud {
+                    Picker("Reasoning effort", selection: $editor.aiSettings.reasoningEffort) {
+                        ForEach(AISettings.ReasoningEffort.allCases) { Text($0.title).tag($0) }
+                    }
+                    .help("How long Claude or GPT-6 Luna thinks about each batch. Higher catches more lines that read two ways, but translates slower and costs more.")
+                    .accessibilityIdentifier(AccessibilityID.AISettings.reasoningEffort)
+                }
                 if let problem = providerProblem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)

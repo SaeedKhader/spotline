@@ -444,6 +444,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
     public static let defaultModel = "claude-opus-5-5"
     public static let sonnetModel = "claude-sonnet-5-5"
     let model: String
+    let effort: AISettings.ReasoningEffort
     let apiKey: String
     let http: HTTPClient
     var endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
@@ -452,9 +453,13 @@ public struct ClaudeTranslator: BatchedCueTranslator {
     var batchSize = 40
     var contextLines = 20
 
-    public init(apiKey: String, model: String = ClaudeTranslator.defaultModel, session: URLSession = .shared) {
+    public init(
+        apiKey: String, model: String = ClaudeTranslator.defaultModel, effort: AISettings.ReasoningEffort = .medium,
+        session: URLSession = .shared
+    ) {
         self.apiKey = apiKey
         self.model = model
+        self.effort = effort
         http = HTTPClient(session: session)
     }
 
@@ -465,7 +470,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         urlRequest.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: Self.body(for: request, model: model))
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: Self.body(for: request, model: model, effort: effort))
         let data = try await http.send(urlRequest)
         return try Self.translations(from: data, request: request)
     }
@@ -494,7 +499,9 @@ public struct ClaudeTranslator: BatchedCueTranslator {
     /// The Messages API request: structured output constrained to a JSON schema.
     /// The rules and the episode's script come first and are cached, since every
     /// batch of the episode sends them unchanged.
-    static func body(for request: TranslationRequest, model: String = defaultModel) -> [String: Any] {
+    static func body(
+        for request: TranslationRequest, model: String = defaultModel, effort: AISettings.ReasoningEffort = .medium
+    ) -> [String: Any] {
         var system: [[String: Any]] = [["type": "text", "text": systemPrompt(for: request)]]
         if let script = scriptText(for: request) { system.append(["type": "text", "text": script]) }
         system[system.count - 1]["cache_control"] = ["type": "ephemeral"]
@@ -502,7 +509,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             "model": model,
             "max_tokens": 32000,
             "fallbacks": "default",
-            "output_config": ["effort": "medium", "format": ["type": "json_schema", "schema": outputSchema(for: request)]],
+            "output_config": ["effort": effort.rawValue, "format": ["type": "json_schema", "schema": outputSchema(for: request)]],
             "system": system,
             "messages": [["role": "user", "content": userPrompt(for: request)]],
         ]
@@ -812,15 +819,20 @@ public struct OpenAITranslator: BatchedCueTranslator {
     public var name: String { model == Self.defaultModel ? "OpenAI GPT-6 Luna (cloud)" : "OpenAI \(model) (cloud)" }
     public static let defaultModel = "gpt-6-luna"
     let model: String
+    let effort: AISettings.ReasoningEffort
     let apiKey: String
     let http: HTTPClient
     var endpoint = URL(string: "https://api.openai.com/v1/responses")!
     var batchSize = 40
     var contextLines = 20
 
-    public init(apiKey: String, model: String = OpenAITranslator.defaultModel, session: URLSession = .shared) {
+    public init(
+        apiKey: String, model: String = OpenAITranslator.defaultModel, effort: AISettings.ReasoningEffort = .medium,
+        session: URLSession = .shared
+    ) {
         self.apiKey = apiKey
         self.model = model
+        self.effort = effort
         http = HTTPClient(session: session)
     }
 
@@ -829,14 +841,16 @@ public struct OpenAITranslator: BatchedCueTranslator {
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: Self.body(for: request, model: model))
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: Self.body(for: request, model: model, effort: effort))
         let data = try await http.send(urlRequest)
         return try Self.translations(from: data, request: request)
     }
 
     /// The Responses API request. `store` is off, so OpenAI keeps no copy of the dialogue
-    /// for the dashboard. High effort: Luna is cheap, and the flags need the reasoning.
-    static func body(for request: TranslationRequest, model: String = defaultModel) -> [String: Any] {
+    /// for the dashboard. The reasoning effort is a setting (Settings › AI).
+    static func body(
+        for request: TranslationRequest, model: String = defaultModel, effort: AISettings.ReasoningEffort = .medium
+    ) -> [String: Any] {
         [
             "model": model,
             // The script last, so OpenAI's automatic prompt caching reuses rules and script for every batch.
@@ -844,7 +858,7 @@ public struct OpenAITranslator: BatchedCueTranslator {
                 .compactMap { $0 }.joined(separator: "\n\n"),
             "input": ClaudeTranslator.userPrompt(for: request),
             "max_output_tokens": 32000,
-            "reasoning": ["effort": "high"],
+            "reasoning": ["effort": effort.rawValue],
             "store": false,
             "text": ["format": [
                 "type": "json_schema", "name": "subtitle_translations", "strict": true,

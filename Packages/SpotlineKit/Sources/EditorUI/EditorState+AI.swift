@@ -44,11 +44,14 @@ public struct AIProviderFactory {
                 case .claude, .claudeSonnet:
                     guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                     guard let key = keys.key(for: .anthropic) else { throw AIError.missingAPIKey(provider: "Anthropic") }
-                    return ClaudeTranslator(apiKey: key, model: settings.translation.claudeModel ?? ClaudeTranslator.defaultModel)
+                    return ClaudeTranslator(
+                        apiKey: key, model: settings.translation.claudeModel ?? ClaudeTranslator.defaultModel,
+                        effort: settings.reasoningEffort
+                    )
                 case .openAILuna:
                     guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                     guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
-                    return OpenAITranslator(apiKey: key)
+                    return OpenAITranslator(apiKey: key, effort: settings.reasoningEffort)
                 }
             }
         )
