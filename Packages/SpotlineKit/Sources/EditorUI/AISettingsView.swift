@@ -36,6 +36,9 @@ public struct AISettingsView: View {
                 Toggle("Leave out background crowd chatter (walla)", isOn: $editor.aiSettings.leavesOutWalla)
                     .help("Transcription leaves out voices far quieter than the dialogue around them, and Claude or GPT-6 Luna leave out crowd lines nobody in the scene is talking with")
                     .accessibilityIdentifier(AccessibilityID.AISettings.leavesOutWalla)
+                Toggle("Leave out made-up languages (High Valyrian, Dothraki)", isOn: $editor.aiSettings.leavesOutFictionalLanguages)
+                    .help("Claude or GPT-6 Luna leave out lines spoken in a fictional language, which transcription can only guess at")
+                    .accessibilityIdentifier(AccessibilityID.AISettings.leavesOutFictionalLanguages)
                 Picker("Translation", selection: $editor.aiSettings.translation) {
                     ForEach(AISettings.TranslationProvider.allCases) { Text($0.title).tag($0) }
                 }

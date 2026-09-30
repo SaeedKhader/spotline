@@ -73,7 +73,7 @@ public struct TranslationPipeline: Sendable {
             return text
         }
         return translations.map { translation in
-            guard !translation.isWalla else { return translation }
+            guard !translation.isLeftOut else { return translation }
             var fixed = translation
             fixed.text = fix(translation.text, cueID: translation.cueID)
             if var flag = translation.flag {
@@ -265,9 +265,9 @@ extension SentenceSpans {
                 result.append(translation)
                 continue
             }
-            // A sentence of crowd chatter is crowd chatter in every cue.
-            if translation.isWalla {
-                result += group.cueIDs.map(CueTranslation.walla)
+            // A sentence left out (crowd chatter, a made-up language) is left out in every cue.
+            if let leftOut = translation.leftOut {
+                result += group.cueIDs.map { CueTranslation(cueID: $0, text: "", leftOut: leftOut) }
                 continue
             }
             func parts(_ text: String) -> [String] {

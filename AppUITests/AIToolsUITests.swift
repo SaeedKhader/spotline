@@ -61,6 +61,22 @@ final class AIToolsUITests: XCTestCase {
     }
 
     @MainActor
+    func testMadeUpLanguagesAreLeftOutUnlessTurnedOff() throws {
+        let app = launchApp()
+        app.typeKey(",", modifierFlags: .command)
+        let aiTab = app.toolbars.buttons["AI"]
+        XCTAssertTrue(aiTab.waitForExistence(timeout: 10), "No AI tab in Settings")
+        aiTab.click()
+
+        let madeUp = app.descendants(matching: .any)[AccessibilityID.AISettings.leavesOutFictionalLanguages]
+        XCTAssertTrue(madeUp.waitForExistence(timeout: 10), "No setting for made-up languages")
+        XCTAssertEqual(madeUp.value as? Int, 1, "Made-up languages are left out in a fresh app")
+        madeUp.click()
+        expectation(for: NSPredicate(format: "value == 0"), evaluatedWith: madeUp)
+        waitForExpectations(timeout: 10)
+    }
+
+    @MainActor
     func testTranscriptionFillsTheCueList() throws {
         let app = launchApp()
         _ = button(.stepForward, in: app)

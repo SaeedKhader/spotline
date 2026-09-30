@@ -109,6 +109,9 @@ public struct AISettings: Sendable, Equatable {
     /// far quieter than the dialogue around them (`WallaFilter`), and Claude and
     /// GPT-6 Luna mark crowd lines, which then go. On by default: pro subtitles leave it out.
     public var leavesOutWalla = true
+    /// Leaves out lines in a made-up language (High Valyrian, Dothraki), which the
+    /// transcriber only guesses at: Claude and GPT-6 Luna mark them, and they go.
+    public var leavesOutFictionalLanguages = true
 
     public init() {}
 
@@ -123,6 +126,7 @@ public struct AISettings: Sendable, Equatable {
     static let dropsFinalPunctuationKey = "AIDropsFinalPunctuation"
     static let namesInParenthesesKey = "AINamesInParentheses"
     static let wallaKey = "AILeavesOutWalla"
+    static let fictionalLanguagesKey = "AILeavesOutFictionalLanguages"
 
     public static func load(from defaults: UserDefaults?) -> AISettings {
         var settings = AISettings()
@@ -138,6 +142,7 @@ public struct AISettings: Sendable, Equatable {
         settings.translationStyle.namesInParentheses = defaults.bool(forKey: namesInParenthesesKey)
         settings.includesSoundDescriptions = defaults.bool(forKey: soundDescriptionsKey)
         settings.leavesOutWalla = defaults.object(forKey: wallaKey) as? Bool ?? true
+        settings.leavesOutFictionalLanguages = defaults.object(forKey: fictionalLanguagesKey) as? Bool ?? true
         return settings
     }
 
@@ -154,6 +159,7 @@ public struct AISettings: Sendable, Equatable {
         defaults.set(translationStyle.namesInParentheses, forKey: Self.namesInParenthesesKey)
         defaults.set(includesSoundDescriptions, forKey: Self.soundDescriptionsKey)
         defaults.set(leavesOutWalla, forKey: Self.wallaKey)
+        defaults.set(leavesOutFictionalLanguages, forKey: Self.fictionalLanguagesKey)
     }
 }
 

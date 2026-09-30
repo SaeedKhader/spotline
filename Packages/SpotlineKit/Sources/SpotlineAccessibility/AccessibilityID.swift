@@ -156,6 +156,7 @@ public enum AccessibilityID {
         public static let joinsLines = "settings.ai.joinsLines"
         public static let soundDescriptions = "settings.ai.soundDescriptions"
         public static let leavesOutWalla = "settings.ai.leavesOutWalla"
+        public static let leavesOutFictionalLanguages = "settings.ai.leavesOutFictionalLanguages"
         public static let register = "settings.ai.register"
         public static let dropsFinalPunctuation = "settings.ai.dropsFinalPunctuation"
         public static let namesInParentheses = "settings.ai.namesInParentheses"
