@@ -549,9 +549,13 @@ public struct ClaudeTranslator: BatchedCueTranslator {
                 shows more listeners; use the dual when two people are named or addressed together. This decides which \
                 variant you recommend; it does not replace the flag. These listener and gender choices are what the user \
                 reviews, so flag them whenever the line itself leaves them open.
-                - Flag every line whose \(target) wording depends on something the source leaves open: the listener's gender \
-                or number ("listener"), gendered verbs, adjectives or pronouns about someone ("genderedWords"), or who says it \
-                ("speaker"). Put the reasons in "reasons".
+                - Flag every line whose \(target) wording changes with who is spoken to, who speaks or who is spoken about, \
+                unless the line itself settles it (a name or form of address in it, "sir", "my lady", "boys"). That is not only \
+                "you": imperatives ("Leave the food and go"), verbs and adjectives about the listener ("Are you ready?", \
+                "Well done"), first-person agreement ("I'm tired"), and pronouns or adjectives about a third person. Flag \
+                these even when the scene makes you fairly sure: the user confirms them with one click. The reasons are the \
+                listener's gender or number ("listener"), gendered words about the speaker or someone else ("genderedWords"), \
+                or an unclear speaker ("speaker"); put them in "reasons".
                 - For a flagged line, write every valid variant in "variants", the one you recommend first; "text" is that first \
                 variant's text. Only list variants whose wording differs. For each, say who it assumes speaks ("speaker", a \
                 name or ""), their gender, who is spoken to ("listeners", names, empty when unknown) and their gender and number. \
