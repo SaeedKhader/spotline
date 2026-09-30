@@ -242,7 +242,10 @@ public enum OpusEncoder {
         }
     }
 
-    public static func oggOpus(_ samples: [Float], sampleRate: Int = PreparedAudio.sampleRate, bitRate: Int = 24_000) throws -> Data {
+    /// `progress` gets how much has been encoded, 0 to 1, about once per percent.
+    public static func oggOpus(
+        _ samples: [Float], sampleRate: Int = PreparedAudio.sampleRate, bitRate: Int = 24_000, progress: ((Double) -> Void)? = nil
+    ) throws -> Data {
         var format: UnsafeMutablePointer<AVFormatContext>?
         guard avformat_alloc_output_context2(&format, nil, "ogg", nil) >= 0, let format else {
             throw Error.unavailable("no Ogg muxer")
@@ -285,7 +288,13 @@ public enum OpusEncoder {
         var frame = av_frame_alloc()
         defer { av_frame_free(&frame) }
         var offset = 0
+        let step = max(samples.count / 100, frameSize)
+        var nextReport = 0
         while offset < samples.count {
+            if let progress, offset >= nextReport {
+                progress(Double(offset) / Double(samples.count))
+                nextReport = offset + step
+            }
             frame!.pointee.nb_samples = Int32(frameSize)
             frame!.pointee.format = AV_SAMPLE_FMT_FLT.rawValue
             frame!.pointee.sample_rate = Int32(sampleRate)
@@ -303,6 +312,7 @@ public enum OpusEncoder {
         avcodec_send_frame(context, nil)
         drain()
         av_write_trailer(format)
+        progress?(1)
         let size = avio_close_dyn_buf(format.pointee.pb, &output)
         format.pointee.pb = nil
         guard size > 0, let output else { throw Error.unavailable("nothing was encoded") }

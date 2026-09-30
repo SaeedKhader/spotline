@@ -5,6 +5,7 @@ import Foundation
 import MediaAnalysis
 import SubtitleCore
 import SubtitleTranslation
+import Synchronization
 
 /// Makes providers for the current settings. `live` uses the real ones (API keys
 /// from the Keychain), `scripted` fixed answers for UI tests.
@@ -403,6 +404,7 @@ extension EditorState {
                 switch step {
                 case .provider(let progress): self.aiTask?.update(with: progress, now: now)
                 case .stage(let name, let detail, let fraction): self.aiTask?.enter(name, detail: detail, fraction: fraction)
+                case .usualWait(let seconds): self.aiTask?.usualWait = seconds
                 }
             }
         }
@@ -491,11 +493,11 @@ extension EditorState {
         // Words this project already got from the provider are used again, not paid for and uploaded again.
         let stored = storedTranscript(provider: provider, audioStream: stream, language: language)
         let status = if stored != nil {
-            AITaskStatus(title: "Transcription", provider: transcriber.name, stages: ["Building cues"], detail: "Using the saved transcript")
+            AITaskStatus(title: "Transcription", provider: transcriber.name, stages: ["Transcribing"], detail: "Using the saved transcript")
         } else {
             AITaskStatus(
                 title: "Transcription", provider: transcriber.name,
-                stages: ["Preparing audio"] + (transcriber.uploadsInOnePiece ? ["Uploading"] : []) + ["Transcribing", "Building cues"]
+                stages: ["Preparing audio"] + (transcriber.uploadsInOnePiece ? ["Compressing audio", "Uploading"] : []) + ["Transcribing"]
             )
         }
         startAITask(status, summary: Self.transcriptionSummary) { [weak self] report, propose in
@@ -504,17 +506,46 @@ extension EditorState {
                 words = stored
             } else {
                 let audio = try await prepare(url, stream) { report(.stage("Preparing audio", detail: "Preparing audio · \(AITaskStatus.percent($0))", fraction: $0)) }
-                words = try await transcriber.transcribe(audio, language: language) { report(.provider($0)) } found: { words in
+                // How long the provider takes once it has the audio is timed, to say how long it usually takes next time.
+                let seconds = audio.duration.seconds
+                if let rate = self?.waitRates[provider.rawValue] { report(.usualWait(rate * seconds)) }
+                let waitStarted = Mutex<Date?>(nil)
+                words = try await transcriber.transcribe(audio, language: language) { progress in
+                    if case .waiting = progress { waitStarted.withLock { if $0 == nil { $0 = Date() } } }
+                    report(.provider(progress))
+                } found: { words in
                     // Cues show as soon as they are complete.
                     propose(Proposals.transcription(accumulator.add(words), existing: existing))
                 }
+                if let started = waitStarted.withLock({ $0 }), seconds > 0 {
+                    self?.recordWait(Date().timeIntervalSince(started) / seconds, provider: provider.rawValue)
+                }
                 self?.storeTranscript(words, provider: provider, audioStream: stream, language: language)
-                report(.stage("Building cues", detail: nil, fraction: nil))
             }
             guard !words.isEmpty else { throw AIError.nothingToDo("No speech was heard.") }
             let cues = try await Self.runDetached { accumulator.finish(with: words) }
             return Proposals.transcription(cues, existing: existing)
         }
+    }
+
+    /// Seconds of waiting per second of audio, by provider, from earlier runs.
+    var waitRates: [String: Double] {
+        get {
+            if cachedWaitRates == nil { cachedWaitRates = settings?.dictionary(forKey: Self.waitRatesKey) as? [String: Double] ?? [:] }
+            return cachedWaitRates ?? [:]
+        }
+        set {
+            cachedWaitRates = newValue
+            settings?.set(newValue, forKey: Self.waitRatesKey)
+        }
+    }
+
+    static let waitRatesKey = "AIProviderWaitRates"
+
+    /// Takes in a wait just timed, weighted with the ones before so one slow day doesn't set it.
+    func recordWait(_ rate: Double, provider: String) {
+        guard rate.isFinite, rate > 0 else { return }
+        waitRates[provider] = waitRates[provider].map { $0 * 0.5 + rate * 0.5 } ?? rate
     }
 
     /// "212 cues transcribed · 9 with words to check".
@@ -789,6 +820,8 @@ enum AITaskStep: Sendable {
     case provider(AIProgress)
     /// A stage the editor does itself: preparing audio, building cues.
     case stage(String, detail: String?, fraction: Double?)
+    /// How long the provider's wait usually takes for this audio, from earlier runs.
+    case usualWait(TimeInterval)
 }
 
 /// How an AI tool ended, for a notification when Spotline is in the background.

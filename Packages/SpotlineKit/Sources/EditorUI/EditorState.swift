@@ -120,6 +120,8 @@ public final class EditorState {
     @ObservationIgnored var aiTaskGeneration = 0
     /// The last progress report taken in; older ones arriving late are dropped.
     @ObservationIgnored var reportSerial = 0
+    /// `waitRates` as read from the settings.
+    @ObservationIgnored var cachedWaitRates: [String: Double]?
     @ObservationIgnored var aiTaskHandle: Task<Void, Never>?
     /// Cues the running tool has already written, so later results do not write them again.
     @ObservationIgnored var appliedAIChanges: Set<Cue.ID> = []

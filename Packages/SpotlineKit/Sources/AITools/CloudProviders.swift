@@ -200,8 +200,8 @@ public struct ElevenLabsTranscriber: Transcriber {
         _ audio: PreparedAudio, language: String?, progress: @escaping @Sendable (AIProgress) -> Void,
         found: @escaping @Sendable ([TranscribedWord]) -> Void
     ) async throws -> [TranscribedWord] {
-        progress(.encoding)
-        let encoded = try OpusEncoder.oggOpus(Self.samples(of: audio))
+        progress(.encoding(0))
+        let encoded = try OpusEncoder.oggOpus(Self.samples(of: audio)) { progress(.encoding($0)) }
         let boundary = "spotline-\(UUID().uuidString)"
         var form = MultipartForm(boundary: boundary)
         form.add(name: "model_id", value: Self.model)
@@ -212,11 +212,17 @@ public struct ElevenLabsTranscriber: Transcriber {
         form.add(name: "diarize", value: "true")
         if let language { form.add(name: "language_code", value: Languages.base(language)) }
         form.add(name: "file", filename: "dialogue.ogg", contentType: "audio/ogg", data: encoded)
-        var request = URLRequest(url: Self.withoutLogging(endpoint), timeoutInterval: 1800)
+        // Zero retention is asked for until ElevenLabs refuses it once (only enterprise
+        // accounts may use it): the refusal comes after the whole file is up, so asking
+        // every time would upload everything twice.
+        let asksForZeroRetention = !Self.zeroRetentionRefused
+        var request = URLRequest(url: asksForZeroRetention ? Self.withoutLogging(endpoint) : endpoint, timeoutInterval: 1800)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = form.finish()
+        let size = Int64(request.httpBody?.count ?? 0)
+        progress(.uploading(sent: 0, total: size))
         // Once every byte is up, ElevenLabs works on the whole file and says nothing until it is done.
         let uploaded: @Sendable (Int64, Int64) -> Void = { sent, total in
             progress(total > 0 && sent >= total ? .waiting : .uploading(sent: sent, total: total))
@@ -224,15 +230,25 @@ public struct ElevenLabsTranscriber: Transcriber {
         let data: Data
         do {
             data = try await http.send(request, uploadProgress: uploaded)
-        } catch AIError.provider(let message) where Self.isRetentionRefusal(message) {
+        } catch AIError.provider(let message) where asksForZeroRetention && Self.isRetentionRefusal(message) {
             // Only enterprise accounts may turn logging off; others transcribe as usual.
+            Self.zeroRetentionRefused = true
             request.url = endpoint
+            progress(.uploading(sent: 0, total: size))
             data = try await http.send(request, uploadProgress: uploaded)
         }
         let words = try Self.words(from: data)
         found(words)
         return words
     }
+
+    /// True once ElevenLabs has refused zero retention for this Mac's account (kept in the user defaults).
+    static var zeroRetentionRefused: Bool {
+        get { UserDefaults.standard.bool(forKey: zeroRetentionRefusedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: zeroRetentionRefusedKey) }
+    }
+
+    static let zeroRetentionRefusedKey = "ElevenLabsZeroRetentionRefused"
 
     /// The endpoint asking ElevenLabs to keep no copy of the audio or transcript (zero retention).
     static func withoutLogging(_ endpoint: URL) -> URL {

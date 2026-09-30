@@ -70,7 +70,10 @@ struct AudioPreparationTests {
     @Test func opusRoundTrip() throws {
         let rate = PreparedAudio.sampleRate
         let tone = (0..<(2 * rate)).map { Float(sin(2 * .pi * 300 * Double($0) / Double(rate)) * 0.5) }
-        let ogg = try OpusEncoder.oggOpus(tone)
+        let reported = Reported()
+        let ogg = try OpusEncoder.oggOpus(tone) { reported.values.append($0) }
+        #expect(reported.values.first == 0 && reported.values.last == 1)
+        #expect(reported.values == reported.values.sorted(), "Encoding progress only goes forward")
         // About 24 kbit/s: 2 s is roughly 6 KB, far smaller than 64 KB of 16-bit PCM.
         #expect(ogg.count > 1_000 && ogg.count < 16_000)
         #expect(ogg.prefix(4) == Data("OggS".utf8))
@@ -97,4 +100,9 @@ struct AudioPreparationTests {
         #expect(difference < 0.001, "16-bit PCM keeps the samples")
         #expect(cache.preparedAudio(for: media, audioStream: 3) == nil)
     }
+}
+
+/// Collects progress values reported during a synchronous call.
+private final class Reported {
+    var values: [Double] = []
 }
