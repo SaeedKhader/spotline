@@ -315,7 +315,7 @@ struct AIStateTests {
         editor.aiSettings.joinsLinesAfterTranslating = true
         #expect(editor.perform(.translateWithAI))
         await finish(editor)
-        #expect(editor.track.cues.map { $0.text.replacing("\n", with: " ") } == ["[ar] I'd leave my sword, but it [ar] would only rust.", "[ar] Farewell."])
+        #expect(editor.track.cues.map { $0.text.replacing("\n", with: " ") } == ["[ar] I'd leave my sword, but it would only rust.", "[ar] Farewell."], "The sentence went as one line")
         let joined = editor.track.cues[0]
         #expect(joined.end == MediaTime(value: 5, timescale: 1))
         #expect(joined.sourceCueIDs == editor.sourceTrack?.cues.prefix(2).map(\.id))

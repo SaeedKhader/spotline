@@ -509,11 +509,14 @@ extension EditorState {
         )
         let fixUp = TranslationPipeline(preset: qcPreset)
         let joinsLines = aiSettings.joinsLinesAfterTranslating
+        // A sentence over several cues goes as one line, and its translation is shared out again.
+        let (grouped, groups) = SentenceSpans.grouping(request)
         startAITask("Translation", afterward: { [weak self] in if joinsLines { self?.joinTranslatedLines() } }) { [weak self] progress, propose in
             let found = TranslationCollector()
-            let translations = try await translator.translate(request, progress: progress) { batch in
-                propose(Proposals.translation(found.add(fixUp.fix(batch, request: request)), cues: cues))
+            let whole = try await translator.translate(grouped, progress: progress) { batch in
+                propose(Proposals.translation(found.add(fixUp.spread(fixUp.fix(batch, request: grouped), groups: groups, request: grouped)), cues: cues))
             }
+            let translations = fixUp.spread(whole, groups: groups, request: grouped)
             // Lines the translator never sent back (a model declined them) stay empty: say so.
             let done = Set(translations.translations.filter { !$0.text.isEmpty }.map(\.cueID))
             if let first = cues.first(where: { !done.contains($0.id) }), let self {
@@ -526,7 +529,7 @@ extension EditorState {
                     )
                 )
             }
-            return Proposals.translation(fixUp.fix(translations, request: request), cues: cues)
+            return Proposals.translation(fixUp.spread(fixUp.fix(whole, request: grouped), groups: groups, request: grouped), cues: cues)
         }
     }
 

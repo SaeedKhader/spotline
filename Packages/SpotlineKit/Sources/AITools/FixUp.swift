@@ -71,9 +71,23 @@ public struct TranslationPipeline: Sendable {
         return TranslationBatch(translations: fix(batch.translations, request: request, cast: cast), cast: batch.cast)
     }
 
+    /// Translations of sentences sent as one line (`SentenceSpans.grouping`)
+    /// shared out over their cues, each part laid out in the house style.
+    public func spread(_ translations: [CueTranslation], groups: [SentenceSpans.Group], request: TranslationRequest) -> [CueTranslation] {
+        guard !groups.isEmpty else { return translations }
+        let bare = TranslationStyle.endsLinesBare(request.targetLanguage) && request.style.dropsFinalPunctuation
+        return SentenceSpans.spread(translations, groups: groups) { part in
+            bare ? Self.withoutFinalPunctuation(layout(part)) : layout(part)
+        }
+    }
+
+    public func spread(_ batch: TranslationBatch, groups: [SentenceSpans.Group], request: TranslationRequest) -> TranslationBatch {
+        TranslationBatch(translations: spread(batch.translations, groups: groups, request: request), cast: batch.cast)
+    }
+
     /// Each line without a closing full stop or comma (an ellipsis, question or
     /// exclamation mark stays), as Arabic subtitles are written.
-    static func withoutFinalPunctuation(_ text: String) -> String {
+    public static func withoutFinalPunctuation(_ text: String) -> String {
         text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
             var line = String(line)
             while let last = line.last, ".,،".contains(last), !line.hasSuffix(".."), !line.hasSuffix("…") {
@@ -156,7 +170,10 @@ public enum SentenceSpans {
                 position += Double(words[cut - 1].count + 1)
                 guard cut >= first, cut < last else { continue }
                 var score = abs(position / length - share)
-                if let mark = words[cut - 1].last, ",.;:!?،؛؟…".contains(mark) { score -= 0.08 }
+                // Cut after punctuation or before "و" (and), never after a word that belongs with the next.
+                if let mark = words[cut - 1].last, ",.;:!?،؛؟…".contains(mark) { score -= 0.15 }
+                if words[cut].hasPrefix("و"), words[cut].count > 2 { score -= 0.06 }
+                if CueSegmenter.danglingWords.contains(words[cut - 1].lowercased()) { score += 0.2 }
                 if score < (best?.score ?? .infinity) { best = (cut, score) }
             }
             cuts.append(best?.cut ?? first)
@@ -168,6 +185,87 @@ public enum SentenceSpans {
             start = cut
         }
         return parts
+    }
+}
+
+extension SentenceSpans {
+    /// A sentence over several cues, sent to the translator as one line.
+    public struct Group: Sendable {
+        /// The cues, in order; the first one's ID stands for the whole sentence in the request.
+        public var cueIDs: [Cue.ID]
+        /// Each cue's source text, for sharing the translation out by length.
+        public var sources: [String]
+
+        public init(cueIDs: [Cue.ID], sources: [String]) {
+            self.cueIDs = cueIDs
+            self.sources = sources
+        }
+    }
+
+    /// The request with every sentence that runs over several lines made one line
+    /// (the first line's ID, their text, span, voices and unsure words), and the groups.
+    /// Translated cue by cue, the halves of a sentence come back cut where the source
+    /// cut them, which in Arabic falls mid-phrase ("…ولرؤية" / "الطرف المذنب يُعاقَب").
+    public static func grouping(_ request: TranslationRequest) -> (request: TranslationRequest, groups: [Group]) {
+        let texts = request.lines.map { AppleTranslator.sourceText($0.source) }
+        let spans = groups(zip(texts, request.lines).map { ($0, $1.start, $1.end) })
+        var lines: [TranslationRequest.Line] = []
+        var result: [Group] = []
+        for span in spans {
+            var line = request.lines[span[0]]
+            guard span.count > 1 else {
+                lines.append(line)
+                continue
+            }
+            let members = span.map { request.lines[$0] }
+            line.source = span.map { texts[$0] }.joined(separator: " ")
+            line.end = members.last!.end
+            var voices: [String] = []
+            for voice in members.flatMap({ $0.voices ?? [] }) where !voices.contains(voice) { voices.append(voice) }
+            line.voices = voices.isEmpty ? nil : voices
+            let unsure = members.flatMap { $0.unsureWords ?? [] }
+            line.unsureWords = unsure.isEmpty ? nil : unsure
+            line.memoryExample = nil
+            lines.append(line)
+            result.append(Group(cueIDs: members.map(\.cueID), sources: span.map { texts[$0] }))
+        }
+        var grouped = request
+        grouped.lines = lines
+        return (grouped, result)
+    }
+
+    /// The translations of grouped sentences shared out over their cues, cut at
+    /// phrase boundaries (`split`) and laid out again. A flag stays with the first
+    /// cue whose part differs between the variants; the other cues take the
+    /// recommended variant's part.
+    public static func spread(_ translations: [CueTranslation], groups: [Group], layout: (String) -> String) -> [CueTranslation] {
+        let byFirst = Dictionary(groups.map { ($0.cueIDs[0], $0) }, uniquingKeysWith: { first, _ in first })
+        var result: [CueTranslation] = []
+        for translation in translations {
+            guard let group = byFirst[translation.cueID] else {
+                result.append(translation)
+                continue
+            }
+            func parts(_ text: String) -> [String] {
+                split(SubtitleText.visibleLines(of: text).joined(separator: " "), like: group.sources).map(layout)
+            }
+            let texts = parts(translation.text)
+            var flagged: Int?
+            var variantParts: [[String]] = []
+            if let flag = translation.flag {
+                variantParts = flag.variants.map { parts($0.text) }
+                flagged = texts.indices.first { index in Set(variantParts.map { $0[index] }).count > 1 }
+            }
+            for (index, cueID) in group.cueIDs.enumerated() {
+                var part = CueTranslation(cueID: cueID, text: texts[index])
+                if index == flagged, var flag = translation.flag {
+                    for variant in flag.variants.indices { flag.variants[variant].text = variantParts[variant][index] }
+                    part.flag = flag
+                }
+                result.append(part)
+            }
+        }
+        return result
     }
 }
 

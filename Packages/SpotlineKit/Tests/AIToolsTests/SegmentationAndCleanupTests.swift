@@ -235,3 +235,18 @@ struct TranscriptCleanupTests {
         #expect(cues[0].duration.seconds >= 1.2)
     }
 }
+
+struct PhraseBreakTests {
+    @Test func aFullCueEndsAtItsLastCommaNotMidPhrase() {
+        let text = "The Andals believed that if seven champions fought, the gods being thus honored would be more like to intervene and see the guilty party punished."
+        var time = 0.0
+        let words = text.split(separator: " ").map { word -> TranscribedWord in
+            defer { time += 0.3 }
+            return TranscribedWord(text: String(word), start: MediaTime(seconds: time, timescale: 1000), end: MediaTime(seconds: time + 0.25, timescale: 1000))
+        }
+        let cues = CueSegmenter(preset: .netflix, frameRate: .fps25).cues(from: words)
+        #expect(cues.count >= 2)
+        #expect(cues[0].text.replacing("\n", with: " ").hasSuffix("fought,"))
+        #expect(cues.allSatisfy { !$0.text.hasSuffix("thus") && !$0.text.hasSuffix("the") })
+    }
+}

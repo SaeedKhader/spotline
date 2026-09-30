@@ -14,8 +14,10 @@ import SubtitleCore
 /// duration, and never across a long pause.
 public struct CueJoiner: Sendable {
     public var preset: QCPreset
-    /// The longest pause a joined cue may span.
+    /// The longest pause a joined cue may span, and a longer one inside a sentence
+    /// (as long as `SentenceSpans` allows when it sends a sentence as one line).
     public var maxGapSeconds = 0.75
+    public var maxSentenceGapSeconds = 1.0
     /// A cue up to this long, or this short in characters, reads as a flash on
     /// its own and joins a neighbour even when both are whole sentences.
     public var shortSeconds = 1.6
@@ -71,7 +73,7 @@ public struct CueJoiner: Sendable {
         guard let first = group.first, let last = group.last, group.count < maxCues,
               first.cue.position == next.cue.position,
               !isBlank(next.cue.text), !group.contains(where: { isBlank($0.cue.text) }),
-              (next.cue.start - last.cue.end).seconds <= maxGapSeconds,
+              (next.cue.start - last.cue.end).seconds <= (goesOn(last) ? maxSentenceGapSeconds : maxGapSeconds),
               (next.cue.end - first.cue.start).seconds <= maxDuration,
               // A line with variants to choose from joins only lines without.
               (group + [next]).filter({ hasOpenChoice($0.cue) }).count <= 1,
