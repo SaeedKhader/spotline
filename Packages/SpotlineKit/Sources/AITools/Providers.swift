@@ -128,12 +128,15 @@ public struct TranslationRequest: Sendable, Equatable {
     public var style: TranslationStyle
     /// Asks the translator to mark crowd chatter (walla) instead of translating it.
     public var leavesOutWalla: Bool
+    /// Asks the translator to mark lines in a made-up language (High Valyrian, Dothraki,
+    /// Klingon) instead of translating the transcriber's guess at them.
+    public var leavesOutFictionalLanguages: Bool
 
     public init(
         lines: [Line], precedingContext: [(source: String, target: String)] = [], sourceLanguage: String, targetLanguage: String,
         glossary: [(source: String, target: String, note: String)] = [], maxCharactersPerLine: Int? = nil, maxLines: Int? = nil,
         cast: [CastMember] = [], work: String? = nil, notes: String? = nil, script: [ScriptLine] = [], style: TranslationStyle = TranslationStyle(),
-        leavesOutWalla: Bool = false
+        leavesOutWalla: Bool = false, leavesOutFictionalLanguages: Bool = false
     ) {
         self.lines = lines
         self.precedingContext = precedingContext
@@ -148,6 +151,7 @@ public struct TranslationRequest: Sendable, Equatable {
         self.script = script
         self.style = style
         self.leavesOutWalla = leavesOutWalla
+        self.leavesOutFictionalLanguages = leavesOutFictionalLanguages
     }
 
     public static func == (lhs: TranslationRequest, rhs: TranslationRequest) -> Bool {
@@ -156,7 +160,7 @@ public struct TranslationRequest: Sendable, Equatable {
             && lhs.precedingContext.map { [$0.source, $0.target] } == rhs.precedingContext.map { [$0.source, $0.target] }
             && lhs.maxCharactersPerLine == rhs.maxCharactersPerLine && lhs.maxLines == rhs.maxLines && lhs.cast == rhs.cast
             && lhs.work == rhs.work && lhs.notes == rhs.notes && lhs.script == rhs.script && lhs.style == rhs.style
-            && lhs.leavesOutWalla == rhs.leavesOutWalla
+            && lhs.leavesOutWalla == rhs.leavesOutWalla && lhs.leavesOutFictionalLanguages == rhs.leavesOutFictionalLanguages
     }
 
     /// True when the target language changes "you", verbs or adjectives for someone's gender or number.
@@ -205,23 +209,39 @@ public struct CueTranslation: Sendable, Equatable {
     public var text: String
     /// Set when the line could be translated more than one way: `text` is the recommended variant.
     public var flag: TranslationFlag?
-    /// Crowd chatter under the dialogue, which subtitles leave out: `text` is empty and the cue goes.
-    public var isWalla: Bool
+    /// Why the line is left out of the subtitles, when it is: `text` is empty and the cue goes.
+    public var leftOut: LeftOut?
 
-    public init(cueID: Cue.ID, text: String, flag: TranslationFlag? = nil, isWalla: Bool = false) {
+    /// Lines subtitles leave out.
+    public enum LeftOut: Sendable, Equatable {
+        /// Crowd chatter under the dialogue.
+        case walla
+        /// Speech in a made-up language (High Valyrian, Dothraki), which the transcriber only guessed at.
+        case fictionalLanguage
+    }
+
+    public init(cueID: Cue.ID, text: String, flag: TranslationFlag? = nil, leftOut: LeftOut? = nil) {
         self.cueID = cueID
         self.text = text
         self.flag = flag
-        self.isWalla = isWalla
+        self.leftOut = leftOut
     }
 
     /// Crowd chatter for a cue: nothing to show.
     public static func walla(_ cueID: Cue.ID) -> CueTranslation {
-        CueTranslation(cueID: cueID, text: "", isWalla: true)
+        CueTranslation(cueID: cueID, text: "", leftOut: .walla)
     }
 
-    /// True when the line came back: translated, or marked as crowd chatter.
-    public var isAnswered: Bool { isWalla || !text.isEmpty }
+    /// A line in a made-up language for a cue: nothing to show.
+    public static func fictionalLanguage(_ cueID: Cue.ID) -> CueTranslation {
+        CueTranslation(cueID: cueID, text: "", leftOut: .fictionalLanguage)
+    }
+
+    public var isWalla: Bool { leftOut == .walla }
+    public var isLeftOut: Bool { leftOut != nil }
+
+    /// True when the line came back: translated, or marked to be left out.
+    public var isAnswered: Bool { isLeftOut || !text.isEmpty }
 }
 
 /// Translations, with the people the translator identified on the way.

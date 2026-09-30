@@ -396,7 +396,7 @@ extension BatchedCueTranslator {
             results = results.adding(translated)
             found(translated)
             for line in lines {
-                if let translation = translated.translations.first(where: { $0.cueID == line.cueID }), !translation.isWalla {
+                if let translation = translated.translations.first(where: { $0.cueID == line.cueID }), !translation.isLeftOut {
                     context.append((line.source, translation.text))
                 }
             }
@@ -543,6 +543,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         item["confidence"] = ["type": "number"]
         item["note"] = string
         if request.leavesOutWalla { item["walla"] = ["type": "boolean"] }
+        if request.leavesOutFictionalLanguages { item["fictional_language"] = ["type": "boolean"] }
         item["variants"] = array(object([
             "text": string, "speaker": string, "speaker_gender": oneOf(personGenderValues),
             "listeners": array(string), "listener_gender": oneOf(genderValues), "listener_count": oneOf(countValues),
@@ -603,6 +604,18 @@ public struct ClaudeTranslator: BatchedCueTranslator {
                 audio than the dialogue around them: voices in the background. From 10 dB under, a line is walla unless a \
                 character in the scene answers it or the scene turns on it (a herald's call, a chant the scene is about). \
                 Set "walla" to false for every other line.
+                """
+        }
+        if request.leavesOutFictionalLanguages {
+            prompt += """
+
+                - Some characters speak a made-up language: High Valyrian or Dothraki in Game of Thrones, Klingon in Star \
+                Trek, Elvish, Na'vi. The transcript only guesses at it, as nonsense words or a phonetic spelling \
+                ("Zaldrīzes buzdari iksos daor", "Athchomar chomakaan"), often with words in [brackets?]. Subtitles leave \
+                it out. Set "fictional_language" to true for a line that is mostly such speech and leave "text" empty. A \
+                \(Languages.name(request.sourceLanguage)) line with an invented word or name in it ("Tell the khal", \
+                "Dracarys!" as a known command) is not such a line: translate it. Nor is mumbled or misheard \
+                \(Languages.name(request.sourceLanguage)). Set "fictional_language" to false for every other line.
                 """
         }
         if TranslationStyle.endsLinesBare(request.targetLanguage) || request.style.namesInParentheses {
@@ -764,6 +777,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             var note: String?
             var variants: [Variant]?
             var walla: Bool?
+            var fictional_language: Bool?
         }
 
         struct Person: Decodable {
@@ -796,6 +810,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         let translations: [CueTranslation] = output.translations.compactMap { item in
             guard let cueID = ids[item.id] else { return nil }
             if request.leavesOutWalla, item.walla == true { return .walla(cueID) }
+            if request.leavesOutFictionalLanguages, item.fictional_language == true { return .fictionalLanguage(cueID) }
             let text = item.text.replacing("\\n", with: "\n")
             var translation = CueTranslation(cueID: cueID, text: text)
             translation.flag = flag(from: item, text: text, cast: request.cast, gendered: request.targetIsGendered)

@@ -651,7 +651,7 @@ extension EditorState {
             glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) },
             maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast,
             work: workTitle, notes: track.translatorNotes, script: script, style: aiSettings.translationStyle,
-            leavesOutWalla: aiSettings.leavesOutWalla
+            leavesOutWalla: aiSettings.leavesOutWalla, leavesOutFictionalLanguages: aiSettings.leavesOutFictionalLanguages
         )
         let fixUp = TranslationPipeline(preset: qcPreset)
         let joinsLines = aiSettings.joinsLinesAfterTranslating
@@ -668,12 +668,12 @@ extension EditorState {
             title: "Translation", provider: translator.name, stages: (hintsFrom != nil ? ["Preparing audio"] : []) + ["Translating"],
             detail: "\(AITaskStatus.shortName(translator.name)) · 0 of \(ungrouped.lines.count) lines"
         )
-        // Lines the translator marked as crowd chatter, removed once it is done.
-        let walla = Mutex<Set<Cue.ID>>([])
+        // Lines the translator marked to be left out (crowd chatter, a made-up language), removed once it is done.
+        let leftOut = Mutex<[Cue.ID: CueTranslation.LeftOut]>([:])
         startAITask(
             status, afterward: { [weak self] in
                 if !keepsSounds { self?.removeCuesOfSoundsOnly() }
-                self?.removeWalla(walla.withLock { $0 })
+                self?.removeLeftOut(leftOut.withLock { $0 })
                 if joinsLines { self?.joinTranslatedLines() }
             }, summary: Self.translationSummary
         ) { [weak self] report, propose in
@@ -700,7 +700,9 @@ extension EditorState {
             }
             let translations = fixUp.spread(whole, groups: groups, request: request)
             // Lines the translator never sent back (a model declined them) stay empty: say so.
-            walla.withLock { $0 = Set(translations.translations.filter(\.isWalla).map(\.cueID)) }
+            leftOut.withLock { marked in
+                marked = Dictionary(translations.translations.compactMap { t in t.leftOut.map { (t.cueID, $0) } }, uniquingKeysWith: { first, _ in first })
+            }
             let done = Set(translations.translations.filter(\.isAnswered).map(\.cueID))
             if let first = cues.first(where: { !done.contains($0.id) }), let self {
                 let count = cues.count - cues.filter { done.contains($0.id) }.count
@@ -750,12 +752,15 @@ extension EditorState {
         edit("Remove Sound Descriptions") { track in track.cues.removeAll { ids.contains($0.id) } }
     }
 
-    /// Removes the cues the translator marked as crowd chatter (walla) that are
-    /// still empty: subtitles leave it out. One undoable edit.
-    func removeWalla(_ ids: Set<Cue.ID>) {
-        let empty = Set(track.cues.filter { ids.contains($0.id) && SubtitleText.visibleLines(of: $0.text).joined().allSatisfy(\.isWhitespace) }.map(\.id))
-        guard !empty.isEmpty else { return }
-        edit("Remove Crowd Chatter") { track in track.cues.removeAll { empty.contains($0.id) } }
+    /// Removes the cues the translator marked to be left out that are still empty:
+    /// crowd chatter (walla) and lines in a made-up language. One undoable edit for each.
+    func removeLeftOut(_ marked: [Cue.ID: CueTranslation.LeftOut]) {
+        let empty = track.cues.filter { marked[$0.id] != nil && SubtitleText.visibleLines(of: $0.text).joined().allSatisfy(\.isWhitespace) }
+        for (reason, name) in [(CueTranslation.LeftOut.walla, "Remove Crowd Chatter"), (.fictionalLanguage, "Remove Made-Up Language")] {
+            let ids = Set(empty.filter { marked[$0.id] == reason }.map(\.id))
+            guard !ids.isEmpty else { continue }
+            edit(name) { track in track.cues.removeAll { ids.contains($0.id) } }
+        }
     }
 
     // MARK: Joining lines

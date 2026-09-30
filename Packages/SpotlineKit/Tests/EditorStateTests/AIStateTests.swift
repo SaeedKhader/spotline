@@ -475,6 +475,24 @@ struct AIStateTests {
         #expect(kept.track.cues.map(\.text) == ["[ar] Crowd: Look at him!", "[ar] He's alive."])
     }
 
+    @Test func madeUpLanguageGoesAfterTranslatingUnlessKept() async {
+        let editor = makeEditor(cues: [cue("Valyrian: Dracarys!", at: 0), cue("He's alive.", at: 2), cue("Crowd: Move on!", at: 4)])
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.track.cues.map(\.text) == ["[ar] He's alive."], "Made-up lines go, and are not reported as untranslated")
+        #expect(editor.sourceTrack?.cues.count == 3, "The source keeps them")
+        // Crowd chatter and made-up language go in an undo step each.
+        #expect(editor.undoManager.undoActionName == "Remove Made-Up Language")
+        editor.perform(.undo)
+        #expect(editor.track.cues.map(\.text) == ["", "[ar] He's alive."])
+
+        let kept = makeEditor(cues: [cue("Valyrian: Dracarys!", at: 0), cue("He's alive.", at: 2)])
+        kept.aiSettings.leavesOutFictionalLanguages = false
+        #expect(kept.perform(.translateWithAI))
+        await finish(kept)
+        #expect(kept.track.cues.map(\.text) == ["[ar] Valyrian: Dracarys!", "[ar] He's alive."])
+    }
+
     @Test func cloudTranslatorsHearWhichLinesAreFarUnderTheDialogue() async {
         let editor = makeEditor(cues: [cue("One.", at: 0), cue("Two.", at: 2), cue("Take my horse.", at: 4), cue("Four.", at: 6), cue("Five.", at: 8)])
         // Dialogue at about -10 dBFS, and a voice 30 dB under it from 4 to 5 s.
