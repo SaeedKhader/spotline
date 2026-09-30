@@ -192,6 +192,10 @@ extension EditorState {
                 )
             }
             guard canPerform(command) else { throw AgentToolError("“\(command.title)” can't run now.") }
+            // Agents never see dialogs: clearing the transcript is undoable, and asked for.
+            let confirmClearing = confirmClearingTranscript
+            confirmClearingTranscript = { _ in true }
+            defer { confirmClearingTranscript = confirmClearing }
             let done = try reportingErrorsToAgent { perform(command) }
             guard done else { throw AgentToolError("“\(command.title)” had nothing to do.") }
             return [

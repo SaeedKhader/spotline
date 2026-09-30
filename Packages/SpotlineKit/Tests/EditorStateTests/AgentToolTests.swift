@@ -156,6 +156,19 @@ struct AgentToolTests {
         #expect(await failure(editor, .runCommand, ["id": "nope"]) != nil)
     }
 
+    @Test func agentsClearTheTranscriptWithoutADialog() async throws {
+        let editor = makeEditor()
+        editor.confirmClearingTranscript = { _ in
+            Issue.record("Agents never see dialogs")
+            return false
+        }
+        try await run(editor, .runCommand, ["id": "ai.clearTranscript"])
+        #expect(editor.track.cues.isEmpty)
+        #expect(await failure(editor, .runCommand, ["id": "ai.clearTranslation"]) == "“Clear Translation” can't run now.")
+        try await run(editor, .runCommand, ["id": "editing.undo"])
+        #expect(editor.track.cues.map(\.text) == ["One", "Two", "Three"])
+    }
+
     @Test func qcRunsWithAPreset() async throws {
         let editor = makeEditor(["One", "", "Three"])
         let report = try await run(editor, .runQC, ["preset": "netflix"])
