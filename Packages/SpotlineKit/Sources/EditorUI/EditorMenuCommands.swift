@@ -61,6 +61,7 @@ public struct EditorMenuCommands: Commands {
             Divider()
             buttons(for: .ai, only: [.clearTranslation, .clearTranscript])
             Divider()
+            buttons(for: .ai, only: [.reviewScriptWithAI, .reviewScriptFindings])
             buttons(for: .ai, only: [.reviewWords, .confirmRemainingWords])
             buttons(for: .ai, only: [.reviewChoices, .acceptRemainingChoices])
             Divider()

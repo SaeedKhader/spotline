@@ -26,7 +26,7 @@ struct ReviewSidebar: View {
         VStack(spacing: 0) {
             ReviewHeader(editor: editor)
             Divider()
-            if editor.isReviewHeldForBrief {
+            if editor.isReviewHeld {
                 BriefWaiting(editor: editor)
             } else {
                 cards
@@ -112,7 +112,7 @@ struct ReviewSidebar: View {
             }
             return .handled
         case .delete, .deleteForward:
-            guard case .change = item.kind else { return .ignored }
+            guard item.kind == .change || item.kind == .script else { return .ignored }
             editor.decide(item, .reject)
             return .handled
         default:
@@ -126,7 +126,7 @@ struct ReviewSidebar: View {
         case let digit where digit.count == 1 && ("1"..."9").contains(digit):
             guard let index = Int(digit) else { return .ignored }
             switch item.kind {
-            case .choice: editor.decide(item, .variant(index - 1))
+            case .choice, .script: editor.decide(item, .variant(index - 1))
             case .issues, .frames: editor.decide(item, .suggestion(index - 1))
             default: return .ignored
             }
@@ -137,14 +137,21 @@ struct ReviewSidebar: View {
     }
 }
 
-/// Instead of the cards while the review waits for the episode brief: what is
-/// happening, and the button that opens the brief to confirm.
+/// Instead of the cards while the review waits for the episode brief or the script
+/// review: what is happening, and the button that opens the brief to confirm.
 private struct BriefWaiting: View {
     let editor: EditorState
 
     var body: some View {
         VStack(spacing: 10) {
-            if editor.isBuildingBrief {
+            if editor.isReviewingScript {
+                ProgressView().controlSize(.small)
+                Text("Reviewing the script with the brief…")
+                    .font(.callout)
+                Text("Everything to review shows once it's done.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if editor.isBuildingBrief {
                 ProgressView().controlSize(.small)
                 Text("Building the episode brief…")
                     .font(.callout)
@@ -194,7 +201,7 @@ private struct ReviewHeader: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Review").font(.headline)
-                Text(editor.isReviewHeldForBrief ? "Waiting for the brief" : left == 0 ? "All done" : "\(left) to review")
+                Text(editor.isReviewingScript ? "Reviewing the script" : editor.isReviewHeld ? "Waiting for the brief" : left == 0 ? "All done" : "\(left) to review")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -242,6 +249,8 @@ private struct ReviewHeader: View {
             CommandButton(command: .confirmRemainingWords, editor: editor)
         case .choices:
             CommandButton(command: .acceptRemainingChoices, editor: editor)
+        case .script:
+            EmptyView()
         case .changes:
             CommandButton(command: .rejectAllChanges, editor: editor)
             CommandButton(command: .acceptAllChanges, editor: editor)
@@ -332,6 +341,7 @@ private struct ScopeButton: View {
         case .frames: .reviewFrames
         case .words: .reviewWords
         case .choices: .reviewChoices
+        case .script: .reviewScriptFindings
         case .changes: .reviewChanges
         }
     }
@@ -343,6 +353,7 @@ private struct ScopeButton: View {
         case .frames: "Frames"
         case .words: "Words"
         case .choices: "Choices"
+        case .script: "AI Review"
         case .changes: "AI Changes"
         }
     }
@@ -352,7 +363,7 @@ private struct ScopeButton: View {
         switch scope {
         case .all: .secondary
         case .issues, .frames, .words: .attentionTint
-        case .choices, .changes: .aiTint
+        case .choices, .changes, .script: .aiTint
         }
     }
 
@@ -363,6 +374,7 @@ private struct ScopeButton: View {
         case .frames: "Cues too close to a shot change or the next cue"
         case .words: "Words the transcription wasn't sure of"
         case .choices: "Lines the translation could word more than one way"
+        case .script: "Lines the AI script review thinks were misheard or make no sense"
         case .changes: "Changes \(editor.pendingReview?.title ?? "an AI tool") proposes"
         }
     }
@@ -374,6 +386,7 @@ private struct ScopeButton: View {
         case .frames: count == 1 ? "1 cue with frame issues" : "\(count) cues with frame issues"
         case .words: count == 1 ? "1 word to check" : "\(count) words to check"
         case .choices: count == 1 ? "1 line to choose" : "\(count) lines to choose"
+        case .script: count == 1 ? "1 line to check" : "\(count) lines to check"
         case .changes: "\(editor.pendingReview?.title ?? "AI"): \(count == 1 ? "1 change" : "\(count) changes") to review"
         }
     }
@@ -385,6 +398,7 @@ private struct ScopeButton: View {
         case .frames: AccessibilityID.CueList.framesSummary
         case .words: AccessibilityID.CueList.wordsSummary
         case .choices: AccessibilityID.CueList.choicesSummary
+        case .script: AccessibilityID.CueList.scriptSummary
         case .changes: AccessibilityID.CueList.aiReview
         }
     }
@@ -488,6 +502,7 @@ private struct ReviewCard: View {
         switch item.kind {
         case .change: changeContent
         case .choice: choiceContent
+        case .script: scriptContent
         case .word(let index): wordContent(index)
         case .issues, .frames: issuesContent
         }
@@ -499,6 +514,7 @@ private struct ReviewCard: View {
         switch item.kind {
         case .change: "AI change"
         case .choice: "Choice"
+        case .script: "AI review"
         case .word: "Unsure word"
         case .issues: "Issue"
         case .frames: "Frames"
@@ -507,7 +523,7 @@ private struct ReviewCard: View {
 
     private var kindTint: Color {
         switch item.kind {
-        case .change, .choice: .aiTint
+        case .change, .choice, .script: .aiTint
         case .word, .issues, .frames: .attentionTint
         }
     }
@@ -587,6 +603,35 @@ private struct ReviewCard: View {
             buttons {
                 CardButton(editor: editor, item: item, action: .edit, title: "Edit", key: "E") { editor.editReviewItem(item) }
                 CardButton(editor: editor, item: item, action: .confirm, title: "Confirm", key: "Return", isPrimary: true) { editor.decide(item, .primary) }
+            }
+        }
+    }
+
+    /// What the AI script review doubts, why, and its fixes to try (1 to 9), with how sure it is of each.
+    @ViewBuilder private var scriptContent: some View {
+        if let cue, let finding = cue.scriptFinding {
+            let shown = finding.tried == nil ? cue.text : finding.original
+            Text(highlighting(finding.words, in: SubtitleText.visibleLines(of: shown).joined(separator: "\n")))
+                .font(SpotlineStyle.cueFont)
+                .foregroundStyle(finding.tried == nil ? .primary : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .environment(\.layoutDirection, direction.layoutDirection)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !finding.reason.isEmpty {
+                Text(finding.reason).font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(finding.fixes.enumerated()), id: \.offset) { index, fix in
+                    FixRow(editor: editor, item: item, index: index, fix: fix, isTried: finding.tried == index, direction: direction)
+                }
+            }
+            buttons {
+                CardButton(editor: editor, item: item, action: .play, title: "Play", key: "P") { editor.playReviewItem(item) }
+                    .disabled(!editor.hasMedia)
+                CardButton(editor: editor, item: item, action: .keep, title: "Keep Line", key: "Delete") { editor.decide(item, .reject) }
+                CardButton(editor: editor, item: item, action: .confirm, title: finding.tried == nil ? "Try Fix" : "Confirm", key: "Return", isPrimary: true) {
+                    editor.decide(item, .primary)
+                }
             }
         }
     }
@@ -689,10 +734,17 @@ private struct ReviewCard: View {
 
     /// The line with the unsure word underlined in orange.
     private func highlighting(_ word: String, in text: String) -> AttributedString {
+        highlighting([word], in: text)
+    }
+
+    /// The line with each of `words` underlined in orange.
+    private func highlighting(_ words: [String], in text: String) -> AttributedString {
         var result = AttributedString(text)
-        if let range = result.range(of: word, options: .caseInsensitive) {
-            result[range].swiftUI.underlineStyle = Text.LineStyle(pattern: .solid, color: .attentionTint)
-            result[range].swiftUI.foregroundColor = .attentionTint
+        for word in words where !word.isEmpty {
+            if let range = result.range(of: word, options: .caseInsensitive) {
+                result[range].swiftUI.underlineStyle = Text.LineStyle(pattern: .solid, color: .attentionTint)
+                result[range].swiftUI.foregroundColor = .attentionTint
+            }
         }
         return result
     }
@@ -702,6 +754,7 @@ private struct ReviewCard: View {
         switch item.kind {
         case .change: return editor.proposedChange(forCue: item.cueID)?.cue.text ?? ""
         case .choice: return cue.text
+        case .script: return cue.scriptFinding?.reason ?? ""
         case .word(let index): return cue.unsureWords?[safe: index]?.text ?? ""
         case .issues, .frames: return editor.cardIssues(item).map(\.message).joined(separator: "\n")
         }
@@ -881,6 +934,53 @@ private struct VariantRow: View {
         .accessibilityLabel(variant.summary)
         .accessibilityValue(variant.text)
         .accessibilityIdentifier(AccessibilityID.Review.variant(item.id, index))
+        .accessibilityAction { editor.decide(item, .variant(index)) }
+    }
+}
+
+/// One fix on an AI Review card: how sure the review is, and the line as it would read. A click tries it.
+private struct FixRow: View {
+    let editor: EditorState
+    let item: ReviewItem
+    let index: Int
+    let fix: ScriptFinding.Fix
+    let isTried: Bool
+    let direction: TextDirection
+
+    var body: some View {
+        let percent = "\(Int((fix.confidence * 100).rounded()))% sure"
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: isTried ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(isTried ? Color.aiTint : Color.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    if index < 9 {
+                        Text("\(index + 1)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text(percent)
+                        .monospacedDigit()
+                        .foregroundStyle(fix.confidence < 0.75 ? Color.attentionTint : Color.secondary)
+                }
+                .font(.caption)
+                Text(SubtitleText.visibleLines(of: fix.text).joined(separator: "\n"))
+                    .font(SpotlineStyle.cueFont)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .environment(\.layoutDirection, direction.layoutDirection)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 3)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { editor.decide(item, .variant(index)) }
+        .help(isTried ? "In the line now; Confirm keeps it" : "Try it (\(index + 1)); Confirm keeps it")
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(isTried ? [.isButton, .isSelected] : .isButton)
+        .accessibilityLabel(percent)
+        .accessibilityValue(fix.text)
+        .accessibilityIdentifier(AccessibilityID.Review.fix(item.id, index))
         .accessibilityAction { editor.decide(item, .variant(index)) }
     }
 }

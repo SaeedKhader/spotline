@@ -28,6 +28,9 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     /// True while the text is as an AI tool wrote it (transcription, translation);
     /// cleared when the user edits it. The cue list tints these.
     public var isAIGenerated: Bool?
+    /// What the AI script review found wrong with the line, with fixes to try;
+    /// gone once a fix is confirmed or the line is kept.
+    public var scriptFinding: ScriptFinding?
     /// A reading speed the user accepted for the cue (Ignore on its review card, when no fix
     /// could slow it down): it is not flagged while it reads no faster than this.
     public var acceptedReadingSpeed: Double?

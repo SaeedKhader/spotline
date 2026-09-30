@@ -83,6 +83,8 @@ public enum AccessibilityID {
         public static let framesSummary = "cueList.frames"
         /// The review sidebar's Choices filter chip: how many lines still read more than one way.
         public static let choicesSummary = "cueList.choices"
+        /// The AI Review chip: lines the AI script review flagged.
+        public static let scriptSummary = "cueList.script"
         /// The review sidebar's Words filter chip: how many words the transcriber was unsure of.
         public static let wordsSummary = "cueList.words"
 
@@ -148,6 +150,9 @@ public enum AccessibilityID {
         /// The n-th (0-based) suggested fix on an issue card; its label says what it does,
         /// its value what the text becomes, for text fixes.
         public static func suggestion(_ itemID: String, _ index: Int) -> String { "\(card(itemID)).suggestion.\(index)" }
+        /// The n-th (0-based) fix on an AI Review card; its label says how sure the review is,
+        /// its value is the line as it would read, and it is selected while it is in the line.
+        public static func fix(_ itemID: String, _ index: Int) -> String { "\(card(itemID)).fix.\(index)" }
         /// The cue's text, edited in its card (after Fix, Edit or E); its value is the text.
         public static func text(_ itemID: String) -> String { "\(card(itemID)).text" }
         /// The title bar button that shows and hides the sidebar; its value is how many things are left to review.

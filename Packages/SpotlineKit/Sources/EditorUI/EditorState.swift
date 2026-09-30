@@ -285,6 +285,8 @@ public final class EditorState {
     public internal(set) var isBuildingBrief = false
     /// Whether the episode brief dialog is shown.
     public internal(set) var isBriefSheetShown = false
+    /// True while the AI script review runs after the brief is confirmed; the review waits for it.
+    public internal(set) var isReviewingScript = false
     @ObservationIgnored private var embeddedSubtitlesTask: Task<Void, Never>?
     /// Lists and reads the media's subtitle tracks off the main actor. Tests replace them.
     @ObservationIgnored public var listEmbeddedSubtitles: @Sendable (URL) async throws -> [EmbeddedSubtitleTrack] = { url in
@@ -501,7 +503,8 @@ public final class EditorState {
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id,
-             EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id:
+             EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id,
+             EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id:
             canPerformAI(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
@@ -552,6 +555,7 @@ public final class EditorState {
         case EditorCommand.reviewFrames.id: isShowingReview(.frames)
         case EditorCommand.reviewChanges.id: isShowingReview(.changes)
         case EditorCommand.reviewChoices.id: isShowingReview(.choices)
+        case EditorCommand.reviewScriptFindings.id: isShowingReview(.script)
         case EditorCommand.reviewWords.id: isShowingReview(.words)
         case EditorCommand.togglePositionTop.id: selectedCue.map { $0.position == .top }
         default: nil
@@ -648,7 +652,8 @@ public final class EditorState {
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id,
-             EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id:
+             EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id,
+             EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id:
             return performAI(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
@@ -762,6 +767,7 @@ public final class EditorState {
         isEmbeddedSubtitlesSheetShown = false
         isBuildingBrief = false
         isBriefSheetShown = false
+        isReviewingScript = false
         scrollTimeline(toCenter: 0)
     }
 

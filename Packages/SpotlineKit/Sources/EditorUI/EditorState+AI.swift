@@ -15,15 +15,19 @@ public struct AIProviderFactory {
     public var translator: @MainActor (AISettings) throws -> any CueTranslator
     /// Builds the episode brief after transcription; nil when there is none to use.
     public var briefBuilder: @MainActor (AISettings) throws -> (any EpisodeBriefBuilder)?
+    /// Reviews the transcript once the brief is confirmed; nil when there is none to use.
+    public var scriptReviewer: @MainActor (AISettings) throws -> (any ScriptReviewer)?
 
     public init(
         transcriber: @escaping @MainActor (AISettings) throws -> any Transcriber,
         translator: @escaping @MainActor (AISettings) throws -> any CueTranslator,
-        briefBuilder: @escaping @MainActor (AISettings) throws -> (any EpisodeBriefBuilder)? = { _ in nil }
+        briefBuilder: @escaping @MainActor (AISettings) throws -> (any EpisodeBriefBuilder)? = { _ in nil },
+        scriptReviewer: @escaping @MainActor (AISettings) throws -> (any ScriptReviewer)? = { _ in nil }
     ) {
         self.transcriber = transcriber
         self.translator = translator
         self.briefBuilder = briefBuilder
+        self.scriptReviewer = scriptReviewer
     }
 
     public static func live(keys: APIKeyStore = APIKeyStore()) -> AIProviderFactory {
@@ -64,17 +68,23 @@ public struct AIProviderFactory {
                 guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                 guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
                 return OpenAIBriefBuilder(apiKey: key, effort: settings.reasoningEffort)
+            },
+            scriptReviewer: { settings in
+                guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
+                guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
+                return OpenAIScriptReviewer(apiKey: key, effort: settings.reasoningEffort)
             }
         )
     }
 
-    /// Fixed answers. The episode brief only with `buildsBrief` (`-UITestEpisodeBrief`), so
-    /// UI tests of other tools don't get its dialog after transcribing.
+    /// Fixed answers. The episode brief and script review only with `buildsBrief`
+    /// (`-UITestEpisodeBrief`), so UI tests of other tools don't get its dialog after transcribing.
     public static func scripted(buildsBrief: Bool = false) -> AIProviderFactory {
         AIProviderFactory(
             transcriber: { _ in ScriptedTranscriber.fixture },
             translator: { _ in ScriptedTranslator() },
-            briefBuilder: { _ in buildsBrief ? ScriptedBriefBuilder() : nil }
+            briefBuilder: { _ in buildsBrief ? ScriptedBriefBuilder() : nil },
+            scriptReviewer: { _ in buildsBrief ? ScriptedScriptReviewer() : nil }
         )
     }
 }
@@ -117,6 +127,10 @@ extension EditorState {
             return track.brief != nil || (idle && !briefSourceTrack.cues.isEmpty)
         case EditorCommand.rebuildEpisodeBrief.id:
             return track.brief != nil && idle && !briefSourceTrack.cues.isEmpty
+        case EditorCommand.reviewScriptWithAI.id:
+            return idle && !isTranslating && track.brief?.isConfirmed == true && !track.cues.isEmpty
+        case EditorCommand.reviewScriptFindings.id:
+            return track.cues.contains { $0.scriptFinding != nil }
         default:
             return false
         }
@@ -163,6 +177,8 @@ extension EditorState {
         case EditorCommand.rejectAllChanges.id: rejectChanges(to: nil)
         case EditorCommand.reviewChanges.id: toggleReviewFilter(.changes)
         case EditorCommand.showEpisodeBrief.id: showEpisodeBrief()
+        case EditorCommand.reviewScriptWithAI.id: reviewScript(automatically: false)
+        case EditorCommand.reviewScriptFindings.id: toggleReviewFilter(.script)
         case EditorCommand.rebuildEpisodeBrief.id:
             isBriefSheetShown = false
             buildEpisodeBrief(automatically: false)
