@@ -31,6 +31,8 @@ public struct AISettings: Sendable, Equatable {
         case claude
         /// The same with Claude Sonnet, at half the price.
         case claudeSonnet
+        /// The same prompt and output with OpenAI's GPT-6 Luna, far cheaper still.
+        case openAILuna
 
         public var id: String { rawValue }
         public var isCloud: Bool { self != .appleTranslation }
@@ -39,13 +41,32 @@ public struct AISettings: Sendable, Equatable {
             case .appleTranslation: "On this Mac (Apple Translation)"
             case .claude: "Claude Opus (cloud)"
             case .claudeSonnet: "Claude Sonnet (cloud, half the price)"
+            case .openAILuna: "OpenAI GPT-6 Luna (cloud, cheapest)"
+            }
+        }
+
+        /// The provider name for messages ("… needs an API key").
+        public var providerName: String {
+            switch self {
+            case .appleTranslation: "Apple Translation"
+            case .claude, .claudeSonnet: "Claude"
+            case .openAILuna: "OpenAI GPT-6 Luna"
+            }
+        }
+
+        /// Whose API key the provider needs, for the cloud providers.
+        public var apiKeyProvider: APIKeyStore.Provider? {
+            switch self {
+            case .appleTranslation: nil
+            case .claude, .claudeSonnet: .anthropic
+            case .openAILuna: .openAI
             }
         }
 
         /// The Claude model, for the Claude providers.
         public var claudeModel: String? {
             switch self {
-            case .appleTranslation: nil
+            case .appleTranslation, .openAILuna: nil
             case .claude: ClaudeTranslator.defaultModel
             case .claudeSonnet: ClaudeTranslator.sonnetModel
             }

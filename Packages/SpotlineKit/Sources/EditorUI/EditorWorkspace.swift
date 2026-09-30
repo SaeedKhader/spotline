@@ -23,6 +23,8 @@ public final class EditorWorkspace: ProjectActions {
     public private(set) var recentProjects: [URL] = []
     /// The launch options for the next editor made; only the first window opens the launch files.
     @ObservationIgnored private var pendingLaunchOptions: LaunchOptions?
+    /// The projects macOS remembers for the app (`NSDocumentController.recentDocumentURLs`).
+    @ObservationIgnored private let recentDocumentURLs: @MainActor () -> [URL]
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
 
     /// Commands the stand-in editor allows while no project window is open.
@@ -30,8 +32,12 @@ public final class EditorWorkspace: ProjectActions {
         EditorCommand.newProject.id, EditorCommand.openProject.id, EditorCommand.openMedia.id,
     ]
 
-    init(launchOptions: LaunchOptions) {
+    init(
+        launchOptions: LaunchOptions,
+        recentDocumentURLs: @escaping @MainActor () -> [URL] = { NSDocumentController.shared.recentDocumentURLs }
+    ) {
         self.launchOptions = launchOptions
+        self.recentDocumentURLs = recentDocumentURLs
         let testMode = launchOptions.isUITestMode
         idleEditor = EditorState(
             launchOptions: launchOptions.withoutFiles, playback: SimulatedPlaybackEngine(), settings: testMode ? nil : .standard
@@ -51,9 +57,14 @@ public final class EditorWorkspace: ProjectActions {
                 if let document = window?.windowController?.document as? SpotlineDocument { self?.activeEditor = document.editor }
             }
         })
-        observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshRecentProjects() }
-        })
+        // AppKit adds a project whenever one is opened or first saved (including
+        // the save next to the video an AI tool makes); the list can also change
+        // outside Spotline while it is in the background.
+        for name in [ProjectDocumentController.recentDocumentsDidChangeNotification, NSApplication.didBecomeActiveNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshRecentProjects() }
+            })
+        }
     }
 
     /// The editor menus show: the front project's, else the stand-in.
@@ -112,7 +123,6 @@ public final class EditorWorkspace: ProjectActions {
             MainActor.assumeIsolated {
                 if let document = document as? SpotlineDocument { self?.activeEditor = document.editor }
                 if let error, (error as NSError).code != NSUserCancelledError { NSApp.presentError(error) }
-                self?.refreshRecentProjects()
             }
         }
         if let controller = NSDocumentController.shared as? ProjectDocumentController {
@@ -138,7 +148,7 @@ public final class EditorWorkspace: ProjectActions {
     }
 
     func refreshRecentProjects() {
-        let urls = NSDocumentController.shared.recentDocumentURLs
+        let urls = recentDocumentURLs()
         if urls != recentProjects { recentProjects = urls }
     }
 
