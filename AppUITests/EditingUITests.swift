@@ -128,8 +128,15 @@ final class EditingUITests: XCTestCase {
         number.click()
         waitForSelection(true, in: app)
 
+        // Just under the last row (scrolled into view first: the selected row is taller).
         let list = app.descendants(matching: .any)[AccessibilityID.CueList.root]
-        list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.97)).click()
+        list.scroll(byDeltaX: 0, deltaY: -1000)
+        let last = app.cueCells(.text).element(boundBy: 2)
+        let below = last.frame.maxY + 60
+        XCTAssertLessThan(below, list.frame.maxY, "No empty space under the rows")
+        list.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: list.frame.width / 2, dy: below - list.frame.minY))
+            .click()
         waitForSelection(false, in: app)
     }
 

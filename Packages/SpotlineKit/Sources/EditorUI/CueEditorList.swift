@@ -108,8 +108,16 @@ struct CueEditorList: View {
                 focusedText = id
                 return .handled
             }
-            // Esc in the text goes back to the list; Esc in the list deselects.
-            .onKeyPress(.escape) { editor.perform(.deselectCue) ? .handled : .ignored }
+            // Esc in the text goes back to the list (the text editor passes Esc up to
+            // here); Esc in the list deselects.
+            .onKeyPress(.escape) {
+                if editor.isEditingText || focusedText != nil {
+                    focusedText = nil
+                    isListFocused = true
+                    return .handled
+                }
+                return editor.perform(.deselectCue) ? .handled : .ignored
+            }
             .onChange(of: editor.selectedCueID) { _, id in
                 guard let id else { return }
                 withAnimation(editor.launchOptions.isUITestMode ? nil : .default) { proxy.scrollTo(id) }
