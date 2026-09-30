@@ -130,6 +130,11 @@ extension EditorCommand {
     public static let fixOverlaps = EditorCommand(
         id: "cue.fixOverlaps", title: "Fix Overlaps and Short Gaps", category: .review
     )
+    /// Joins short cues and sentences split over two cues, as a subtitler would
+    /// (`CueJoiner`), proposed as changes to review.
+    public static let joinShortLines = EditorCommand(
+        id: "cue.joinShortLines", title: "Join Short Lines", category: .review
+    )
     public static let previousIssue = EditorCommand(
         id: "navigation.previousIssue", title: "Previous Cue with Issues", category: .review,
         defaultShortcut: KeyShortcut(.upArrow, modifiers: [.command, .option])
@@ -300,7 +305,7 @@ extension EditorCommand {
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
         previousCue, nextCue, previousShotChange, nextShotChange,
-        toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps,
+        toggleIssuesPanel, previousIssue, nextIssue, fixOverlaps, joinShortLines,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
         toggleMilliseconds,

@@ -408,6 +408,8 @@ public final class EditorState {
             !issues.isEmpty
         case EditorCommand.fixOverlaps.id:
             issues.values.contains { $0.contains { $0.kind.isTimingConflict } }
+        case EditorCommand.joinShortLines.id:
+            track.cues.count > 1 && pendingReview == nil && aiTask == nil
         case EditorCommand.toggleMilliseconds.id, EditorCommand.toggleIssuesPanel.id:
             true
         case EditorCommand.openSourceSubtitles.id:
@@ -505,6 +507,13 @@ public final class EditorState {
             return addCueAtPlayhead()
         case EditorCommand.fixOverlaps.id:
             fixOverlaps()
+        case EditorCommand.joinShortLines.id:
+            let proposal = joinProposal { _ in true }
+            guard !proposal.isEmpty else {
+                reportError("\(EditorCommand.joinShortLines.title) found nothing to join.", AIError.nothingToDo("No two neighbouring cues fit in one."))
+                return false
+            }
+            presentReview(proposal)
         case EditorCommand.deleteCue.id:
             deleteSelectedCue()
         case EditorCommand.splitCue.id:
@@ -963,11 +972,19 @@ public final class EditorState {
         // Variants are whole lines; they no longer fit either half.
         first.flag = nil
         first.unsureWords = Self.words(cue.unsureWords, in: firstText)
-        // Both halves still translate the same source cue and share its speaker.
-        let second = Cue(
+        // Both halves still translate the same source cue and share its speaker; a cue
+        // joined from several source cues gives the first ones to the first half.
+        var second = Cue(
             start: at, end: cue.end, text: secondText, position: cue.position, style: cue.style, speaker: cue.speaker,
             sourceCueID: cue.sourceCueID, voices: cue.voices, unsureWords: Self.words(cue.unsureWords, in: secondText)
         )
+        if let joined = cue.joinedSourceCueIDs, !joined.isEmpty, let sourceID = cue.sourceCueID {
+            let ids = [sourceID] + joined
+            let half = (ids.count + 1) / 2
+            first.joinedSourceCueIDs = ids.count > 2 && half > 1 ? Array(ids[1..<half]) : nil
+            second.sourceCueID = ids[half]
+            second.joinedSourceCueIDs = ids.count - half > 1 ? Array(ids[(half + 1)...]) : nil
+        }
         edit("Split Cue") { track in
             track.cues[index] = first
             track.cues.insert(second, at: index + 1)
@@ -1012,6 +1029,7 @@ public final class EditorState {
             merged.unsureWords = unsure.isEmpty ? nil : unsure
             let voices = (merged.voices ?? []) + (next.voices ?? []).filter { !(merged.voices ?? []).contains($0) }
             merged.voices = voices.isEmpty ? nil : voices
+            merged.joinSources(of: next)
             track.cues[index] = merged
             track.cues.remove(at: index + 1)
         }

@@ -275,6 +275,7 @@ extension EditorState {
     /// passes to `propose` go into the track at once; its final result adds the rest.
     private func startAITask(
         _ title: String,
+        afterward: (@MainActor () -> Void)? = nil,
         _ work: @escaping @MainActor (
             _ progress: @escaping @Sendable (Double) -> Void, _ propose: @escaping @Sendable (ProposedChangeSet) -> Void
         ) async throws -> ProposedChangeSet
@@ -300,6 +301,7 @@ extension EditorState {
                 guard let self, !Task.isCancelled else { return }
                 self.applyResults(final)
                 self.aiTask = nil
+                afterward?()
                 if self.appliedAIChanges.isEmpty {
                     self.reportError("\(title) found nothing to add.", AIError.nothingToDo("Every cue is already as the tool would make it."))
                 }
@@ -427,7 +429,8 @@ extension EditorState {
             maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast
         )
         let fixUp = TranslationPipeline(preset: qcPreset)
-        startAITask("Translation") { [weak self] progress, propose in
+        let joinsLines = aiSettings.joinsLinesAfterTranslating
+        startAITask("Translation", afterward: { [weak self] in if joinsLines { self?.joinTranslatedLines() } }) { [weak self] progress, propose in
             let found = TranslationCollector()
             let translations = try await translator.translate(request, progress: progress) { batch in
                 propose(Proposals.translation(found.add(fixUp.fix(batch, request: request)), cues: cues))
@@ -446,6 +449,46 @@ extension EditorState {
             }
             return Proposals.translation(fixUp.fix(translations, request: request), cues: cues)
         }
+    }
+
+    // MARK: Joining lines
+
+    /// Joins the lines a translation just wrote that nobody has edited since
+    /// (`CueJoiner`): one undoable edit after the translation's own.
+    func joinTranslatedLines() {
+        let written = appliedAIChanges
+        let proposal = joinProposal { written.contains($0.id) && $0.isAIGenerated == true }
+        guard !proposal.isEmpty else { return }
+        edit(proposal.title) { track in proposal.apply(to: &track) }
+    }
+
+    /// The joins `CueJoiner` finds among the cues `eligible` accepts. Cues are
+    /// only joined with neighbours that are eligible too.
+    func joinProposal(eligible: (Cue) -> Bool) -> ProposedChangeSet {
+        let joiner = CueJoiner(preset: qcPreset)
+        var runs: [[Cue]] = [[]]
+        for cue in track.cues.sorted(by: { $0.start < $1.start }) {
+            if eligible(cue) {
+                runs[runs.count - 1].append(cue)
+            } else if !runs[runs.count - 1].isEmpty {
+                runs.append([])
+            }
+        }
+        var original: [Cue] = []
+        var joined: [Cue] = []
+        for run in runs where run.count > 1 {
+            original += run
+            joined += joiner.join(run.map(joinLine(for:)))
+        }
+        return Proposals.join(original, into: joined)
+    }
+
+    /// A cue as the joiner sees it: who says it and, in a translation, its source text.
+    func joinLine(for cue: Cue) -> CueJoiner.Line {
+        let source = sourceCues[cue.id]
+        let voices = source?.voices ?? cue.voices
+        let speaker = cue.speaker ?? source?.speaker ?? (voices?.count == 1 ? voices?.first : nil)
+        return CueJoiner.Line(cue: cue, speaker: speaker, source: isTranslating ? source?.text : nil)
     }
 
     /// Starts a translation of the cues being edited (a transcription, an

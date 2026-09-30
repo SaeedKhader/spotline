@@ -71,7 +71,11 @@ extension EditorState {
     /// Recomputes `sourceCues`; observers see a change only when the pairing differs.
     func updateSourceCues() {
         let pairs = sourceTrack.map { Alignment.sourceCues(for: track.cues, in: $0.cues) } ?? [:]
-        if pairs != sourceCues { sourceCues = pairs }
+        guard pairs != sourceCues else { return }
+        let joined = track.cues.contains { $0.joinedSourceCueIDs != nil }
+        sourceCues = pairs
+        // A joined cue reads its source cues as one, with glossary terms from all of them.
+        if joined { updateGlossaryHits() }
     }
 
     // MARK: Languages
@@ -144,7 +148,9 @@ extension EditorState {
             return
         }
         var hits: [Cue.ID: [Glossary.Entry]] = [:]
-        for cue in source.cues {
+        // Joined target cues read their source cues as one (with the first's ID), so those come last.
+        let joined = sourceCues.values.filter { cue in !source.cues.contains { $0.id == cue.id && $0.text == cue.text } }
+        for cue in source.cues + joined {
             let entries = glossaryIndex.entries(inSource: cue.text)
             if !entries.isEmpty { hits[cue.id] = entries }
         }

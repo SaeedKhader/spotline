@@ -13,6 +13,9 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     public var speaker: String?
     /// In a translation, the source-language cue this one translates.
     public var sourceCueID: UUID?
+    /// In a translation joined from several cues (`CueJoiner`), the source cues
+    /// after `sourceCueID` that this one also translates, in order.
+    public var joinedSourceCueIDs: [UUID]?
     /// The transcriber's labels for who says the line ("speaker_0"), one per
     /// speaker in order; two for a dialogue cue. Nil when not transcribed with speakers.
     public var voices: [String]?
@@ -44,6 +47,19 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     }
 
     public var duration: MediaTime { end - start }
+
+    /// Every source cue this one translates: `sourceCueID`, then `joinedSourceCueIDs`.
+    public var sourceCueIDs: [UUID] {
+        (sourceCueID.map { [$0] } ?? []) + (joinedSourceCueIDs ?? [])
+    }
+
+    /// After joining `next` into this cue: it translates `next`'s source cues too.
+    public mutating func joinSources(of next: Cue) {
+        var ids = sourceCueIDs
+        for id in next.sourceCueIDs where !ids.contains(id) { ids.append(id) }
+        sourceCueID = ids.first
+        joinedSourceCueIDs = ids.count > 1 ? Array(ids.dropFirst()) : nil
+    }
 
     /// Characters per second: visible characters (without markup or line
     /// breaks) over the duration, the reading-speed measure style guides use.

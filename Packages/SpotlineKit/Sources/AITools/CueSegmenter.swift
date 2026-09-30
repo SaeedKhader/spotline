@@ -193,9 +193,20 @@ public struct CueSegmenter: Sendable {
         var score = Double(abs(first - second))
         // Prefer a shorter top line, and a break after a comma or full stop.
         if first > second { score += 2 }
-        if space > text.startIndex, ",.;:!?؟،".contains(text[text.index(before: space)]) { score -= 6 }
+        if space > text.startIndex, ",.;:!?؟،".contains(text[text.index(before: space)]) { score -= 12 }
+        // Never leave an article, preposition or conjunction at the end of the top line.
+        let lastWord = text[..<space].split(separator: " ").last.map { $0.lowercased() } ?? ""
+        if danglingWords.contains(lastWord) { score += 14 }
         return score
     }
+
+    /// Words that belong with the word after them, in English and Arabic.
+    static let danglingWords: Set<String> = [
+        "a", "an", "the", "of", "to", "in", "on", "at", "for", "and", "or", "but", "with", "from", "by", "as", "if",
+        "my", "your", "his", "her", "its", "our", "their", "this", "that", "i", "you're", "i'm", "not",
+        "و", "في", "من", "على", "إلى", "عن", "أن", "ألا", "لن", "لم", "لا", "ما", "يا", "مع", "ثم", "أو", "بل", "قد", "كي",
+        "حتى", "الذي", "التي", "هذا", "هذه", "ذلك", "تلك", "إن", "لو", "كان", "كانت", "إذا", "لكن", "لكنه", "لكنها", "أي",
+    ]
 
     /// Ends cues a little after their last word, or long enough to be read at
     /// the preset's reading speed, stretches short ones to the minimum
