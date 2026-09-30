@@ -98,7 +98,7 @@ struct CueEditorList: View {
     private var listItems: [CueListItem] {
         if editor.isReviewingChoices || editor.isReviewingWords {
             let numbers = Dictionary(editor.track.cues.enumerated().map { ($0.element.id, $0.offset + 1) }, uniquingKeysWith: { first, _ in first })
-            let cues = editor.isReviewingWords ? editor.cuesToCheck : editor.cuesToChoose
+            let cues = editor.isReviewingWords ? editor.reviewedWordCues : editor.cuesToChoose
             return cues.map { CueListItem.cue($0, number: numbers[$0.id] ?? 0) }
         }
         let cues = editor.track.cues.enumerated().map { CueListItem.cue($0.element, number: $0.offset + 1) }
@@ -156,6 +156,7 @@ private struct CueRow: View {
     let directions: TextDirections
     var focusedText: FocusState<Cue.ID?>.Binding
     @State private var isHovered = false
+    @State private var textSelection: TextSelection?
 
     private var isSelected: Bool { editor.selectedCueID == cue.id }
     private var isCurrent: Bool { editor.currentCueID == cue.id }
@@ -226,7 +227,15 @@ private struct CueRow: View {
                 TextEditor(text: Binding(
                     get: { editor.cue(withID: cue.id)?.text ?? "" },
                     set: { editor.setText($0, forCue: cue.id) }
-                ))
+                ), selection: $textSelection)
+                .onChange(of: editor.wordSelectionRequest) { _, request in
+                    // A word to check was clicked: select it once the editor has focus, to type over it.
+                    guard let request, request.cueID == cue.id else { return }
+                    Task { @MainActor in
+                        let text = editor.cue(withID: cue.id)?.text ?? ""
+                        if let range = text.range(of: request.word, options: .caseInsensitive) { textSelection = TextSelection(range: range) }
+                    }
+                }
                 .font(SpotlineStyle.cueFont)
                 .scrollContentBackground(.hidden)
                 .scrollDisabled(true)

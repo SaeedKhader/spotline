@@ -213,6 +213,24 @@ extension EditorState {
         track.cues.reduce(0) { $0 + ($1.unsureWords?.count ?? 0) }
     }
 
+    /// The cues the word review shows: those with words to check, in the order the
+    /// review started with, and the selected one even once its words are fixed, so
+    /// fixing a word does not move the cue away while typing.
+    public var reviewedWordCues: [Cue] {
+        let open = Set(cuesToCheck.map(\.id))
+        let known = Set(wordReviewOrder)
+        let listed = wordReviewOrder.compactMap(cue(withID:)).filter { open.contains($0.id) || $0.id == selectedCueID }
+        return listed + cuesToCheck.filter { !known.contains($0.id) }
+    }
+
+    /// Selects a word to check in its cue's text, to type over it.
+    public func selectUnsureWord(_ index: Int, forCue id: Cue.ID) {
+        guard let word = cue(withID: id)?.unsureWords?[safe: index] else { return }
+        select(id)
+        wordSelectionRequest = WordSelectionRequest(cueID: id, word: word.text, serial: (wordSelectionRequest?.serial ?? 0) + 1)
+        textFocusRequest += 1
+    }
+
     /// Keeps a word as the transcriber heard it: one undoable edit. In the
     /// review, a cue with nothing left to check makes way for the next.
     public func confirmUnsureWord(_ index: Int, forCue id: Cue.ID) {
@@ -220,6 +238,7 @@ extension EditorState {
               words.indices.contains(index)
         else { return }
         let next = isReviewingWords && words.count == 1 ? nextCueToCheck(after: id) : nil
+        if next == nil, isReviewingWords, words.count == 1, cuesToCheck.count == 1 { isReviewingWords = false }
         edit("Confirm Word") { track in
             var remaining = words
             remaining.remove(at: index)
@@ -241,6 +260,7 @@ extension EditorState {
         isReviewingWords.toggle()
         if isReviewingWords {
             isReviewingChoices = false
+            wordReviewOrder = cuesToCheck.map(\.id)
             if let first = cuesToCheck.first, selectedCue?.unsureWords?.isEmpty != false { select(first.id) }
         }
     }
@@ -257,7 +277,7 @@ extension EditorState {
 
     /// The cue to check after `id` in the review's order.
     private func nextCueToCheck(after id: Cue.ID) -> Cue.ID? {
-        let order = cuesToCheck.map(\.id)
+        let order = reviewedWordCues.map(\.id).filter { $0 == id || cue(withID: $0)?.unsureWords?.isEmpty == false }
         guard let index = order.firstIndex(of: id) else { return order.first }
         return order[(index + 1)...].first ?? order[..<index].first
     }
@@ -692,4 +712,11 @@ private final class TranslationCollector: @unchecked Sendable {
 
 extension Array {
     subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
+/// A word to select in a cue's text editor (`EditorState.selectUnsureWord`).
+public struct WordSelectionRequest: Equatable, Sendable {
+    public var cueID: Cue.ID
+    public var word: String
+    public var serial: Int
 }

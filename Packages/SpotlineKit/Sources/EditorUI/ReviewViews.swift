@@ -481,7 +481,7 @@ struct WordCheckBox: View {
             ForEach(Array(words.enumerated()), id: \.offset) { index, word in
                 WordToCheck(editor: editor, cueID: cue.id, index: index, word: word)
             }
-            Text("Listen, then fix the text above or confirm the word.")
+            Text("Listen, then click the word to fix it in the text above, or confirm it.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -504,9 +504,15 @@ private struct WordToCheck: View {
     var body: some View {
         let percent = word.confidence.map { "\(Int(($0 * 100).rounded()))%" }
         HStack(spacing: 8) {
-            Text("“\(word.text)”")
-                .underline(color: Color.hearingTint)
-                .font(.callout)
+            Button {
+                editor.selectUnsureWord(index, forCue: cueID)
+            } label: {
+                Text("“\(word.text)”")
+                    .underline(color: Color.hearingTint)
+                    .font(.callout)
+            }
+            .help("Select the word in the text to type over it")
+            .accessibilityIdentifier(AccessibilityID.CueList.selectWord(cueID, index))
             if let percent {
                 Text(percent)
                     .font(.caption.monospacedDigit())

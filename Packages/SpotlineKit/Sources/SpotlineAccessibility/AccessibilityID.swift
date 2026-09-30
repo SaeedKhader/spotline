@@ -85,6 +85,8 @@ public enum AccessibilityID {
         public static func word(_ cueID: UUID, _ index: Int) -> String { "\(cell(cueID, .words)).\(index)" }
         /// Plays the n-th word to check.
         public static func playWord(_ cueID: UUID, _ index: Int) -> String { "\(word(cueID, index)).play" }
+        /// Selects the n-th word to check in the cue's text, to type over it.
+        public static func selectWord(_ cueID: UUID, _ index: Int) -> String { "\(word(cueID, index)).select" }
         /// Confirms the n-th word to check is right.
         public static func confirmWord(_ cueID: UUID, _ index: Int) -> String { "\(word(cueID, index)).confirm" }
 

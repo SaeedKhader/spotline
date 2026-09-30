@@ -248,6 +248,31 @@ struct AIStateTests {
         #expect(!editor.canPerform(.reviewWords))
     }
 
+    @Test func fixingAWordKeepsItsCueInPlaceUntilTheUserLeavesIt() {
+        var aron = cue("Ser Aron taught me sword and shield.", at: 0)
+        aron.unsureWords = [UnsureWord(text: "Aron", confidence: 0.38)]
+        var egg = cue("Egg.", at: 3)
+        egg.unsureWords = [UnsureWord(text: "Egg", confidence: 0.45)]
+        let editor = makeEditor(cues: [aron, egg])
+        #expect(editor.perform(.reviewWords))
+        #expect(editor.selectedCueID == aron.id)
+        // Clicking the word asks the editor to select it.
+        editor.selectUnsureWord(0, forCue: aron.id)
+        #expect(editor.wordSelectionRequest?.cueID == aron.id && editor.wordSelectionRequest?.word == "Aron")
+        // Typing over it clears the word, but the cue stays listed and selected.
+        editor.setText("Ser Arlan taught me sword and shield.", forCue: aron.id)
+        #expect(editor.cue(withID: aron.id)?.unsureWords == nil)
+        #expect(editor.reviewedWordCues.map(\.id) == [aron.id, egg.id])
+        #expect(editor.selectedCueID == aron.id)
+        editor.select(egg.id)
+        #expect(editor.reviewedWordCues.map(\.id) == [egg.id])
+        // The last word fixed: the review stays while its cue is selected, and ends after.
+        editor.setText("Aegon.", forCue: egg.id)
+        #expect(editor.isReviewingWords)
+        editor.select(aron.id)
+        #expect(!editor.isReviewingWords)
+    }
+
     @Test func splittingKeepsEachWordWithItsHalf() {
         var line = cue("I'm Ser Duncan.", at: 0)
         line.unsureWords = ["Duncan"]
