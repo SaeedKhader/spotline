@@ -245,7 +245,10 @@ public struct ElevenLabsTranscriber: Transcriber {
         try JSONDecoder().decode(Response.self, from: data).words.compactMap { word in
             var text = word.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard word.type == "word" || word.type == "audio_event", !text.isEmpty, let start = word.start else { return nil }
-            if word.type == "audio_event", !text.hasPrefix("(") { text = "(\(text))" }
+            // "[door opens]" or "door opens" becomes "(door opens)", once.
+            if word.type == "audio_event" {
+                text = "(" + text.trimmingCharacters(in: CharacterSet(charactersIn: "()[] ")) + ")"
+            }
             let begin = MediaTime(value: Int64((start * 1000).rounded()), timescale: 1000)
             let end = MediaTime(value: Int64(((word.end ?? start) * 1000).rounded()), timescale: 1000)
             return TranscribedWord(

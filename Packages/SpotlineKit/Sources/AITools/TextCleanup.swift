@@ -39,6 +39,12 @@ public enum CleanupTool: String, Sendable, CaseIterable {
         return ProposedChangeSet(title: title, changes: changes)
     }
 
+    /// The text without sound descriptions, music notes or speaker labels: what a
+    /// subtitle for the hearing leaves out ("(laughs) You're alive." → "You're alive.").
+    public static func withoutSoundDescriptions(_ text: String) -> String {
+        HearingImpaired.remove(from: text)
+    }
+
     public func clean(_ text: String, languageCode: String) -> String {
         switch self {
         case .maskProfanity: ProfanityFilter.mask(text)

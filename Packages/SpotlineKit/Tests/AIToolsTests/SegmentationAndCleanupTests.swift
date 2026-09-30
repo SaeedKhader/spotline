@@ -230,6 +230,13 @@ struct TranscriptCleanupTests {
         #expect(cues[0].duration.seconds < 2)
     }
 
+    @Test func soundDescriptionsGoUnlessKept() {
+        let clean = words([("(footsteps)", 0, 0.5), ("Rise.", 1, 1.4), ("(laughs)", 1.5, 1.8)])
+        #expect(TranscriptionPipeline(preset: .netflix, frameRate: rate).cues(from: clean).map(\.text) == ["Rise."])
+        let kept = TranscriptionPipeline(preset: .netflix, frameRate: rate, keepsSoundDescriptions: true).cues(from: clean)
+        #expect(kept.map(\.text).joined(separator: " ").contains("(footsteps)"))
+    }
+
     @Test func shortCuesStayUpLongerWhenThereIsRoom() {
         let cues = TranscriptionPipeline(preset: .netflix, frameRate: rate).cues(from: words([("Yes.", 0, 0.3), ("Go.", 5, 5.3)]))
         #expect(cues[0].duration.seconds >= 1.2)

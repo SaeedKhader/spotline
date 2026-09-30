@@ -147,6 +147,7 @@ public enum AccessibilityID {
         /// Shown when a chosen cloud provider can't run yet (cloud off, or no key); its value says why.
         public static let providerProblem = "settings.ai.problem"
         public static let joinsLines = "settings.ai.joinsLines"
+        public static let soundDescriptions = "settings.ai.soundDescriptions"
         public static let register = "settings.ai.register"
         public static let dropsFinalPunctuation = "settings.ai.dropsFinalPunctuation"
         public static let namesInParentheses = "settings.ai.namesInParentheses"

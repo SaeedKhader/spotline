@@ -326,6 +326,20 @@ struct AIStateTests {
         #expect(editor.track.cues.count == 3)
     }
 
+    @Test func soundDescriptionsAreLeftOutOfTranslationsUnlessKept() async {
+        let editor = makeEditor(cues: [cue("(door opening)", at: 0), cue("(laughs) He's alive.", at: 2), cue("Farewell.", at: 4)])
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.track.cues.map(\.text) == ["[ar] He's alive.", "[ar] Farewell."], "The sounds-only cue goes, the sound goes from the other")
+        #expect(editor.sourceTrack?.cues.count == 3, "The source keeps them")
+
+        let sdh = makeEditor(cues: [cue("(door opening)", at: 0), cue("(laughs) He's alive.", at: 2)])
+        sdh.aiSettings.includesSoundDescriptions = true
+        #expect(sdh.perform(.translateWithAI))
+        await finish(sdh)
+        #expect(sdh.track.cues.map(\.text) == ["[ar] (door opening)", "[ar] (laughs) He's alive."])
+    }
+
     @Test func joinShortLinesIsReviewed() {
         let editor = makeEditor(cues: [cue("Hello.", at: 0), cue("Are you the stable boy?", at: 1), cue("Yes.", at: 5)])
         #expect(editor.perform(.joinShortLines))

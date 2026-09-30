@@ -11,16 +11,29 @@ public struct TranscriptionPipeline: Sendable {
     public var segmenter: CueSegmenter
     /// Seconds by which the transcriber's word starts come before the voice (`Transcriber.wordStartLead`).
     public var wordStartLead: Double
+    /// Keeps the transcriber's sound descriptions ("(door opens)"), for hearing-impaired subtitles.
+    public var keepsSoundDescriptions: Bool
 
-    public init(preset: QCPreset, frameRate: FrameRate, shotChanges: [Int64] = [], wordStartLead: Double = 0) {
+    public init(
+        preset: QCPreset, frameRate: FrameRate, shotChanges: [Int64] = [], wordStartLead: Double = 0, keepsSoundDescriptions: Bool = false
+    ) {
         segmenter = CueSegmenter(preset: preset, frameRate: frameRate, shotChanges: shotChanges)
         self.wordStartLead = wordStartLead
+        self.keepsSoundDescriptions = keepsSoundDescriptions
     }
 
     /// Cues for the words, in order. Words must be in time order. Hesitations,
-    /// stutters and cues of nothing but an interjection are left out (`TranscriptCleanup`).
+    /// stutters and cues of nothing but an interjection are left out (`TranscriptCleanup`),
+    /// and sound descriptions unless they are kept.
     public func cues(from words: [TranscribedWord]) -> [Cue] {
-        segmenter.cues(from: TranscriptCleanup.words(corrected(words))).filter { !TranscriptCleanup.isOnlyInterjections($0.text) }
+        let spoken = keepsSoundDescriptions ? words : words.filter { !Self.isSoundDescription($0.text) }
+        return segmenter.cues(from: TranscriptCleanup.words(corrected(spoken))).filter { !TranscriptCleanup.isOnlyInterjections($0.text) }
+    }
+
+    /// "(laughs)", "[door opens]".
+    static func isSoundDescription(_ word: String) -> Bool {
+        let text = word.trimmingCharacters(in: .whitespaces.union(.punctuationCharacters.subtracting(["(", ")", "[", "]"])))
+        return (text.hasPrefix("(") && text.hasSuffix(")")) || (text.hasPrefix("[") && text.hasSuffix("]"))
     }
 
     func corrected(_ words: [TranscribedWord]) -> [TranscribedWord] {

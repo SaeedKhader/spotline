@@ -421,7 +421,8 @@ extension EditorState {
         let stream = status.audioStreamIndex
         let language = transcriptionLanguage
         let pipeline = TranscriptionPipeline(
-            preset: qcPreset, frameRate: frameRate, shotChanges: shotChangeFrames, wordStartLead: transcriber.wordStartLead
+            preset: qcPreset, frameRate: frameRate, shotChanges: shotChangeFrames, wordStartLead: transcriber.wordStartLead,
+            keepsSoundDescriptions: aiSettings.includesSoundDescriptions
         )
         let existing = track.cues
         let prepare = prepareAudio
@@ -483,8 +484,14 @@ extension EditorState {
             reportError("Translation could not start.", error)
             return
         }
-        let cues = untranslatedCues
-        guard let source = sourceTrack, let first = cues.first else { return }
+        // Without sound descriptions, a line of nothing else is not translated (its empty cue goes afterwards).
+        let keepsSounds = aiSettings.includesSoundDescriptions
+        func spoken(_ text: String) -> String { keepsSounds ? text : CleanupTool.withoutSoundDescriptions(text) }
+        let cues = untranslatedCues.filter { cue in sourceCues[cue.id].map { !spoken($0.text).isEmpty } ?? true }
+        guard let source = sourceTrack, let first = cues.first else {
+            removeCuesOfSoundsOnly()
+            return
+        }
         let glossaryEntries = glossary.entries.filter { entry in cues.contains { glossaryHits[sourceCues[$0.id]?.id ?? UUID()]?.contains(entry) == true } }
         let context: [(source: String, target: String)] = track.cues.filter { $0.start < first.start && !$0.text.isEmpty }
             .suffix(20).compactMap { cue in sourceCues[cue.id].map { ($0.text, cue.text) } }
@@ -493,13 +500,16 @@ extension EditorState {
         }, uniquingKeysWith: { first, _ in first })
         let lines = cues.map { cue in
             TranslationRequest.Line(
-                cueID: cue.id, source: sourceCues[cue.id]?.text ?? "", start: cue.start, end: cue.end, voices: voices(for: cue),
+                cueID: cue.id, source: spoken(sourceCues[cue.id]?.text ?? ""), start: cue.start, end: cue.end, voices: voices(for: cue),
                 speakerName: sourceCues[cue.id]?.speaker ?? cue.speaker, memoryExample: examples[cue.id],
                 unsureWords: sourceCues[cue.id]?.unsureWords?.map(\.text)
             )
         }
-        let script = source.cues.map { cue in
-            TranslationRequest.ScriptLine(start: cue.start, voice: (cue.speaker.map { [$0] } ?? cue.voices)?.joined(separator: " then "), text: cue.text)
+        let script = source.cues.compactMap { cue -> TranslationRequest.ScriptLine? in
+            let text = spoken(cue.text)
+            return text.isEmpty ? nil : TranslationRequest.ScriptLine(
+                start: cue.start, voice: (cue.speaker.map { [$0] } ?? cue.voices)?.joined(separator: " then "), text: text
+            )
         }
         let request = TranslationRequest(
             lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
@@ -511,7 +521,10 @@ extension EditorState {
         let joinsLines = aiSettings.joinsLinesAfterTranslating
         // A sentence over several cues goes as one line, and its translation is shared out again.
         let (grouped, groups) = SentenceSpans.grouping(request)
-        startAITask("Translation", afterward: { [weak self] in if joinsLines { self?.joinTranslatedLines() } }) { [weak self] progress, propose in
+        startAITask("Translation", afterward: { [weak self] in
+            if !keepsSounds { self?.removeCuesOfSoundsOnly() }
+            if joinsLines { self?.joinTranslatedLines() }
+        }) { [weak self] progress, propose in
             let found = TranslationCollector()
             let whole = try await translator.translate(grouped, progress: progress) { batch in
                 propose(Proposals.translation(found.add(fixUp.spread(fixUp.fix(batch, request: grouped), groups: groups, request: grouped)), cues: cues))
@@ -554,6 +567,17 @@ extension EditorState {
         }
         title = title.replacing(/\s+/, with: " ").trimmingCharacters(in: .whitespaces.union(["-"]))
         return title.isEmpty ? nil : title
+    }
+
+    /// Removes the empty target cues whose source is only sound descriptions
+    /// ("(door opens)"): subtitles for the hearing leave them out. One undoable edit.
+    func removeCuesOfSoundsOnly() {
+        let ids = Set(track.cues.filter { cue in
+            SubtitleText.visibleLines(of: cue.text).joined().allSatisfy(\.isWhitespace)
+                && sourceCues[cue.id].map { !$0.text.isEmpty && CleanupTool.withoutSoundDescriptions($0.text).isEmpty } == true
+        }.map(\.id))
+        guard !ids.isEmpty else { return }
+        edit("Remove Sound Descriptions") { track in track.cues.removeAll { ids.contains($0.id) } }
     }
 
     // MARK: Joining lines
