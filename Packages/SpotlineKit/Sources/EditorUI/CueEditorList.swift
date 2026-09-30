@@ -163,7 +163,6 @@ private struct CueRow: View {
     let directions: TextDirections
     var focusedText: FocusState<Cue.ID?>.Binding
     @State private var isHovered = false
-    @State private var textSelection: TextSelection?
 
     private var isSelected: Bool { editor.selectedCueID == cue.id }
     private var isCurrent: Bool { editor.currentCueID == cue.id }
@@ -234,13 +233,16 @@ private struct CueRow: View {
                 TextEditor(text: Binding(
                     get: { editor.cue(withID: cue.id)?.text ?? "" },
                     set: { editor.setText($0, forCue: cue.id) }
-                ), selection: $textSelection)
+                ))
                 .onChange(of: editor.wordSelectionRequest) { _, request in
                     // A word to check was clicked: select it once the editor has focus, to type over it.
+                    // (Through AppKit: a SwiftUI selection binding put the cursor back at the start on every keystroke.)
                     guard let request, request.cueID == cue.id else { return }
                     Task { @MainActor in
-                        let text = editor.cue(withID: cue.id)?.text ?? ""
-                        if let range = text.range(of: request.word, options: .caseInsensitive) { textSelection = TextSelection(range: range) }
+                        try? await Task.sleep(for: .milliseconds(50))
+                        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
+                        let range = (textView.string as NSString).range(of: request.word, options: .caseInsensitive)
+                        if range.location != NSNotFound { textView.setSelectedRange(range) }
                     }
                 }
                 .font(SpotlineStyle.cueFont)
