@@ -18,10 +18,12 @@ public struct LaunchOptions: Sendable {
     public var usesAnalysisCache: Bool
     /// Turns on agent access at launch, from `-EnableAgentAccess` (UI tests).
     public var enablesAgentAccess: Bool
+    /// Builds a scripted episode brief after transcribing in UI test mode, from `-UITestEpisodeBrief`.
+    public var buildsEpisodeBrief: Bool
 
     public init(
         isUITestMode: Bool = false, mediaURL: URL? = nil, subtitlesURL: URL? = nil, sourceSubtitlesURL: URL? = nil,
-        projectURL: URL? = nil, usesAnalysisCache: Bool? = nil, enablesAgentAccess: Bool = false
+        projectURL: URL? = nil, usesAnalysisCache: Bool? = nil, enablesAgentAccess: Bool = false, buildsEpisodeBrief: Bool = false
     ) {
         self.isUITestMode = isUITestMode
         self.mediaURL = mediaURL
@@ -30,6 +32,7 @@ public struct LaunchOptions: Sendable {
         self.projectURL = projectURL
         self.usesAnalysisCache = usesAnalysisCache ?? !isUITestMode
         self.enablesAgentAccess = enablesAgentAccess
+        self.buildsEpisodeBrief = buildsEpisodeBrief
     }
 
     /// The same switches without the files to open, for every window after the first.
@@ -55,7 +58,8 @@ public struct LaunchOptions: Sendable {
             sourceSubtitlesURL: path(after: "-OpenSource"),
             projectURL: path(after: "-OpenProject"),
             usesAnalysisCache: arguments.contains("-UITestMode") || arguments.contains("-NoAnalysisCache") ? false : true,
-            enablesAgentAccess: arguments.contains("-EnableAgentAccess")
+            enablesAgentAccess: arguments.contains("-EnableAgentAccess"),
+            buildsEpisodeBrief: arguments.contains("-UITestEpisodeBrief")
         )
     }
 }

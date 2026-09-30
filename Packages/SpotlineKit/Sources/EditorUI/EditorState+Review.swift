@@ -185,6 +185,8 @@ public struct ReviewSuggestion: Hashable, Sendable {
 extension EditorState {
     /// Everything to review, or one kind of it, in time order.
     public func reviewItems(in scope: ReviewScope) -> [ReviewItem] {
+        // Nothing shows until the episode brief is confirmed, so it is all reviewed with the brief in place.
+        guard !isReviewHeldForBrief else { return [] }
         var items: [ReviewItem] = []
         for cue in track.cues {
             if scope == .all || scope == .changes, pendingReview?.change(forCue: cue.id) != nil {
@@ -241,7 +243,8 @@ extension EditorState {
 
     /// Whether any card would show, without building them.
     var hasAnythingToReview: Bool {
-        pendingReview != nil || !issues.isEmpty
+        guard !isReviewHeldForBrief else { return false }
+        return pendingReview != nil || !issues.isEmpty
             || track.cues.contains { $0.flag?.isResolved == false || $0.unsureWords?.isEmpty == false }
     }
 

@@ -13,13 +13,17 @@ import Synchronization
 public struct AIProviderFactory {
     public var transcriber: @MainActor (AISettings) throws -> any Transcriber
     public var translator: @MainActor (AISettings) throws -> any CueTranslator
+    /// Builds the episode brief after transcription; nil when there is none to use.
+    public var briefBuilder: @MainActor (AISettings) throws -> (any EpisodeBriefBuilder)?
 
     public init(
         transcriber: @escaping @MainActor (AISettings) throws -> any Transcriber,
-        translator: @escaping @MainActor (AISettings) throws -> any CueTranslator
+        translator: @escaping @MainActor (AISettings) throws -> any CueTranslator,
+        briefBuilder: @escaping @MainActor (AISettings) throws -> (any EpisodeBriefBuilder)? = { _ in nil }
     ) {
         self.transcriber = transcriber
         self.translator = translator
+        self.briefBuilder = briefBuilder
     }
 
     public static func live(keys: APIKeyStore = APIKeyStore()) -> AIProviderFactory {
@@ -54,14 +58,25 @@ public struct AIProviderFactory {
                     guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
                     return OpenAITranslator(apiKey: key, effort: settings.reasoningEffort)
                 }
+            },
+            briefBuilder: { settings in
+                // GPT-6 Luna builds it, whatever translates: it costs about 4 cents an episode.
+                guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
+                guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
+                return OpenAIBriefBuilder(apiKey: key, effort: settings.reasoningEffort)
             }
         )
     }
 
-    public static let scripted = AIProviderFactory(
-        transcriber: { _ in ScriptedTranscriber.fixture },
-        translator: { _ in ScriptedTranslator() }
-    )
+    /// Fixed answers. The episode brief only with `buildsBrief` (`-UITestEpisodeBrief`), so
+    /// UI tests of other tools don't get its dialog after transcribing.
+    public static func scripted(buildsBrief: Bool = false) -> AIProviderFactory {
+        AIProviderFactory(
+            transcriber: { _ in ScriptedTranscriber.fixture },
+            translator: { _ in ScriptedTranslator() },
+            briefBuilder: { _ in buildsBrief ? ScriptedBriefBuilder() : nil }
+        )
+    }
 }
 
 /// AI tools (docs/ARCHITECTURE.md, 7a and 7b). Each one runs in the background
@@ -98,6 +113,8 @@ extension EditorState {
             return pendingReview != nil
         case EditorCommand.reviewChanges.id:
             return pendingReview != nil
+        case EditorCommand.showEpisodeBrief.id:
+            return track.brief != nil || (idle && !briefSourceTrack.cues.isEmpty)
         default:
             return false
         }
@@ -143,6 +160,7 @@ extension EditorState {
         case EditorCommand.acceptAllChanges.id: acceptChanges(to: nil)
         case EditorCommand.rejectAllChanges.id: rejectChanges(to: nil)
         case EditorCommand.reviewChanges.id: toggleReviewFilter(.changes)
+        case EditorCommand.showEpisodeBrief.id: showEpisodeBrief()
         default: return false
         }
         return true
@@ -460,7 +478,9 @@ extension EditorState {
                 stages: ["Preparing audio"] + (transcriber.uploadsInOnePiece ? ["Compressing audio", "Uploading"] : []) + ["Transcribing"]
             )
         }
-        startAITask(status, summary: Self.transcriptionSummary) { [weak self] report, propose in
+        // Then the episode brief, and the review waits until it is confirmed.
+        startAITask(status, afterward: { [weak self] in self?.buildEpisodeBrief(automatically: true) }, summary: Self.transcriptionSummary) {
+            [weak self] report, propose in
             let words: [TranscribedWord]
             let accumulator: TranscriptAccumulator
             var pipeline = basePipeline
@@ -603,9 +623,14 @@ extension EditorState {
                 start: cue.start, voice: (cue.speaker.map { [$0] } ?? cue.voices)?.joined(separator: " then "), text: text
             )
         }
+        // The confirmed brief's terms go too, where the glossary has no translation of its own.
+        let briefTerms = (track.brief?.isConfirmed == true && track.brief?.targetLanguage == track.languageCode ? track.brief?.terms ?? [] : [])
+            .filter { term in
+                !term.translation.isEmpty && !glossaryEntries.contains { MatchText.normalize($0.source) == MatchText.normalize(term.term) }
+            }
         let request = TranslationRequest(
             lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
-            glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) },
+            glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) } + briefTerms.map { ($0.term, $0.translation, $0.note) },
             maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast,
             work: workTitle, notes: track.translatorNotes, script: script, style: aiSettings.translationStyle,
             leavesOutWalla: aiSettings.leavesOutWalla, leavesOutFictionalLanguages: aiSettings.leavesOutFictionalLanguages
@@ -799,6 +824,7 @@ extension EditorState {
         let language = sourceTrack?.languageCode
         editIncludingSources("Clear Transcript") { track, sources in
             track.cues = []
+            track.brief = nil
             if let language { track.languageCode = language }
             sources = SourceState(sourceTrack: nil, sourceFile: nil, transcripts: [])
         }

@@ -193,6 +193,34 @@ public enum AccessibilityID {
     }
 
     /// The sheet offering the subtitle tracks muxed into the media for import.
+    /// The episode brief dialog (AI › Episode Brief…).
+    public enum Brief {
+        public static let sheet = "brief"
+        /// One person's row, by `EpisodeBrief.Person.id`; its value is the voices and how sure the brief is.
+        public static func person(_ id: UUID) -> String { "brief.person.\(id.uuidString)" }
+        public static func name(_ id: UUID) -> String { "\(person(id)).name" }
+        public static func gender(_ id: UUID) -> String { "\(person(id)).gender" }
+        /// The name as the target language spells it.
+        public static func spelling(_ id: UUID) -> String { "\(person(id)).spelling" }
+        /// Plays the person's first line.
+        public static func play(_ id: UUID) -> String { "\(person(id)).play" }
+        /// Merge into another person, or remove.
+        public static func menu(_ id: UUID) -> String { "\(person(id)).menu" }
+        /// One term's row, by `EpisodeBrief.Term.id`.
+        public static func term(_ id: UUID) -> String { "brief.term.\(id.uuidString)" }
+        public static func termText(_ id: UUID) -> String { "\(term(id)).text" }
+        public static func termTranslation(_ id: UUID) -> String { "\(term(id)).translation" }
+        public static func termNote(_ id: UUID) -> String { "\(term(id)).note" }
+        /// The term's Add to glossary checkbox.
+        public static func termGlossary(_ id: UUID) -> String { "\(term(id)).glossary" }
+        public static func removeTerm(_ id: UUID) -> String { "\(term(id)).remove" }
+        public static let addTerm = "brief.addTerm"
+        public static let confirmButton = "brief.confirm"
+        public static let notNowButton = "brief.notNow"
+        /// In the review sidebar while the review waits for the brief.
+        public static let waiting = "review.briefWaiting"
+    }
+
     public enum EmbeddedSubtitles {
         public static let sheet = "embeddedSubtitles"
         /// One text track's row, by FFmpeg stream index; selected when chosen.

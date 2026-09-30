@@ -293,6 +293,12 @@ extension EditorCommand {
     /// Removes the transcribed cues (the source in translation mode, with the
     /// translation made from it) and the transcripts the project keeps, so the next
     /// Transcribe Audio asks the transcriber again. Asks first; one edit.
+    /// Who is who in the episode and how names are spelled, built after transcription:
+    /// opens it to confirm or edit, or builds one when there is none.
+    public static let showEpisodeBrief = EditorCommand(
+        id: "ai.episodeBrief", title: "Episode Brief…", category: .ai,
+        defaultShortcut: KeyShortcut(.character("b"), modifiers: [.command, .control])
+    )
     public static let clearTranscript = EditorCommand(
         id: "ai.clearTranscript", title: "Clear Transcript…", category: .ai
     )
@@ -360,7 +366,7 @@ extension EditorCommand {
         toggleMilliseconds, toggleReviewSidebar,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
-        transcribe, translateWithAI, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        transcribe, translateWithAI, showEpisodeBrief, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         reviewChanges, acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

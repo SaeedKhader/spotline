@@ -26,7 +26,11 @@ struct ReviewSidebar: View {
         VStack(spacing: 0) {
             ReviewHeader(editor: editor)
             Divider()
-            cards
+            if editor.isReviewHeldForBrief {
+                BriefWaiting(editor: editor)
+            } else {
+                cards
+            }
         }
         .overlay(alignment: .bottom) { UndoNote(editor: editor) }
         .background(.background.opacity(0.4))
@@ -133,6 +137,35 @@ struct ReviewSidebar: View {
     }
 }
 
+/// Instead of the cards while the review waits for the episode brief: what is
+/// happening, and the button that opens the brief to confirm.
+private struct BriefWaiting: View {
+    let editor: EditorState
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if editor.isBuildingBrief {
+                ProgressView().controlSize(.small)
+                Text("Building the episode brief…")
+                    .font(.callout)
+                Text("The review shows once you confirm who is who.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Confirm the episode brief to see the review.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                CommandButton(command: .showEpisodeBrief, editor: editor)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(20)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AccessibilityID.Brief.waiting)
+    }
+}
+
 private enum ReviewEntry: Identifiable {
     case open(ReviewItem)
     case settled(SettledReview)
@@ -161,10 +194,13 @@ private struct ReviewHeader: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Review").font(.headline)
-                Text(left == 0 ? "All done" : "\(left) to review")
+                Text(editor.isReviewHeldForBrief ? "Waiting for the brief" : left == 0 ? "All done" : "\(left) to review")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
+                if editor.track.brief != nil {
+                    CommandButton(command: .showEpisodeBrief, systemImage: "person.2", editor: editor)
+                }
             }
             let scopes = ReviewScope.allCases.filter { $0 == .all || $0 == editor.reviewScope || editor.reviewCount(in: $0) > 0 }
             FlowRow(spacing: 4) {
