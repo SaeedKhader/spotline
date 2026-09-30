@@ -56,12 +56,12 @@ final class AIActivity {
     }
 }
 
-/// The app icon with a ring around it, a segment per stage, like the AI bar.
+/// The app icon with a ring around it, a segment per step of the AI tool.
 final class DockProgressView: NSView {
     struct Progress: Equatable {
         var stages: Int
         var stage: Int
-        /// Nil when nothing measures the stage: its segment is drawn faint.
+        /// Nil when nothing measures the stage: its segment stays empty.
         var fraction: Double?
     }
 
@@ -86,10 +86,9 @@ final class DockProgressView: NSView {
             if index < progress.stage {
                 track(center: center, radius: radius, from: start, to: end, color: tint, width: width)
             } else if index == progress.stage {
+                // A stage nothing measures stays empty: a full segment would read as done.
                 if let fraction = progress.fraction {
                     track(center: center, radius: radius, from: start, to: start + (end - start) * min(max(fraction, 0), 1), color: tint, width: width)
-                } else {
-                    track(center: center, radius: radius, from: start, to: end, color: tint.withAlphaComponent(0.6), width: width)
                 }
             }
         }
