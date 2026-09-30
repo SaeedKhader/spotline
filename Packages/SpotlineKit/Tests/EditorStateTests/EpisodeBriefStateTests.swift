@@ -80,6 +80,23 @@ struct EpisodeBriefStateTests {
         #expect(editor.aiTask == nil, "Opening a brief that exists builds nothing")
     }
 
+    @Test func buildingAgainReplacesTheBrief() async {
+        let editor = makeEditor()
+        #expect(!editor.canPerform(.rebuildEpisodeBrief), "Nothing to build again yet")
+        editor.perform(.transcribe)
+        await tests.finish(editor)
+        editor.confirmEpisodeBrief(editor.track.brief!)
+        #expect(editor.canPerform(.rebuildEpisodeBrief))
+        #expect(editor.perform(.rebuildEpisodeBrief))
+        #expect(editor.isReviewHeldForBrief)
+        await tests.finish(editor)
+        #expect(editor.track.brief?.isConfirmed == false)
+        #expect(editor.track.brief?.plot == "Rick wakes Morty to go on an adventure.")
+        #expect(editor.isBriefSheetShown)
+        // The cast confirmed before stays until the new brief is confirmed.
+        #expect(editor.track.cast.map(\.name) == ["Rick"])
+    }
+
     @Test func withoutABriefBuilderTheReviewShowsAtOnce() async {
         let editor = makeEditor(builder: nil)
         editor.perform(.transcribe)

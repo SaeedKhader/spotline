@@ -56,6 +56,7 @@ struct EpisodeBriefSheet: View {
 
     private var footer: some View {
         HStack {
+            CommandButton(command: .rebuildEpisodeBrief, editor: editor)
             Spacer()
             Button("Not Now") { editor.dismissEpisodeBrief() }
                 .keyboardShortcut(.cancelAction)

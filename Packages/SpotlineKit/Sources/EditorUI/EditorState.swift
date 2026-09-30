@@ -501,7 +501,7 @@ public final class EditorState {
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id,
-             EditorCommand.showEpisodeBrief.id:
+             EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id:
             canPerformAI(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
@@ -648,7 +648,7 @@ public final class EditorState {
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id,
-             EditorCommand.showEpisodeBrief.id:
+             EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id:
             return performAI(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)

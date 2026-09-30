@@ -299,6 +299,10 @@ extension EditorCommand {
         id: "ai.episodeBrief", title: "Episode Brief…", category: .ai,
         defaultShortcut: KeyShortcut(.character("b"), modifiers: [.command, .control])
     )
+    /// Builds the episode brief again from the transcript, replacing the one there (about 4 cents).
+    public static let rebuildEpisodeBrief = EditorCommand(
+        id: "ai.rebuildEpisodeBrief", title: "Build Episode Brief Again", category: .ai
+    )
     public static let clearTranscript = EditorCommand(
         id: "ai.clearTranscript", title: "Clear Transcript…", category: .ai
     )
@@ -366,7 +370,7 @@ extension EditorCommand {
         toggleMilliseconds, toggleReviewSidebar,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
-        transcribe, translateWithAI, showEpisodeBrief, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        transcribe, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         reviewChanges, acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

@@ -115,6 +115,8 @@ extension EditorState {
             return pendingReview != nil
         case EditorCommand.showEpisodeBrief.id:
             return track.brief != nil || (idle && !briefSourceTrack.cues.isEmpty)
+        case EditorCommand.rebuildEpisodeBrief.id:
+            return track.brief != nil && idle && !briefSourceTrack.cues.isEmpty
         default:
             return false
         }
@@ -161,6 +163,9 @@ extension EditorState {
         case EditorCommand.rejectAllChanges.id: rejectChanges(to: nil)
         case EditorCommand.reviewChanges.id: toggleReviewFilter(.changes)
         case EditorCommand.showEpisodeBrief.id: showEpisodeBrief()
+        case EditorCommand.rebuildEpisodeBrief.id:
+            isBriefSheetShown = false
+            buildEpisodeBrief(automatically: false)
         default: return false
         }
         return true
