@@ -22,8 +22,9 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     /// Set when AI translation found the line could be translated more than one
     /// way: every variant, the one in use and why (docs/ARCHITECTURE.md, 7b).
     public var flag: TranslationFlag?
-    /// Words the transcriber was unsure of, for checking; cleared when the text is edited.
-    public var unsureWords: [String]?
+    /// Words the transcriber was unsure of, to check against the audio: each goes
+    /// when it is confirmed, or edited out of the text.
+    public var unsureWords: [UnsureWord]?
     /// True while the text is as an AI tool wrote it (transcription, translation);
     /// cleared when the user edits it. The cue list tints these.
     public var isAIGenerated: Bool?
@@ -31,7 +32,7 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     public init(
         id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom,
         style: String? = nil, speaker: String? = nil, sourceCueID: UUID? = nil, voices: [String]? = nil,
-        flag: TranslationFlag? = nil, unsureWords: [String]? = nil
+        flag: TranslationFlag? = nil, unsureWords: [UnsureWord]? = nil
     ) {
         self.id = id
         self.start = start
@@ -67,6 +68,47 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
         let characters = SubtitleText.visibleLines(of: text).reduce(0) { $0 + $1.count }
         let seconds = duration.seconds
         return seconds > 0 ? Double(characters) / seconds : 0
+    }
+}
+
+/// A word the transcriber was unsure of: its text, when it was said and how
+/// sure the transcriber was (0 to 1). Projects from before times were kept
+/// saved the text alone, and open with just that.
+public struct UnsureWord: Hashable, Sendable, Codable {
+    public var text: String
+    public var start: MediaTime?
+    public var end: MediaTime?
+    public var confidence: Double?
+
+    public init(text: String, start: MediaTime? = nil, end: MediaTime? = nil, confidence: Double? = nil) {
+        self.text = text
+        self.start = start
+        self.end = end
+        self.confidence = confidence
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case text, start, end, confidence
+    }
+
+    public init(from decoder: any Decoder) throws {
+        if let text = try? decoder.singleValueContainer().decode(String.self) {
+            self.init(text: text)
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            text: try container.decode(String.self, forKey: .text),
+            start: try container.decodeIfPresent(MediaTime.self, forKey: .start),
+            end: try container.decodeIfPresent(MediaTime.self, forKey: .end),
+            confidence: try container.decodeIfPresent(Double.self, forKey: .confidence)
+        )
+    }
+}
+
+extension UnsureWord: ExpressibleByStringLiteral {
+    public init(stringLiteral text: String) {
+        self.init(text: text)
     }
 }
 

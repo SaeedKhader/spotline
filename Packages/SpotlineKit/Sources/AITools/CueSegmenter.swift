@@ -73,11 +73,12 @@ public struct CueSegmenter: Sendable {
     /// Below this, a word is one the transcriber was unsure of, marked for checking.
     public static let unsureConfidence = 0.5
 
-    /// The words the transcriber was unsure of, without punctuation, nil when none.
-    static func unsureWords(of words: [TranscribedWord]) -> [String]? {
-        let unsure = words.filter { ($0.confidence ?? 1) < unsureConfidence }
-            .map { $0.text.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) }
-            .filter { !$0.isEmpty }
+    /// The words the transcriber was unsure of, without punctuation, with their times, nil when none.
+    static func unsureWords(of words: [TranscribedWord]) -> [UnsureWord]? {
+        let unsure = words.filter { ($0.confidence ?? 1) < unsureConfidence }.compactMap { word -> UnsureWord? in
+            let text = word.text.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            return text.isEmpty ? nil : UnsureWord(text: text, start: word.start, end: word.end, confidence: word.confidence)
+        }
         return unsure.isEmpty ? nil : unsure
     }
 

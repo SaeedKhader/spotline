@@ -42,6 +42,7 @@ public final class EditorState {
             guard track.cues != oldValue.cues else { return }
             // The review ends when no choice is left open.
             if isReviewingChoices, !track.cues.contains(where: { $0.flag?.isResolved == false }) { isReviewingChoices = false }
+            if isReviewingWords, !track.cues.contains(where: { $0.unsureWords?.isEmpty == false }) { isReviewingWords = false }
             updateSourceCues()
             updateIssues()
             updateCurrentCue()
@@ -148,6 +149,10 @@ public final class EditorState {
     public private(set) var isIssuesPanelShown = false
     /// True while the cue list shows only the lines AI translation flagged, least confident first.
     public internal(set) var isReviewingChoices = false
+    /// True while the cue list shows only the cues with words to check (AI › Review Words to Check).
+    public internal(set) var isReviewingWords = false
+    /// Where playback pauses by itself: after a word played for checking.
+    @ObservationIgnored var playbackStopTime: MediaTime?
     /// Where the chosen QC preset is remembered; nil in tests.
     @ObservationIgnored let settings: UserDefaults?
     static let qcPresetKey = "QCPreset"
@@ -428,6 +433,7 @@ public final class EditorState {
         case EditorCommand.fillExactMatches.id:
             isTranslating && !memory.entries.isEmpty
         case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.reviewChoices.id, EditorCommand.acceptRemainingChoices.id,
+             EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
@@ -478,6 +484,7 @@ public final class EditorState {
         case EditorCommand.toggleMilliseconds.id: showsMilliseconds
         case EditorCommand.toggleIssuesPanel.id: isIssuesPanelShown
         case EditorCommand.reviewChoices.id: isReviewingChoices
+        case EditorCommand.reviewWords.id: isReviewingWords
         case EditorCommand.togglePositionTop.id: selectedCue.map { $0.position == .top }
         default: nil
         }
@@ -557,6 +564,7 @@ public final class EditorState {
         case EditorCommand.importGlossary.id:
             if let url = chooseGlossaryToImport() { importGlossary(from: url) }
         case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.reviewChoices.id, EditorCommand.acceptRemainingChoices.id,
+             EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
@@ -596,6 +604,7 @@ public final class EditorState {
             selectAudioTrack(id: tracks[(current + 1) % tracks.count].id)
         case EditorCommand.togglePlay.id:
             shuttleRate = 0
+            playbackStopTime = nil
             if isPlaying { playback.setPaused(true) } else { playback.play(rate: 1) }
         case EditorCommand.stepForward.id:
             playback.step(by: 1)
@@ -648,6 +657,8 @@ public final class EditorState {
         shuttleRate = 0
         selectedCueID = nil
         isReviewingChoices = false
+        isReviewingWords = false
+        playbackStopTime = nil
         track = SubtitleTrack()
         subtitleFile = nil
         if sourceTrack != nil { closeSourceSubtitles() }
@@ -907,7 +918,8 @@ public final class EditorState {
             track.cues[index].text = text
             // Edited by hand: no longer the AI's text, and the choice between its variants is made.
             track.cues[index].isAIGenerated = nil
-            track.cues[index].unsureWords = nil
+            // A word edited out of the text was the one to fix; the others still need checking.
+            track.cues[index].unsureWords = Self.words(track.cues[index].unsureWords, in: text)
             if track.cues[index].flag?.isResolved == false { track.cues[index].flag?.isResolved = true }
         }
         textEditCueID = id
@@ -1001,8 +1013,8 @@ public final class EditorState {
     }
 
     /// The ones of `words` that `text` still has, nil when none.
-    static func words(_ words: [String]?, in text: String) -> [String]? {
-        let kept = (words ?? []).filter { text.localizedCaseInsensitiveContains($0) }
+    static func words(_ words: [UnsureWord]?, in text: String) -> [UnsureWord]? {
+        let kept = (words ?? []).filter { text.localizedCaseInsensitiveContains($0.text) }
         return kept.isEmpty ? nil : kept
     }
 
@@ -1185,6 +1197,11 @@ public final class EditorState {
         if status.position != position {
             position = status.position
             updateCurrentCue()
+        }
+        // A word played for checking stops just after it.
+        if let stop = playbackStopTime, status.position >= stop {
+            playbackStopTime = nil
+            if !status.isPaused { playback.setPaused(true) }
         }
         let atStart = !status.hasMedia || status.position.nearestFrame(at: frameRate) <= 0
         if atStart != isAtStart { isAtStart = atStart }

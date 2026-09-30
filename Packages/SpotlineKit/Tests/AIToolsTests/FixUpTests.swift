@@ -209,7 +209,8 @@ struct ElevenLabsTests {
             TranscribedWord(text: $0.0, start: MediaTime(seconds: $0.1, timescale: 1000), end: MediaTime(seconds: $0.2, timescale: 1000), confidence: $0.3)
         }
         let cues = CueSegmenter(preset: .standard, frameRate: .fps25).cues(from: words)
-        #expect(cues.map(\.unsureWords) == [["Ser", "Duncan"]])
+        #expect(cues.map { $0.unsureWords?.map(\.text) } == [["Ser", "Duncan"]])
+        #expect(cues[0].unsureWords?.allSatisfy { $0.start != nil && $0.confidence != nil } == true, "With the time to play it and the confidence")
     }
 
     @Test func chunksGoOnOneTimelineWithSilenceBetween() {

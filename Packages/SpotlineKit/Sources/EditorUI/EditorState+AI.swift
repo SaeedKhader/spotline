@@ -76,6 +76,10 @@ extension EditorState {
         case EditorCommand.translateWithAI.id:
             // Outside translation mode, the cues being edited become the source.
             return idle && (isTranslating ? !untranslatedCues.isEmpty : track.cues.contains { !$0.text.isEmpty })
+        case EditorCommand.reviewWords.id:
+            return isReviewingWords || !cuesToCheck.isEmpty
+        case EditorCommand.confirmRemainingWords.id:
+            return !cuesToCheck.isEmpty
         case EditorCommand.reviewChoices.id:
             return isReviewingChoices || track.cues.contains { $0.flag?.isResolved == false }
         case EditorCommand.acceptRemainingChoices.id:
@@ -99,11 +103,10 @@ extension EditorState {
         case EditorCommand.translateWithAI.id:
             // Words the transcription was unsure of would be translated wrong too: offer to check them first.
             let unsure = cuesWithUnsureSource
-            if let first = unsure.first {
+            if !unsure.isEmpty {
                 switch confirmTranslatingUnsureCues(unsure.count) {
                 case .review:
-                    if !isIssuesPanelShown { perform(.toggleIssuesPanel) }
-                    select(first.id)
+                    if !isReviewingWords { toggleWordReview() }
                     return true
                 case .cancel:
                     return false
@@ -113,6 +116,8 @@ extension EditorState {
             }
             if !isTranslating { useCuesAsSource() }
             translateUntranslatedCues()
+        case EditorCommand.reviewWords.id: toggleWordReview()
+        case EditorCommand.confirmRemainingWords.id: confirmRemainingWords()
         case EditorCommand.reviewChoices.id: toggleChoiceReview()
         case EditorCommand.acceptRemainingChoices.id: acceptRemainingChoices()
         case EditorCommand.maskProfanity.id: runCleanup(.maskProfanity)
@@ -190,6 +195,69 @@ extension EditorState {
         return sourceCues[cue.id] != nil ? "translation" : "transcription"
     }
 
+    // MARK: Words to check
+
+    /// Cues with words the transcriber was unsure of, least sure first: what the word review shows.
+    public var cuesToCheck: [Cue] {
+        func certainty(_ cue: Cue) -> Double { cue.unsureWords?.compactMap(\.confidence).min() ?? 0.5 }
+        return track.cues.filter { $0.unsureWords?.isEmpty == false }
+            .sorted { (certainty($0), $0.start) < (certainty($1), $1.start) }
+    }
+
+    /// How many words are still to check.
+    public var wordsToCheckCount: Int {
+        track.cues.reduce(0) { $0 + ($1.unsureWords?.count ?? 0) }
+    }
+
+    /// Keeps a word as the transcriber heard it: one undoable edit. In the
+    /// review, a cue with nothing left to check makes way for the next.
+    public func confirmUnsureWord(_ index: Int, forCue id: Cue.ID) {
+        guard let cueIndex = track.cues.firstIndex(where: { $0.id == id }), let words = track.cues[cueIndex].unsureWords,
+              words.indices.contains(index)
+        else { return }
+        let next = isReviewingWords && words.count == 1 ? nextCueToCheck(after: id) : nil
+        edit("Confirm Word") { track in
+            var remaining = words
+            remaining.remove(at: index)
+            track.cues[cueIndex].unsureWords = remaining.isEmpty ? nil : remaining
+        }
+        if let next, cue(withID: next)?.unsureWords?.isEmpty == false { select(next) }
+    }
+
+    /// Keeps every word still to check, as one undoable edit, and leaves the review.
+    func confirmRemainingWords() {
+        edit(EditorCommand.confirmRemainingWords.title) { track in
+            for index in track.cues.indices { track.cues[index].unsureWords = nil }
+        }
+        isReviewingWords = false
+    }
+
+    /// Shows only the cues with words to check, least sure first, or every cue again.
+    func toggleWordReview() {
+        isReviewingWords.toggle()
+        if isReviewingWords {
+            isReviewingChoices = false
+            if let first = cuesToCheck.first, selectedCue?.unsureWords?.isEmpty != false { select(first.id) }
+        }
+    }
+
+    /// Plays a word to check with a moment before and after, then pauses.
+    public func playUnsureWord(_ index: Int, forCue id: Cue.ID) {
+        guard hasMedia, let word = cue(withID: id)?.unsureWords?[safe: index], let start = word.start else { return }
+        let lead = MediaTime(value: 300, timescale: 1000)
+        let from = start > lead ? start - lead : .zero
+        playback.seek(toFrame: from.firstFrame(at: frameRate), rate: frameRate)
+        playbackStopTime = (word.end ?? start) + lead
+        playback.play(rate: 1)
+    }
+
+    /// The cue to check after `id` in the review's order.
+    private func nextCueToCheck(after id: Cue.ID) -> Cue.ID? {
+        let order = cuesToCheck.map(\.id)
+        guard let index = order.firstIndex(of: id) else { return order.first }
+        return order[(index + 1)...].first ?? order[..<index].first
+    }
+
     // MARK: Translation choices
 
     /// Cues with an open flag, least confident first: what the choice review shows.
@@ -217,6 +285,7 @@ extension EditorState {
     /// Shows only the cues with open flags, least confident first, or every cue again.
     func toggleChoiceReview() {
         isReviewingChoices.toggle()
+        if isReviewingChoices { isReviewingWords = false }
         if isReviewingChoices, let first = cuesToChoose.first, selectedCue?.flag?.isResolved != false { select(first.id) }
     }
 
@@ -389,10 +458,11 @@ extension EditorState {
         return voices.isEmpty ? nil : voices
     }
 
-    /// The cues about to be translated whose source has words the transcription was unsure of.
+    /// The cues about to become a translation's source that have words the
+    /// transcription was unsure of. In translation mode the source can't be edited;
+    /// the translator gets the words marked instead, and flags lines that read misheard.
     var cuesWithUnsureSource: [Cue] {
-        guard isTranslating else { return track.cues.filter { $0.unsureWords?.isEmpty == false } }
-        return untranslatedCues.filter { sourceCues[$0.id]?.unsureWords?.isEmpty == false }
+        isTranslating ? [] : cuesToCheck
     }
 
     /// Target cues with no text whose source has some.
@@ -421,7 +491,7 @@ extension EditorState {
             TranslationRequest.Line(
                 cueID: cue.id, source: sourceCues[cue.id]?.text ?? "", start: cue.start, end: cue.end, voices: voices(for: cue),
                 speakerName: sourceCues[cue.id]?.speaker ?? cue.speaker, memoryExample: examples[cue.id],
-                unsureWords: sourceCues[cue.id]?.unsureWords
+                unsureWords: sourceCues[cue.id]?.unsureWords?.map(\.text)
             )
         }
         let script = source.cues.map { cue in
@@ -586,4 +656,9 @@ private final class TranslationCollector: @unchecked Sendable {
             return all
         }
     }
+}
+
+
+extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }

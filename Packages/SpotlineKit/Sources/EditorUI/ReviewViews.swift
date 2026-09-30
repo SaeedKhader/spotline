@@ -461,3 +461,110 @@ struct AIReviewBar: View {
         }
     }
 }
+
+/// Under a cue with words the transcriber was unsure of: each word with how
+/// sure it was, a button to hear it and one to keep it. Fixing the text in the
+/// editor above clears the word too.
+struct WordCheckBox: View {
+    let editor: EditorState
+    let cue: Cue
+    let words: [UnsureWord]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "ear").foregroundStyle(Color.hearingTint)
+                Text(words.count == 1 ? "The transcription wasn't sure of this word" : "The transcription wasn't sure of these words")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                WordToCheck(editor: editor, cueID: cue.id, index: index, word: word)
+            }
+            Text("Listen, then fix the text above or confirm the word.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.hearingTint.opacity(0.07), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Words to check")
+        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .words))
+    }
+}
+
+/// One word to check: the word, how sure the transcriber was, Play and Confirm.
+private struct WordToCheck: View {
+    let editor: EditorState
+    let cueID: Cue.ID
+    let index: Int
+    let word: UnsureWord
+
+    var body: some View {
+        let percent = word.confidence.map { "\(Int(($0 * 100).rounded()))%" }
+        HStack(spacing: 8) {
+            Text("“\(word.text)”")
+                .underline(color: Color.hearingTint)
+                .font(.callout)
+            if let percent {
+                Text(percent)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .help("How sure the transcription was")
+            }
+            Spacer(minLength: 8)
+            Button {
+                editor.playUnsureWord(index, forCue: cueID)
+            } label: {
+                Label("Play", systemImage: "play.circle")
+            }
+            .disabled(word.start == nil || !editor.hasMedia)
+            .help("Hear the word")
+            .accessibilityIdentifier(AccessibilityID.CueList.playWord(cueID, index))
+            Button {
+                editor.confirmUnsureWord(index, forCue: cueID)
+            } label: {
+                Label("Confirm", systemImage: "checkmark.circle")
+            }
+            .help("The word is right")
+            .accessibilityIdentifier(AccessibilityID.CueList.confirmWord(cueID, index))
+        }
+        .buttonStyle(.borderless)
+        .labelStyle(.titleAndIcon)
+        .font(.caption)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(word.text)
+        .accessibilityValue(percent.map { "\(word.text), \($0)" } ?? word.text)
+        .accessibilityIdentifier(AccessibilityID.CueList.word(cueID, index))
+    }
+}
+
+/// Over the cue list while it shows only the cues with words to check.
+struct WordReviewHeader: View {
+    let editor: EditorState
+
+    var body: some View {
+        let count = editor.cuesToCheck.count
+        let text = "\(count == 1 ? "1 cue has" : "\(count) cues have") words the transcription wasn't sure of, least sure first. "
+            + "Fix or confirm each, or keep the rest with \(EditorCommand.confirmRemainingWords.menuHint("AI"))."
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "ear")
+                    .foregroundStyle(Color.hearingTint)
+                Text(text)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .font(.callout)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.hearingTint.opacity(0.08))
+            Divider()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(text)
+        .accessibilityIdentifier(AccessibilityID.CueList.wordReview)
+    }
+}

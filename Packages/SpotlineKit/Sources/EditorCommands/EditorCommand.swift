@@ -275,6 +275,15 @@ extension EditorCommand {
     public static let acceptRemainingChoices = EditorCommand(
         id: "ai.acceptRemainingChoices", title: "Accept Remaining Choices", category: .ai
     )
+    /// Shows only the cues with words the transcriber was unsure of, least sure first, or every cue again.
+    public static let reviewWords = EditorCommand(
+        id: "ai.reviewWords", title: "Review Words to Check", category: .ai,
+        defaultShortcut: KeyShortcut(.character("w"), modifiers: [.command, .control])
+    )
+    /// Keeps every word still to check as it is, as one edit.
+    public static let confirmRemainingWords = EditorCommand(
+        id: "ai.confirmRemainingWords", title: "Confirm Remaining Words", category: .ai
+    )
     public static let maskProfanity = EditorCommand(id: "ai.maskProfanity", title: "Mask Profanity", category: .ai)
     public static let removeHearingImpaired = EditorCommand(id: "ai.removeHearingImpaired", title: "Remove Hearing-Impaired Text", category: .ai)
     public static let fixPunctuation = EditorCommand(id: "ai.fixPunctuation", title: "Fix Spacing and Punctuation", category: .ai)
@@ -316,7 +325,7 @@ extension EditorCommand {
         toggleMilliseconds,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
-        transcribe, translateWithAI, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        transcribe, translateWithAI, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

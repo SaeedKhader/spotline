@@ -25,6 +25,7 @@ struct CueEditorList: View {
         VStack(spacing: 0) {
             AIReviewBar(editor: editor)
             if editor.isReviewingChoices { ChoiceReviewHeader(editor: editor) }
+            if editor.isReviewingWords { WordReviewHeader(editor: editor) }
             if editor.track.cues.isEmpty && editor.proposedInserts.isEmpty {
                 CueListEmptyState(editor: editor)
             } else if editor.isIssuesPanelShown {
@@ -93,11 +94,12 @@ struct CueEditorList: View {
     }
 
     /// The cues, with the new cues an AI tool proposes in their places. While
-    /// reviewing translation choices, only the flagged cues, least confident first.
+    /// reviewing translation choices or words to check, only those cues, least sure first.
     private var listItems: [CueListItem] {
-        if editor.isReviewingChoices {
+        if editor.isReviewingChoices || editor.isReviewingWords {
             let numbers = Dictionary(editor.track.cues.enumerated().map { ($0.element.id, $0.offset + 1) }, uniquingKeysWith: { first, _ in first })
-            return editor.cuesToChoose.map { CueListItem.cue($0, number: numbers[$0.id] ?? 0) }
+            let cues = editor.isReviewingWords ? editor.cuesToCheck : editor.cuesToChoose
+            return cues.map { CueListItem.cue($0, number: numbers[$0.id] ?? 0) }
         }
         let cues = editor.track.cues.enumerated().map { CueListItem.cue($0.element, number: $0.offset + 1) }
         let inserts = editor.proposedInserts
@@ -188,6 +190,9 @@ private struct CueRow: View {
                 }
                 if let change = editor.proposedChange(forCue: cue.id), !change.changesText {
                     ProposalBox(editor: editor, change: change)
+                }
+                if let words = cue.unsureWords, !words.isEmpty {
+                    WordCheckBox(editor: editor, cue: cue, words: words)
                 }
                 if let flag = cue.flag, !flag.isResolved {
                     ChoiceBox(editor: editor, cue: cue, flag: flag, direction: directions.target)

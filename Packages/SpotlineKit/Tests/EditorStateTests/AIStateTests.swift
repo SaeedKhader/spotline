@@ -217,18 +217,53 @@ struct AIStateTests {
         #expect(editor.issues[editor.track.cues[1].id]?.contains { $0.kind == .notTranslated } == true)
     }
 
-    @Test func unsureWordsNeedReviewUntilTheTextIsEdited() {
+    @Test func wordsToCheckAreTheirOwnReviewNotQCIssues() {
+        var line = cue("I'm Ser Duncan of the Tall.", at: 0)
+        line.unsureWords = [
+            UnsureWord(text: "Duncan", start: MediaTime(value: 300, timescale: 1000), end: MediaTime(value: 600, timescale: 1000), confidence: 0.3),
+            UnsureWord(text: "Tall", confidence: 0.45),
+        ]
+        var other = cue("Egg.", at: 4)
+        other.unsureWords = [UnsureWord(text: "Egg", confidence: 0.2)]
+        let editor = makeEditor(cues: [line, cue("Hi.", at: 2), other])
+        #expect(editor.issues[line.id]?.contains { $0.message.contains("transcription") } != true, "Words to check are not QC warnings")
+        #expect(editor.wordsToCheckCount == 3)
+        // The review shows the cues with words, least sure first.
+        #expect(editor.perform(.reviewWords))
+        #expect(editor.isReviewingWords && editor.isOn(.reviewWords) == true)
+        #expect(editor.cuesToCheck.map(\.id) == [other.id, line.id])
+        #expect(editor.selectedCueID == other.id)
+        // Confirming the last word of a cue moves to the next one.
+        editor.confirmUnsureWord(0, forCue: other.id)
+        #expect(editor.cue(withID: other.id)?.unsureWords == nil)
+        #expect(editor.selectedCueID == line.id)
+        // Editing the text clears only the word edited out.
+        editor.setText("I'm Ser Dunk of the Tall.", forCue: line.id)
+        #expect(editor.cue(withID: line.id)?.unsureWords?.map(\.text) == ["Tall"])
+        editor.perform(.undo)
+        #expect(editor.cue(withID: line.id)?.unsureWords?.count == 2)
+        // Confirm Remaining keeps the rest and ends the review.
+        #expect(editor.perform(.confirmRemainingWords))
+        #expect(editor.wordsToCheckCount == 0 && !editor.isReviewingWords)
+        #expect(!editor.canPerform(.reviewWords))
+    }
+
+    @Test func splittingKeepsEachWordWithItsHalf() {
         var line = cue("I'm Ser Duncan.", at: 0)
         line.unsureWords = ["Duncan"]
-        let editor = makeEditor(cues: [line, cue("Hi.", at: 2)])
-        #expect(editor.issues[line.id]?.contains { $0.kind == .unsureWords(["Duncan"]) } == true)
-        #expect(editor.issues[line.id]?.contains { $0.message == "Check the transcription: “Duncan”" } == true)
-        editor.select(line.id)
+        let editor = makeEditor(cues: [line])
         #expect(editor.splitCue(line.id, at: nil))
         #expect(editor.track.cues[0].unsureWords == nil && editor.track.cues[1].unsureWords == ["Duncan"], "The half with the word keeps it")
-        editor.setText("Ser Dunk.", forCue: editor.track.cues[1].id)
-        #expect(editor.track.cues[1].unsureWords == nil)
-        #expect(editor.issues[editor.track.cues[1].id]?.contains { if case .unsureWords = $0.kind { true } else { false } } != true)
+    }
+
+    @Test func playingAWordStopsJustAfterIt() {
+        var line = cue("I'm Ser Duncan.", at: 1)
+        line.unsureWords = [UnsureWord(text: "Duncan", start: MediaTime(value: 1500, timescale: 1000), end: MediaTime(value: 1900, timescale: 1000))]
+        let editor = makeEditor(cues: [line])
+        editor.playUnsureWord(0, forCue: line.id)
+        #expect(editor.isPlaying)
+        #expect(editor.currentTime.seconds >= 1.1 && editor.currentTime.seconds <= 1.25)
+        #expect(editor.playbackStopTime == MediaTime(value: 2200, timescale: 1000))
     }
 
     @Test func translatingWarnsAboutWordsToCheck() async {
@@ -240,21 +275,21 @@ struct AIStateTests {
             asked.append(count)
             return .review
         }
-        // Review: nothing is translated; the issues show, on the cue to check.
+        // Review: nothing is translated; the word review opens on the cue to check.
         #expect(editor.perform(.translateWithAI))
         #expect(asked == [1])
         #expect(!editor.isTranslating && editor.aiTask == nil)
-        #expect(editor.isIssuesPanelShown)
+        #expect(editor.isReviewingWords)
         #expect(editor.selectedCueID == unsure.id)
         editor.confirmTranslatingUnsureCues = { _ in .cancel }
         #expect(!editor.perform(.translateWithAI))
         #expect(!editor.isTranslating)
-        // Translate anyway.
+        // Translate anyway: the translator is told which words to doubt.
         editor.confirmTranslatingUnsureCues = { _ in .translateAnyway }
         #expect(editor.perform(.translateWithAI))
         await finish(editor)
         #expect(editor.track.cues.map(\.text) == ["[ar] Hello.", "[ar] I'm Ser Duncan."])
-        #expect(editor.issues[editor.track.cues[1].id]?.contains { $0.message == "Check the source transcription: “Duncan”" } == true)
+        #expect(editor.sourceCues[editor.track.cues[1].id]?.unsureWords == ["Duncan"])
     }
 
     @Test func transcribedCuesCanBeTranslatedDirectly() async throws {

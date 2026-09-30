@@ -21,6 +21,11 @@ extension NSColor {
     static var aiTint: NSColor { .systemPurple }
 }
 
+extension Color {
+    /// Words the transcriber was unsure of: apart from QC warnings (orange) and AI text (purple).
+    static var hearingTint: Color { Color(nsColor: .systemTeal) }
+}
+
 extension KeyShortcut {
     /// The shortcut as menus show it, e.g. "⌃⌘R".
     var displayString: String {
