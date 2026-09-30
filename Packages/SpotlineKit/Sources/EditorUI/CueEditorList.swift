@@ -52,14 +52,17 @@ struct CueEditorList: View {
         let directions = TextDirections(
             source: editor.isTranslating ? editor.sourceDirection : .leftToRight, target: editor.targetDirection
         )
-        return ScrollViewReader { proxy in
+        return GeometryReader { geometry in ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(listItems) { item in
                         Group {
                             switch item {
                             case .cue(let cue, let number):
-                                CueRow(editor: editor, cue: cue, number: number, directions: directions, focusedText: $focusedText)
+                                CueRow(
+                                    editor: editor, cue: cue, number: number, directions: directions, focusedText: $focusedText,
+                                    leaveText: { isListFocused = true }
+                                )
                                     .overlay {
                                         if editor.aiTask?.inFlight.contains(cue.id) == true {
                                             InFlightShimmer()
@@ -80,12 +83,14 @@ struct CueEditorList: View {
                         Divider()
                     }
                 }
-            }
-            // A click below the last row (no row takes it) leaves the text and deselects.
-            .contentShape(Rectangle())
-            .onTapGesture {
-                editor.perform(.deselectCue)
-                isListFocused = true
+                // The rows fill at least the visible height, so a click below the last
+                // row (no row takes it) lands here: it leaves the text and deselects.
+                .frame(minHeight: geometry.size.height, alignment: .top)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    editor.perform(.deselectCue)
+                    isListFocused = true
+                }
             }
             .focusable()
             .focusEffectDisabled()
@@ -97,11 +102,13 @@ struct CueEditorList: View {
                 focusedText = id
                 return .handled
             }
+            // Esc in the text goes back to the list; Esc in the list deselects.
+            .onKeyPress(.escape) { editor.perform(.deselectCue) ? .handled : .ignored }
             .onChange(of: editor.selectedCueID) { _, id in
                 guard let id else { return }
                 withAnimation(editor.launchOptions.isUITestMode ? nil : .default) { proxy.scrollTo(id) }
             }
-        }
+        } }
     }
 
     /// The cues, with the new cues an AI tool proposes in their places. In a
@@ -168,6 +175,8 @@ private struct CueRow: View {
     let number: Int
     let directions: TextDirections
     var focusedText: FocusState<Cue.ID?>.Binding
+    /// Gives the list the keyboard focus, as Esc leaves the text.
+    let leaveText: () -> Void
     @State private var isHovered = false
 
     private var isSelected: Bool { editor.selectedCueID == cue.id }
@@ -288,6 +297,7 @@ private struct CueRow: View {
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
                     focusedText.wrappedValue = nil
+                    leaveText()
                     return .handled
                 }
                 .environment(\.layoutDirection, directions.target.layoutDirection)
