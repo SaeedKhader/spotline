@@ -307,6 +307,99 @@ struct AIStateTests {
         #expect(editor.track.cues.map(\.text) == ["[ar] Where are you going? ♀", "[ar] Home."])
     }
 
+    /// Transcribes the scripted audio, then translates it to Arabic.
+    func transcribedAndTranslated() async -> EditorState {
+        let editor = makeEditor()
+        editor.confirmTranslatingUnsureCues = { _ in .translateAnyway }
+        #expect(editor.perform(.transcribe))
+        await finish(editor)
+        #expect(editor.perform(.translateWithAI))
+        await finish(editor)
+        #expect(editor.isTranslating)
+        #expect(editor.track.cues.allSatisfy { !$0.text.isEmpty })
+        return editor
+    }
+
+    @Test func clearingTheTranslationEmptiesTheTargetInOneUndoStep() async {
+        let editor = await transcribedAndTranslated()
+        let translated = editor.track.cues
+        let transcripts = editor.storedTranscripts
+        #expect(!transcripts.isEmpty)
+        #expect(editor.perform(.clearTranslation))
+        #expect(editor.track.cues.allSatisfy { $0.text.isEmpty && $0.flag == nil && $0.isAIGenerated == nil })
+        // Timing, links, the source and the transcript stay, ready to translate again.
+        #expect(editor.track.cues.map(\.sourceCueID) == translated.map(\.sourceCueID))
+        #expect(editor.track.cues.map(\.start) == translated.map(\.start))
+        #expect(editor.isTranslating)
+        #expect(editor.storedTranscripts == transcripts)
+        #expect(editor.canPerform(.translateWithAI))
+        #expect(!editor.canPerform(.clearTranslation), "Nothing left to clear")
+        editor.perform(.undo)
+        #expect(editor.track.cues == translated)
+    }
+
+    @Test func clearTranslationNeedsATranslation() {
+        let editor = makeEditor(cues: [cue("Hello.", at: 1)])
+        #expect(!editor.canPerform(.clearTranslation))
+    }
+
+    @Test func clearingTheTranscriptAsksThenRemovesTheCuesAndTheSavedWords() async {
+        let editor = makeEditor()
+        #expect(editor.perform(.transcribe))
+        await finish(editor)
+        let transcribed = editor.track.cues
+        #expect(!editor.storedTranscripts.isEmpty)
+
+        var asked: [Bool] = []
+        editor.confirmClearingTranscript = { clearsTranslation in
+            asked.append(clearsTranslation)
+            return false
+        }
+        #expect(!editor.perform(.clearTranscript), "Cancelled")
+        #expect(editor.track.cues == transcribed)
+
+        editor.confirmClearingTranscript = { clearsTranslation in
+            asked.append(clearsTranslation)
+            return true
+        }
+        #expect(editor.perform(.clearTranscript))
+        #expect(asked == [false, false])
+        #expect(editor.track.cues.isEmpty)
+        #expect(editor.storedTranscripts.isEmpty, "The next transcription asks the transcriber again")
+        #expect(!editor.canPerform(.clearTranscript))
+
+        // One undo puts back the cues and the saved words.
+        editor.perform(.undo)
+        #expect(editor.track.cues == transcribed)
+        #expect(!editor.storedTranscripts.isEmpty)
+        editor.perform(.redo)
+        #expect(editor.track.cues.isEmpty)
+        #expect(editor.storedTranscripts.isEmpty)
+    }
+
+    @Test func clearingTheTranscriptOfATranslationLeavesTranslationMode() async {
+        let editor = await transcribedAndTranslated()
+        let source = editor.sourceTrack
+        let translated = editor.track.cues
+        var asked: [Bool] = []
+        editor.confirmClearingTranscript = { clearsTranslation in
+            asked.append(clearsTranslation)
+            return true
+        }
+        #expect(editor.perform(.clearTranscript))
+        #expect(asked == [true], "The dialog says the translation goes too")
+        #expect(!editor.isTranslating)
+        #expect(editor.track.cues.isEmpty)
+        #expect(editor.track.languageCode == source?.languageCode, "Back in the spoken language, for the next transcription")
+        #expect(editor.storedTranscripts.isEmpty)
+
+        editor.perform(.undo)
+        #expect(editor.isTranslating)
+        #expect(editor.sourceTrack == source)
+        #expect(editor.track.cues == translated)
+        #expect(!editor.storedTranscripts.isEmpty)
+    }
+
     @Test func translationJoinsTheLinesItWrote() async {
         func line(_ text: String, _ start: Int64, _ end: Int64) -> Cue {
             Cue(start: MediaTime(value: start, timescale: 1), end: MediaTime(value: end, timescale: 1), text: text)

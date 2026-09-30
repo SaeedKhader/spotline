@@ -292,6 +292,9 @@ public final class EditorState {
     /// Asks whether to export unsaved subtitles before new media replaces them. Tests replace it.
     @ObservationIgnored public var confirmReplacingSubtitles: @MainActor () -> ReplaceSubtitlesChoice =
         EditorPanels.confirmReplacingSubtitles
+    /// Asks whether to clear the transcript, saying what goes with it. Tests replace it.
+    @ObservationIgnored public var confirmClearingTranscript: @MainActor (_ clearsTranslation: Bool) -> Bool =
+        EditorPanels.confirmClearingTranscript(clearsTranslation:)
     /// Asks whether to translate while cues still have words the transcription was unsure of. Tests replace it.
     @ObservationIgnored public var confirmTranslatingUnsureCues: @MainActor (_ count: Int) -> UnsureTranscriptChoice =
         EditorPanels.confirmTranslatingUnsureCues(count:)
@@ -433,7 +436,7 @@ public final class EditorState {
         case EditorCommand.fillExactMatches.id:
             isTranslating && !memory.entries.isEmpty
         case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.reviewChoices.id, EditorCommand.acceptRemainingChoices.id,
-             EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
+             EditorCommand.clearTranslation.id, EditorCommand.clearTranscript.id, EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
@@ -564,7 +567,7 @@ public final class EditorState {
         case EditorCommand.importGlossary.id:
             if let url = chooseGlossaryToImport() { importGlossary(from: url) }
         case EditorCommand.transcribe.id, EditorCommand.translateWithAI.id, EditorCommand.reviewChoices.id, EditorCommand.acceptRemainingChoices.id,
-             EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
+             EditorCommand.clearTranslation.id, EditorCommand.clearTranscript.id, EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
@@ -1147,9 +1150,47 @@ public final class EditorState {
         projectDidChange?(.edit)
     }
 
+    /// Like `edit(_:_:)`, for a change that also replaces the translation source and
+    /// the transcripts the project keeps (Clear Transcript). One undo step puts all of them back.
+    func editIncludingSources(_ actionName: String, _ change: (inout SubtitleTrack, inout SourceState) -> Void) {
+        let before = Snapshot(track: track, selectedCueID: selectedCueID, sources: sourceState)
+        var edited = track
+        var sources = sourceState
+        change(&edited, &sources)
+        edited.cues.sort { $0.start < $1.start }
+        guard edited != track || sources != sourceState else { return }
+        endTextEditSession()
+        registerUndo(restoring: before, actionName: actionName)
+        apply(sources)
+        track = edited
+        if let selected = selectedCueID, cue(withID: selected) == nil { selectedCueID = nil }
+        hasUnsavedChanges = true
+        refreshUndoState()
+        projectDidChange?(.edit)
+    }
+
+    /// What a translation is made from, and the transcribers' words the project keeps.
+    struct SourceState: Equatable {
+        var sourceTrack: SubtitleTrack?
+        var sourceFile: SubtitleFileReference?
+        var transcripts: [StoredTranscript]
+    }
+
+    var sourceState: SourceState {
+        SourceState(sourceTrack: sourceTrack, sourceFile: sourceFile, transcripts: storedTranscripts)
+    }
+
+    private func apply(_ sources: SourceState) {
+        storedTranscripts = sources.transcripts
+        sourceFile = sources.sourceFile
+        sourceTrack = sources.sourceTrack
+    }
+
     private struct Snapshot {
         var track: SubtitleTrack
         var selectedCueID: Cue.ID?
+        /// Set by edits that also change the source and the kept transcripts.
+        var sources: SourceState?
     }
 
     private func registerUndo(restoring snapshot: Snapshot, actionName: String) {
@@ -1167,9 +1208,14 @@ public final class EditorState {
     /// Undo and redo: puts back `snapshot` and registers the reverse.
     private func restore(_ snapshot: Snapshot, actionName: String) {
         let change: ProjectChange = undoManager.isUndoing ? .undo : .redo
-        registerUndo(restoring: Snapshot(track: track, selectedCueID: selectedCueID), actionName: actionName)
+        registerUndo(
+            restoring: Snapshot(track: track, selectedCueID: selectedCueID, sources: snapshot.sources.map { _ in sourceState }),
+            actionName: actionName
+        )
+        if let sources = snapshot.sources { apply(sources) }
         track = snapshot.track
         selectedCueID = snapshot.selectedCueID
+        if snapshot.sources != nil { translationPairDidChange() }
         hasUnsavedChanges = true
         projectDidChange?(change)
     }

@@ -80,6 +80,10 @@ extension EditorState {
         case EditorCommand.translateWithAI.id:
             // Outside translation mode, the cues being edited become the source.
             return idle && (isTranslating ? !untranslatedCues.isEmpty : track.cues.contains { !$0.text.isEmpty })
+        case EditorCommand.clearTranslation.id:
+            return idle && isTranslating && track.cues.contains { !$0.text.isEmpty || $0.flag != nil }
+        case EditorCommand.clearTranscript.id:
+            return idle && (!storedTranscripts.isEmpty || !(sourceTrack ?? track).cues.isEmpty)
         case EditorCommand.reviewWords.id:
             return isReviewingWords || !cuesToCheck.isEmpty
         case EditorCommand.confirmRemainingWords.id:
@@ -120,6 +124,10 @@ extension EditorState {
             }
             if !isTranslating { useCuesAsSource() }
             translateUntranslatedCues()
+        case EditorCommand.clearTranslation.id: clearTranslation()
+        case EditorCommand.clearTranscript.id:
+            guard confirmClearingTranscript(isTranslating) else { return false }
+            clearTranscript()
         case EditorCommand.reviewWords.id: toggleWordReview()
         case EditorCommand.confirmRemainingWords.id: confirmRemainingWords()
         case EditorCommand.reviewChoices.id: toggleChoiceReview()
@@ -609,6 +617,34 @@ extension EditorState {
         }
         sourceFile = subtitleFile
         sourceTrack = source
+        translationPairDidChange()
+    }
+
+    /// Empties every target cue (text, flagged choices, AI tint), keeping its timing
+    /// and source link so a translation can fill it again. One undoable edit.
+    func clearTranslation() {
+        edit("Clear Translation") { track in
+            for index in track.cues.indices {
+                track.cues[index].text = ""
+                track.cues[index].flag = nil
+                track.cues[index].unsureWords = nil
+                track.cues[index].isAIGenerated = nil
+            }
+        }
+    }
+
+    /// Removes the transcribed cues and the transcripts the project keeps. In translation
+    /// mode the transcript is the source, so the translation made from it goes too and
+    /// the editor leaves translation mode, back in the source's language. One undoable edit.
+    func clearTranscript() {
+        let language = sourceTrack?.languageCode
+        editIncludingSources("Clear Transcript") { track, sources in
+            track.cues = []
+            if let language { track.languageCode = language }
+            sources = SourceState(sourceTrack: nil, sourceFile: nil, transcripts: [])
+        }
+        isReviewingWords = false
+        isReviewingChoices = false
         translationPairDidChange()
     }
 

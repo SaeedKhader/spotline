@@ -265,6 +265,17 @@ extension EditorCommand {
         id: "ai.translate", title: "Translate with AI", category: .ai,
         defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .control])
     )
+    /// Empties every target cue: text, flagged choices and AI tint go; timing and
+    /// source links stay, so Translate with AI can fill them again. One edit.
+    public static let clearTranslation = EditorCommand(
+        id: "ai.clearTranslation", title: "Clear Translation", category: .ai
+    )
+    /// Removes the transcribed cues (the source in translation mode, with the
+    /// translation made from it) and the transcripts the project keeps, so the next
+    /// Transcribe Audio asks the transcriber again. Asks first; one edit.
+    public static let clearTranscript = EditorCommand(
+        id: "ai.clearTranscript", title: "Clear Transcript…", category: .ai
+    )
     /// Shows only the lines AI translation could translate more than one way, least
     /// confident first, each with its variants to pick from; or every cue again.
     public static let reviewChoices = EditorCommand(
@@ -325,7 +336,7 @@ extension EditorCommand {
         toggleMilliseconds,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
-        transcribe, translateWithAI, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        transcribe, translateWithAI, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

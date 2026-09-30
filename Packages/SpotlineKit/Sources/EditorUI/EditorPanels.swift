@@ -103,6 +103,19 @@ enum EditorPanels {
         }
     }
 
+    static func confirmClearingTranscript(clearsTranslation: Bool) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Clear the transcript?"
+        alert.informativeText = (clearsTranslation
+            ? "This removes the transcribed cues, the translation made from them, and the transcript saved in the project."
+            : "This removes the transcribed cues and the transcript saved in the project.")
+            + " The next Transcribe Audio sends the audio to the transcriber again, which costs money with a cloud service like ElevenLabs Scribe. You can undo this."
+        alert.addButton(withTitle: "Clear Transcript")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     static func showError(_ title: String, _ error: any Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning

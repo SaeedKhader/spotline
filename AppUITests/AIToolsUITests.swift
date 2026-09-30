@@ -89,4 +89,48 @@ final class AIToolsUITests: XCTestCase {
         XCTAssertEqual(texts.count, 2)
         XCTAssertEqual(app.cueCells(.choices).count, 0)
     }
+
+    @MainActor
+    func testClearTranslationEmptiesTheTargetInOneUndoStep() throws {
+        let app = launchApp(source: "translation-source-23.976.srt")
+        XCTAssertTrue(app.cueCells(.source).firstMatch.waitForExistence(timeout: 10), "No source cells")
+        chooseAIMenuItem(.translateWithAI, in: app)
+        let texts = app.cueCells(.text)
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♀")
+        let summary = app.descendants(matching: .any)[AccessibilityID.CueList.choicesSummary]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "No choices summary")
+
+        chooseAIMenuItem(.clearTranslation, in: app)
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "")
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: summary)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 10), .completed, "Choices stayed after clearing")
+        // The source stays, ready to translate again.
+        XCTAssertEqual(app.cueCells(.source).firstMatch.value as? String, "Where are you going?")
+
+        app.typeKey("z", modifierFlags: .command)
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "[ar] Where are you going? ♀")
+    }
+
+    @MainActor
+    func testClearTranscriptAsksThenRemovesTheCuesInOneUndoStep() throws {
+        let app = launchApp()
+        _ = button(.stepForward, in: app)
+        chooseAIMenuItem(.transcribe, in: app)
+        let texts = app.cueCells(.text)
+        let second = texts.element(boundBy: 1)
+        XCTAssertTrue(second.waitForExistence(timeout: 20), "The second cue never came")
+        waitForValue(of: second, toEqual: "Fine, thanks.")
+
+        chooseAIMenuItem(.clearTranscript, in: app)
+        // It asks first: the next transcription is paid for again.
+        let confirm = app.buttons["Clear Transcript"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10), "No confirmation")
+        confirm.click()
+        let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 0"), object: texts)
+        XCTAssertEqual(XCTWaiter().wait(for: [cleared], timeout: 10), .completed, "Cues stayed after clearing")
+
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(second.waitForExistence(timeout: 10), "Undo did not bring the cues back")
+        waitForValue(of: second, toEqual: "Fine, thanks.")
+    }
 }
