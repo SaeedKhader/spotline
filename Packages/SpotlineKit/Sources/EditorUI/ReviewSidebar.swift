@@ -7,7 +7,7 @@ import SubtitleTranslation
 import SwiftUI
 
 /// Right of the video (View › Show Review): every thing to review as a card, in
-/// time order. Filter chips pick a kind, with its "all at once" action. Picking a
+/// time order. Filter chips pick a kind (none picked: everything), with its "all at once" action. Picking a
 /// card selects its cue (the list, video and timeline go there); selecting a cue
 /// anywhere else marks its cards.
 ///
@@ -202,7 +202,8 @@ private struct ReviewHeader: View {
                     CommandButton(command: .showEpisodeBrief, systemImage: "person.2", editor: editor)
                 }
             }
-            let scopes = ReviewScope.allCases.filter { $0 == .all || $0 == editor.reviewScope || editor.reviewCount(in: $0) > 0 }
+            // No All chip: with no chip picked the sidebar lists everything, and picking one again clears it.
+            let scopes = ReviewScope.allCases.filter { $0 != .all && ($0 == editor.reviewScope || editor.reviewCount(in: $0) > 0) }
             FlowRow(spacing: 4) {
                 ForEach(scopes, id: \.self) { scope in
                     ScopeButton(editor: editor, scope: scope)
@@ -287,7 +288,7 @@ private struct FlowRow: Layout {
     }
 }
 
-/// "Issues 3": picks a filter (again: back to everything).
+/// "Issues 3": picks a filter (again: back to everything). There is no chip for everything.
 private struct ScopeButton: View {
     let editor: EditorState
     let scope: ReviewScope
