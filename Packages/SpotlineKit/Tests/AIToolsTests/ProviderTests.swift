@@ -109,6 +109,87 @@ struct CloudProviderTests {
         }
     }
 
+    @Test func lunaRequestUsesClaudesPromptAndAStrictSchema() throws {
+        let cast = [CastMember(name: "Beth", gender: .female, isConfirmed: true, voices: ["speaker_1"])]
+        let request = request(cast: cast)
+        let body = OpenAITranslator.body(for: request)
+        #expect(body["model"] as? String == "gpt-6-luna")
+        #expect(body["store"] as? Bool == false, "OpenAI keeps no copy of the dialogue")
+        #expect(body["instructions"] as? String == ClaudeTranslator.systemPrompt(for: request))
+        #expect(body["input"] as? String == ClaudeTranslator.userPrompt(for: request))
+        let format = try #require((body["text"] as? [String: Any])?["format"] as? [String: Any])
+        #expect(format["type"] as? String == "json_schema")
+        #expect(format["strict"] as? Bool == true)
+        #expect((format["name"] as? String)?.isEmpty == false)
+        let schema = try #require(format["schema"] as? [String: Any])
+        // Strict mode: every object lists all its properties as required and allows no others.
+        func checkStrict(_ node: Any) {
+            guard let node = node as? [String: Any] else { return }
+            if node["type"] as? String == "object" {
+                let properties = node["properties"] as? [String: Any] ?? [:]
+                #expect((node["required"] as? [String])?.sorted() == properties.keys.sorted())
+                #expect(node["additionalProperties"] as? Bool == false)
+                properties.values.forEach(checkStrict)
+            }
+            if let items = node["items"] { checkStrict(items) }
+        }
+        checkStrict(schema)
+        #expect((schema["required"] as? [String])?.sorted() == ["cast", "translations"])
+        #expect(try JSONSerialization.data(withJSONObject: body).count > 0)
+    }
+
+    static func openAIResponse(_ output: String, status: String = "completed") throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
+            "status": status,
+            "output": [
+                ["type": "reasoning", "summary": []],
+                ["type": "message", "content": [["type": "output_text", "text": output]]],
+            ],
+        ])
+    }
+
+    @Test func lunaAnswerMapsBackToCuesWithFlags() throws {
+        let request = request()
+        let output = """
+            {"translations": [
+              {"id": "L1", "text": "انتِ مشغولة.", "reasons": ["listener"], "confidence": 0.7, "note": "Morty is talking to Beth",
+               "variants": [
+                 {"text": "انتِ مشغولة.", "speaker": "Morty", "speaker_gender": "male", "listeners": ["Beth"], "listener_gender": "female", "listener_count": "one"},
+                 {"text": "انت مشغول.", "speaker": "Morty", "speaker_gender": "male", "listeners": ["Jerry"], "listener_gender": "male", "listener_count": "one"}]},
+              {"id": "L2", "text": "وينترفيل باردة.", "reasons": [], "confidence": 1, "note": "", "variants": []}
+            ],
+            "cast": [{"name": "Morty", "gender": "male", "voices": ["speaker_1"]}]}
+            """
+        let batch = try OpenAITranslator.translations(from: Self.openAIResponse(output), request: request)
+        #expect(batch.translations.map(\.cueID) == request.lines.map(\.cueID))
+        #expect(batch.translations[0].flag?.variants.count == 2)
+        #expect(batch.translations[0].flag?.note == "Morty is talking to Beth")
+        #expect(batch.translations[1].flag == nil)
+        #expect(batch.cast.map(\.name) == ["Morty"])
+    }
+
+    @Test func lunaRefusalsAndCutOffAnswersAreErrorsTheRetriesHandle() throws {
+        let refusal = try JSONSerialization.data(withJSONObject: [
+            "status": "completed", "output": [["type": "message", "content": [["type": "refusal", "refusal": "No."]]]],
+        ])
+        #expect(throws: AIError.declined) { try OpenAITranslator.translations(from: refusal, request: request()) }
+        let cutOff = try JSONSerialization.data(withJSONObject: [
+            "status": "incomplete", "incomplete_details": ["reason": "max_output_tokens"], "output": [],
+        ])
+        #expect(throws: AIError.cutOff) { try OpenAITranslator.translations(from: cutOff, request: request()) }
+        let filtered = try JSONSerialization.data(withJSONObject: [
+            "status": "incomplete", "incomplete_details": ["reason": "content_filter"], "output": [],
+        ])
+        #expect(throws: AIError.declined) { try OpenAITranslator.translations(from: filtered, request: request()) }
+    }
+
+    @Test func eachCloudTranslatorNeedsItsOwnKey() {
+        #expect(AISettings.TranslationProvider.openAILuna.apiKeyProvider == .openAI)
+        #expect(AISettings.TranslationProvider.claudeSonnet.apiKeyProvider == .anthropic)
+        #expect(AISettings.TranslationProvider.appleTranslation.apiKeyProvider == nil)
+        #expect(AISettings.TranslationProvider.openAILuna.isCloud)
+    }
+
     @Test func whisperWordsKeepPunctuationAndMediaTime() throws {
         let json = """
             {"text": "Hello, John. Ready?", "segments": [{"text": " Hello, John. Ready?"}],
