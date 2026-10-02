@@ -71,9 +71,13 @@ final class EpisodeBriefUITests: XCTestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 20), "No brief after transcribing")
         let seen = sheet.descendants(matching: .any)[AccessibilityID.Brief.seen]
         XCTAssertEqual(seen.value as? String, "", "Nothing from the video yet")
-        sheet.buttons[AccessibilityID.command(EditorCommand.describeScenes.id)].click()
+        // From the menu: the dialog's own button is below the fold of its scroll view.
+        sheet.buttons[AccessibilityID.Brief.notNowButton].click()
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sheet)
+        XCTAssertEqual(XCTWaiter().wait(for: [closed], timeout: 10), .completed, "Not Now did not close the brief")
+        chooseAIMenuItem(.describeScenes, in: app)
 
-        // The dialog closes while the frames are picked and described, then opens with what they show.
+        // The frames are picked and described, then the brief opens with what they show.
         let described = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND value CONTAINS %@", "In view: Rick"), object: seen)
         XCTAssertEqual(XCTWaiter().wait(for: [described], timeout: 40), .completed, "The scenes were not described")
         sheet.buttons[AccessibilityID.Brief.notNowButton].click()

@@ -68,9 +68,12 @@ extension EditorState {
                     }) else { return }
                     scenes = loaded
                 }
-                guard let self, !Task.isCancelled, self.aiTaskGeneration == generation, self.status.mediaURL == url,
-                      let brief = self.track.brief
-                else { return }
+                guard let self, !Task.isCancelled, self.aiTaskGeneration == generation else { return }
+                // Other media, or the brief undone, meanwhile: there is nothing to describe any more.
+                guard self.status.mediaURL == url, let brief = self.track.brief else {
+                    self.aiTask = nil
+                    return
+                }
                 self.sceneFrames = scenes
                 let requests = self.sceneRequests(for: scenes, brief: brief)
                 self.aiTask?.stage = 1
