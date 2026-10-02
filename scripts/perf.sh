@@ -58,6 +58,8 @@ for name, key in [("Select next cue", "selectNextCue"), ("Jump to a far cue", "j
     a = r.get(key)
     if a:
         print(f'{name:<22} {a["medianMs"]:8.0f} {a["p90Ms"]:8.0f} {a["worstMs"]:8.0f} {a["longestStallMs"]:14.0f} {a["modelMedianMs"]:13.1f}')
+if r.get("timelineFrameMs") is not None:
+    print(f'\nTimeline, drawn for one frame of playback: {r["timelineFrameMs"]:.2f} ms')
 print("\nSingle calls, in ms")
 for name, ms in sorted(r["calls"].items()):
     print(f'  {name:<32} {ms:8.3f}')

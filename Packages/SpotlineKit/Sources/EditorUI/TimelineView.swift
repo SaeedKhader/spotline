@@ -54,6 +54,11 @@ struct TimelineRepresentable: NSViewRepresentable {
 /// a cue to move it and drag its edges to trim; click empty space to deselect.
 /// Pinch or Command-scroll to zoom. Drawn by hand for speed, so it exposes cues,
 /// their edges, shot changes and the playhead as accessibility elements for automation.
+///
+/// The picture is drawn in tiles (`TimelineTile`), each a stretch of the media drawn once.
+/// As the media plays or is scrubbed the tiles slide under the fixed playhead, and only a
+/// tile coming into view is drawn; they are all drawn again when what they show changes
+/// (the cues, the selection, the waveform, the zoom), not for every frame of video.
 final class TimelineView: NSView {
     private let editor: EditorState
     var content = TimelineContent() {
@@ -69,6 +74,18 @@ final class TimelineView: NSView {
     private var scrub: Scrub?
     private var trackingArea: NSTrackingArea?
     private var releaseLocalCenter: DispatchWorkItem?
+
+    /// Holds the tiles, clipped to the view.
+    private let tileContainer = CALayer()
+    /// The tiles on screen (and one beyond each end), by their place along the media: tile `n`
+    /// starts `n * tileWidth` points from the media's start at the current zoom.
+    private var tiles: [Int: TimelineTile] = [:]
+    /// The playhead, fixed in the middle over the tiles.
+    private let playheadLayer = TimelineTile()
+    static let tileWidth: CGFloat = 512
+    static let playheadWidth: CGFloat = 14
+    /// While a tile is drawn: the seconds at its left edge and its width, in place of the view's.
+    private var tileSpace: (origin: Double, width: CGFloat)?
 
     private struct ActiveDrag {
         let cueID: Cue.ID
@@ -93,6 +110,14 @@ final class TimelineView: NSView {
     init(editor: EditorState) {
         self.editor = editor
         super.init(frame: .zero)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        tileContainer.masksToBounds = true
+        playheadLayer.timeline = self
+        playheadLayer.isPlayhead = true
+        playheadLayer.needsDisplayOnBoundsChange = true
+        layer?.addSublayer(tileContainer)
+        layer?.addSublayer(playheadLayer)
         setAccessibilityIdentifier(AccessibilityID.Timeline.root)
     }
 
@@ -100,6 +125,7 @@ final class TimelineView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override var isFlipped: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
     override var acceptsFirstResponder: Bool { false }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 110) }
 
@@ -112,8 +138,11 @@ final class TimelineView: NSView {
         localCenter ?? (content.hasMedia ? content.playhead.seconds : freeCenter)
     }
 
-    /// Seconds at the left edge. View geometry only; edits use frames.
-    private var originSeconds: Double { centerSeconds - visibleSeconds / 2 }
+    /// Seconds at the left edge (of the tile being drawn, else of the view). View geometry only; edits use frames.
+    private var originSeconds: Double { tileSpace?.origin ?? centerSeconds - visibleSeconds / 2 }
+
+    /// The width of what is being laid out: the tile being drawn, else the view.
+    private var spanWidth: CGFloat { tileSpace?.width ?? bounds.width }
 
     private func x(for time: MediaTime) -> CGFloat {
         x(forSeconds: time.seconds)
@@ -132,7 +161,7 @@ final class TimelineView: NSView {
     }
 
     private var laneRect: NSRect {
-        NSRect(x: 0, y: Self.rulerHeight, width: bounds.width, height: max(bounds.height - Self.rulerHeight, 0))
+        NSRect(x: 0, y: Self.rulerHeight, width: spanWidth, height: max(bounds.height - Self.rulerHeight, 0))
     }
 
     /// The band along the bottom the waveform grows up from.
@@ -193,6 +222,9 @@ final class TimelineView: NSView {
 
     private var visibleSeconds: Double { Double(bounds.width) / scale }
 
+    /// The seconds the tile being drawn (else the view) spans.
+    private var spanSeconds: Double { Double(spanWidth) / scale }
+
     /// The end of what can be scrubbed to: the media, or the last cue plus a margin.
     private var contentEndSeconds: Double {
         if let duration = content.duration, content.hasMedia { return duration.seconds }
@@ -233,11 +265,14 @@ final class TimelineView: NSView {
             waveformDescription = description + ", speech highlighted"
         }
         if toolTip != waveformDescription { toolTip = waveformDescription }
-        needsDisplay = true
-        // While playing, only the playhead moves every frame. Announcing a new
-        // layout that often floods accessibility clients and stalls menus.
+        // While playing, only the playhead moves every frame: the tiles slide, and none is drawn
+        // again. Announcing a new layout that often floods accessibility clients and stalls menus.
         var playheadOnly = old
         playheadOnly.playhead = content.playhead
+        if playheadOnly != content {
+            if content.scale != old.scale { removeTiles() } else { redrawTiles() }
+        }
+        layoutTiles()
         invalidateAccessibility(announce: playheadOnly != content)
         reportViewport()
     }
@@ -254,22 +289,119 @@ final class TimelineView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        layoutTiles()
         invalidateAccessibility()
         reportViewport()
     }
 
+    // MARK: - Tiles
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+        redrawTiles()
+        playheadLayer.setNeedsDisplay()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        removeTiles()
+        layoutTiles()
+    }
+
+    /// What the tiles show changed: they are drawn again (those on screen, at the next display).
+    private func redrawTiles() {
+        for tile in tiles.values { tile.setNeedsDisplay() }
+    }
+
+    /// The zoom changed, so each tile is another stretch of the media: they are made anew.
+    private func removeTiles() {
+        for tile in tiles.values { tile.removeFromSuperlayer() }
+        tiles = [:]
+    }
+
+    /// Puts the tiles where the time in the middle says, adding those coming into view and
+    /// dropping those well out of it. Cheap: nothing is drawn unless a tile is new.
+    private func layoutTiles() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let backing = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        // On whole pixels, or text would blur as it slides.
+        let origin = ((centerSeconds - visibleSeconds / 2) * scale * backing).rounded() / backing
+        let first = Int((origin / Self.tileWidth).rounded(.down))
+        let last = Int(((origin + bounds.width) / Self.tileWidth).rounded(.down))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        tileContainer.frame = bounds
+        for index in first...last {
+            let tile = tiles[index] ?? {
+                let tile = TimelineTile()
+                tile.index = index
+                tile.timeline = self
+                tile.contentsScale = backing
+                tile.needsDisplayOnBoundsChange = true
+                tile.setNeedsDisplay()
+                tileContainer.addSublayer(tile)
+                tiles[index] = tile
+                return tile
+            }()
+            tile.frame = CGRect(x: CGFloat(index) * Self.tileWidth - origin, y: 0, width: Self.tileWidth, height: bounds.height)
+        }
+        for (index, tile) in tiles where index < first - 1 || index > last + 1 {
+            tile.removeFromSuperlayer()
+            tiles[index] = nil
+        }
+        playheadLayer.contentsScale = backing
+        playheadLayer.frame = CGRect(
+            x: (bounds.width / 2).rounded() - Self.playheadWidth / 2, y: 0, width: Self.playheadWidth, height: bounds.height
+        )
+        CATransaction.commit()
+    }
+
+    /// Draws a tile's stretch of the media (or the playhead) into its layer.
+    fileprivate func draw(_ tile: TimelineTile, in context: CGContext) {
+        // Top-left origin, as the view's own drawing has.
+        if context.ctm.d > 0 {
+            context.translateBy(x: 0, y: tile.bounds.height)
+            context.scaleBy(x: 1, y: -1)
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            if tile.isPlayhead {
+                drawPlayhead(width: tile.bounds.width)
+            } else {
+                tileSpace = (Double(CGFloat(tile.index) * Self.tileWidth) / scale, Self.tileWidth)
+                drawMedia()
+                tileSpace = nil
+            }
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    // MARK: - Measuring (PerformanceRun)
+
+    /// Draws what needs drawing now, on screen or not.
+    func drawNow() {
+        for tile in tiles.values { tile.displayIfNeeded() }
+        playheadLayer.displayIfNeeded()
+    }
+
     // MARK: - Drawing
 
-    override func draw(_ dirtyRect: NSRect) {
+    /// Everything that moves with the media, for the stretch `tileSpace` says.
+    private func drawMedia() {
         NSColor.controlBackgroundColor.setFill()
-        bounds.fill()
+        NSRect(x: 0, y: 0, width: spanWidth, height: bounds.height).fill()
         drawOutsideMedia()
         drawWaveform()
         drawPendingAnalysis()
         drawShotChanges()
         drawCues()
         drawRuler()
-        drawPlayhead()
     }
 
     /// Before the start and after the end: hatched, so the playhead can stay in the middle at both ends.
@@ -277,7 +409,7 @@ final class TimelineView: NSView {
         let lane = laneRect
         let startX = x(forSeconds: 0)
         let endX = x(forSeconds: contentEndSeconds)
-        for (left, right) in [(CGFloat(0), min(startX, bounds.width)), (max(endX, 0), bounds.width)] where right > left {
+        for (left, right) in [(CGFloat(0), min(startX, spanWidth)), (max(endX, 0), spanWidth)] where right > left {
             let rect = NSRect(x: left, y: lane.minY, width: right - left, height: lane.height)
             hatch(rect, stroke: NSColor.secondaryLabelColor.withAlphaComponent(0.08), fill: NSColor.windowBackgroundColor.withAlphaComponent(0.6))
         }
@@ -289,7 +421,9 @@ final class TimelineView: NSView {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: rect).addClip()
         let stripes = NSBezierPath()
-        var stripeX = rect.minX - rect.height
+        // Counted from the media's start, so the stripes of neighbouring tiles meet.
+        let offset = (originSeconds * scale + Double(rect.minX - rect.height)).truncatingRemainder(dividingBy: 10)
+        var stripeX = rect.minX - rect.height - CGFloat(offset < 0 ? offset + 10 : offset)
         while stripeX < rect.maxX {
             stripes.move(to: NSPoint(x: stripeX, y: rect.maxY))
             stripes.line(to: NSPoint(x: stripeX + rect.height, y: rect.minY))
@@ -302,11 +436,11 @@ final class TimelineView: NSView {
     }
 
     private func drawRuler() {
-        let ruler = NSRect(x: 0, y: 0, width: bounds.width, height: Self.rulerHeight)
+        let ruler = NSRect(x: 0, y: 0, width: spanWidth, height: Self.rulerHeight)
         NSColor.windowBackgroundColor.setFill()
         ruler.fill()
         NSColor.separatorColor.setFill()
-        NSRect(x: 0, y: ruler.maxY - 1, width: bounds.width, height: 1).fill()
+        NSRect(x: 0, y: ruler.maxY - 1, width: spanWidth, height: 1).fill()
 
         let rate = content.frameRate
         let frameSeconds = 1 / rate.framesPerSecond
@@ -317,7 +451,7 @@ final class TimelineView: NSView {
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
         var tick = (originSeconds / step).rounded(.down) * step
-        while tick <= originSeconds + visibleSeconds {
+        while tick <= originSeconds + spanSeconds {
             let tickX = x(forSeconds: tick)
             NSColor.tertiaryLabelColor.setFill()
             NSRect(x: tickX, y: ruler.maxY - 7, width: 1, height: 6).fill()
@@ -333,7 +467,7 @@ final class TimelineView: NSView {
         NSColor.secondaryLabelColor.setFill()
         for frame in content.shotChanges {
             let lineX = x(forFrame: frame)
-            guard lineX >= -1, lineX <= bounds.width + 1 else { continue }
+            guard lineX >= -1, lineX <= spanWidth + 1 else { continue }
             NSRect(x: lineX - 0.5, y: ruler.maxY - 6, width: 1.5, height: 5).fill()
         }
     }
@@ -354,7 +488,7 @@ final class TimelineView: NSView {
         let secondsPerPoint = 1 / scale
         let origin = originSeconds
         var column = max(x(forSeconds: 0).rounded(.down), 0)
-        let lastColumn = min(x(forSeconds: contentEndSeconds), bounds.width)
+        let lastColumn = min(x(forSeconds: contentEndSeconds), spanWidth)
         // The columns of each colour are filled together: setting a colour for every column costs more than drawing it.
         var plainColumns: [NSRect] = [], spokenColumns: [NSRect] = [], dimmedColumns: [NSRect] = []
         while column < lastColumn {
@@ -384,7 +518,7 @@ final class TimelineView: NSView {
         guard let analyzedUntil = content.analyzedUntil else { return }
         let lane = laneRect
         let left = max(x(for: analyzedUntil), 0)
-        let right = min(x(forSeconds: contentEndSeconds), bounds.width)
+        let right = min(x(forSeconds: contentEndSeconds), spanWidth)
         guard left < right else { return }
         let pending = NSRect(x: left, y: lane.minY, width: right - left, height: lane.height)
         hatch(pending, stroke: NSColor.secondaryLabelColor.withAlphaComponent(0.12), fill: NSColor.secondaryLabelColor.withAlphaComponent(0.06))
@@ -397,7 +531,7 @@ final class TimelineView: NSView {
         let lane = laneRect
         for frame in content.shotChanges {
             let lineX = x(forFrame: frame)
-            guard lineX >= -1, lineX <= bounds.width + 1 else { continue }
+            guard lineX >= -1, lineX <= spanWidth + 1 else { continue }
             NSRect(x: lineX - 0.5, y: lane.minY, width: 1, height: lane.height).fill()
         }
     }
@@ -406,12 +540,12 @@ final class TimelineView: NSView {
         // Only the cues in view: the rest are passed over by their times, before any geometry.
         // (A block is two points wide at least, so a cue just out of view by its times may still show.)
         let margin = 4 / scale
-        let first = originSeconds - margin, last = originSeconds + visibleSeconds + margin
+        let first = originSeconds - margin, last = originSeconds + spanSeconds + margin
         for cue in content.cues {
             let (start, end) = timing(of: cue)
             guard end.seconds >= first, start.seconds <= last else { continue }
             let rect = blockRect(for: cue, start: start, end: end)
-            guard rect.maxX >= 0, rect.minX <= bounds.width else { continue }
+            guard rect.maxX >= 0, rect.minX <= spanWidth else { continue }
             let isSelected = cue.id == content.selectedCueID
             let isAI = cue.isAIGenerated == true
             // Grey blocks; the selection in the accent colour; text an AI tool wrote outlined in the AI tint until edited.
@@ -467,8 +601,9 @@ final class TimelineView: NSView {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private func drawPlayhead() {
-        let playheadX = (bounds.width / 2).rounded()
+    /// The playhead in the middle of its own layer, `width` wide.
+    private func drawPlayhead(width: CGFloat) {
+        let playheadX = width / 2
         NSColor.labelColor.setFill()
         NSRect(x: playheadX - 0.75, y: 0, width: 1.5, height: bounds.height).fill()
         let marker = NSBezierPath()
@@ -541,14 +676,15 @@ final class TimelineView: NSView {
             tolerance: tolerance
         )
         drag = active
-        needsDisplay = true
+        redrawTiles()
     }
 
     override func mouseUp(with event: NSEvent) {
         defer {
             drag = nil
             scrub = nil
-            needsDisplay = true
+            redrawTiles()
+            layoutTiles()
             mouseMoved(with: event)
         }
         if let active = scrub {
@@ -584,7 +720,7 @@ final class TimelineView: NSView {
         } else {
             freeCenter = target
         }
-        needsDisplay = true
+        layoutTiles()
         invalidateAccessibility()
         reportViewport()
     }
@@ -595,7 +731,7 @@ final class TimelineView: NSView {
         let work = DispatchWorkItem { [weak self] in
             guard let self, scrub == nil else { return }
             localCenter = nil
-            needsDisplay = true
+            layoutTiles()
         }
         releaseLocalCenter = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
@@ -734,6 +870,24 @@ final class TimelineView: NSView {
         editor.setTiming(start: timing.start, end: timing.end, forCue: id, actionName: model.actionName)
     }
 
+}
+
+/// A stretch of the timeline's picture (or its playhead), drawn by the timeline view once and
+/// then only moved. Core Animation draws layers on the main thread, where the view lives.
+private final class TimelineTile: CALayer, @unchecked Sendable {
+    /// Which stretch: tile `n` starts `n * TimelineView.tileWidth` points from the media's start.
+    var index = 0
+    var isPlayhead = false
+    weak var timeline: TimelineView?
+
+    override func draw(in context: CGContext) {
+        nonisolated(unsafe) let context = context
+        nonisolated(unsafe) let tile = self
+        MainActor.assumeIsolated { tile.timeline?.draw(tile, in: context) }
+    }
+
+    /// Tiles appear and move at once, without Core Animation's fades and slides.
+    override func action(forKey event: String) -> (any CAAction)? { nil }
 }
 
 /// One accessible part of the timeline, positioned in the timeline view's coordinates.
