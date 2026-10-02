@@ -20,7 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = agentAccess
-        if workspace.openLaunchProject() { return }
+        if workspace.openLaunchProject() {
+            if let url = workspace.launchOptions.performanceReportURL {
+                PerformanceRun.start(workspace: workspace, reportURL: url, quitsWhenDone: workspace.launchOptions.quitsAfterPerformanceRun)
+            }
+            return
+        }
         // Without the "open application" event, nothing would open a window.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [workspace] in
             MainActor.assumeIsolated {

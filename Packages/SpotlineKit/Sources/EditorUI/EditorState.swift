@@ -410,7 +410,9 @@ public final class EditorState {
         let testMode = launchOptions.isUITestMode
         let player: MPVPlayer
         do {
-            player = try MPVPlayer(configuration: .init(playsAudio: !testMode, usesHardwareDecoding: !testMode))
+            // A performance run plays without sound.
+            let playsAudio = !testMode && launchOptions.performanceReportURL == nil
+            player = try MPVPlayer(configuration: .init(playsAudio: playsAudio, usesHardwareDecoding: !testMode))
         } catch {
             fatalError("libmpv failed to start: \(error)")
         }
