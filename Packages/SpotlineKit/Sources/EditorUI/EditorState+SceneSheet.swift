@@ -90,7 +90,8 @@ extension EditorState {
                 self.aiTask = nil
                 let seen = notes.sorted { $0.start < $1.start }.map(\.line).joined(separator: "\n")
                 self.edit("Describe Scenes") { track in track.brief?.seen = seen }
-                self.isBriefSheetShown = true
+                // In the plan, the brief opens when it is next to be confirmed.
+                if self.aiFlow != nil { self.aiFlowFinished(.scenes) } else { self.isBriefSheetShown = true }
                 self.onAITaskEnd?(AITaskEnd(
                     title: "Scenes described", message: notes.count == 1 ? "1 scene, in the episode brief" : "\(notes.count) scenes, in the episode brief",
                     succeeded: true
@@ -103,7 +104,11 @@ extension EditorState {
                     self.onAITaskEnd?(AITaskEnd(title: "Scene descriptions stopped", message: error.localizedDescription, succeeded: false))
                 }
                 // The brief is there without them.
-                if automatically, self.track.brief != nil { self.isBriefSheetShown = true }
+                if self.aiFlow != nil, !(error is CancellationError), !Task.isCancelled {
+                    self.aiFlowFinished(.scenes)
+                } else if automatically, self.track.brief != nil {
+                    self.isBriefSheetShown = true
+                }
             }
         }
     }

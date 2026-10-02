@@ -4,8 +4,9 @@ import SpotlineAccessibility
 import SwiftUI
 
 /// In the middle of the title bar while an AI tool runs: what it is doing and
-/// how far it has got, with a button to stop it. Click it for every step. For a
-/// few seconds after the tool finishes, what it did ("640 lines translated · 12 flagged").
+/// how far it has got, with a button to stop it. Click it for every step. While
+/// Translate with AI waits for the user, what it waits for and the button to go on.
+/// For a few seconds after a tool finishes, what it did ("640 lines translated · 12 flagged").
 struct AIActivityPill: View {
     static let size = CGSize(width: 460, height: 34)
     let editor: EditorState
@@ -27,6 +28,19 @@ struct AIActivityPill: View {
                         AITaskSteps(editor: editor, task: task)
                     }
                     CommandButton(command: .cancelAITask, systemImage: "stop.circle", editor: editor)
+                }
+            } else if let waiting = editor.aiFlowStopText {
+                HStack(spacing: 8) {
+                    Label(waiting, systemImage: "pause.circle")
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .accessibilityLabel("Translate with AI is waiting")
+                        .accessibilityValue(waiting)
+                        .accessibilityIdentifier(AccessibilityID.AIPlan.waiting)
+                    Button(editor.aiFlowContinueTitle) { editor.perform(.continueAIFlow) }
+                        .controlSize(.small)
+                        .accessibilityIdentifier(AccessibilityID.command(EditorCommand.continueAIFlow.id))
+                    CommandButton(command: .cancelAITask, systemImage: "xmark.circle", editor: editor)
                 }
             } else if let summary = editor.aiSummary {
                 Label(summary.fullText, systemImage: "checkmark.circle")
@@ -57,6 +71,20 @@ private struct AITaskSteps: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // In a run of Translate with AI: where this step is in the plan.
+            if let flow = editor.aiFlow {
+                ForEach(flow.steps.filter { $0 != .join }) { step in
+                    let isDone = flow.finished.contains(step), isCurrent = flow.current == step
+                    HStack(spacing: 8) {
+                        Image(systemName: isDone ? "checkmark.circle.fill" : isCurrent ? "circle.dotted" : "circle")
+                            .foregroundStyle(isDone || isCurrent ? Color.aiTint : Color.secondary)
+                        Text(AIPlanSheet.shortTitle(step))
+                            .fontWeight(isCurrent ? .semibold : .regular)
+                            .foregroundStyle(isDone || isCurrent ? .primary : .secondary)
+                    }
+                }
+                Divider()
+            }
             Text(task.title).font(.headline)
             ForEach(Array(task.stages.enumerated()), id: \.offset) { index, stage in
                 HStack(spacing: 8) {

@@ -68,8 +68,9 @@ extension EditorState {
         if let sync = alignment.sync {
             subtitleSync = sync
             briefAwaitsSync = thenBrief
+            if aiFlow != nil { aiFlow?.stop = .syncQuestion }
         } else if thenBrief {
-            buildEpisodeBrief(automatically: true)
+            afterListening()
         }
         let total = alignment.cues.count
         return AITaskSummary(
@@ -165,6 +166,12 @@ extension EditorState {
     private func subtitleSyncDecided() {
         guard briefAwaitsSync else { return }
         briefAwaitsSync = false
-        buildEpisodeBrief(automatically: true)
+        afterListening()
+    }
+
+    /// The audio has been listened to and the timing settled: the episode brief is next,
+    /// by itself or as the next step of Translate with AI.
+    func afterListening() {
+        if aiFlow != nil { aiFlowFinished(.listen) } else { buildEpisodeBrief(automatically: true) }
     }
 }

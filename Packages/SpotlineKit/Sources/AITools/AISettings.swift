@@ -90,6 +90,34 @@ public struct AISettings: Sendable, Equatable {
         }
     }
 
+    /// The OpenAI model a helper step uses: the episode brief, the scene descriptions, the script review.
+    public enum OpenAIModel: String, Sendable, CaseIterable, Identifiable {
+        case luna = "gpt-6-luna"
+        case sol = "gpt-6.1-sol"
+
+        public var id: String { rawValue }
+        public var title: String {
+            switch self {
+            case .luna: "GPT-6 Luna (cheapest)"
+            case .sol: "GPT-6.1 Sol (20× the price)"
+            }
+        }
+
+        /// List price next to Luna's, for the plan's rough costs.
+        public var priceFactor: Double { self == .luna ? 1 : 20 }
+    }
+
+    /// The model and effort of one helper step, chosen in the Translate with AI plan.
+    public struct Step: Sendable, Equatable {
+        public var model: OpenAIModel
+        public var effort: ReasoningEffort
+
+        public init(model: OpenAIModel = .luna, effort: ReasoningEffort = .medium) {
+            self.model = model
+            self.effort = effort
+        }
+    }
+
     public var transcription: TranscriptionProvider = .appleSpeech
     public var translation: TranslationProvider = .appleTranslation
     /// For Claude and GPT-6 Luna. Medium by default: high made Luna slow for little gain.
@@ -99,6 +127,14 @@ public struct AISettings: Sendable, Equatable {
     /// Off by default, and only with `allowsCloud`: a few frames of each scene go to GPT-6 Luna, which
     /// writes who is in view into the episode brief (`SceneDescriber`). Frames give a title away far more than text does.
     public var sendsVideoFrames = false
+    /// Whether the episode brief is built by itself after listening to the audio, and the script
+    /// reviewed once it is confirmed: the plan's ticks, remembered.
+    public var buildsBrief = true
+    public var reviewsScript = true
+    /// The helper steps' models and efforts. Scenes think longest: a small model reads pictures better with time.
+    public var brief = Step()
+    public var scenes = Step(effort: .high)
+    public var scriptReview = Step()
     /// The spoken language for transcription, nil to use the audio track's language (else the Mac's).
     public var transcriptionLanguage: String?
     /// After translating, joins short lines and sentences split over two cues (`CueJoiner`).
@@ -123,6 +159,20 @@ public struct AISettings: Sendable, Equatable {
     static let effortKey = "AIReasoningEffort"
     static let allowsCloudKey = "AIAllowsCloud"
     static let sendsVideoFramesKey = "AISendsVideoFrames"
+    static let buildsBriefKey = "AIBuildsBrief"
+    static let reviewsScriptKey = "AIReviewsScript"
+    static let briefStepKey = "AIBriefStep"
+    static let scenesStepKey = "AIScenesStep"
+    static let scriptReviewStepKey = "AIScriptReviewStep"
+
+    /// A step as "gpt-6-luna/medium" in the defaults.
+    static func step(_ stored: String?, default fallback: Step) -> Step {
+        let parts = stored?.split(separator: "/").map(String.init) ?? []
+        guard parts.count == 2, let model = OpenAIModel(rawValue: parts[0]), let effort = ReasoningEffort(rawValue: parts[1]) else { return fallback }
+        return Step(model: model, effort: effort)
+    }
+
+    static func stored(_ step: Step) -> String { "\(step.model.rawValue)/\(step.effort.rawValue)" }
     static let languageKey = "AITranscriptionLanguage"
     static let joinsLinesKey = "AIJoinsLinesAfterTranslating"
     static let registerKey = "AITranslationRegister"
@@ -140,6 +190,11 @@ public struct AISettings: Sendable, Equatable {
         settings.reasoningEffort = defaults.string(forKey: effortKey).flatMap(ReasoningEffort.init) ?? .medium
         settings.allowsCloud = defaults.bool(forKey: allowsCloudKey)
         settings.sendsVideoFrames = defaults.bool(forKey: sendsVideoFramesKey)
+        settings.buildsBrief = defaults.object(forKey: buildsBriefKey) as? Bool ?? true
+        settings.reviewsScript = defaults.object(forKey: reviewsScriptKey) as? Bool ?? true
+        settings.brief = step(defaults.string(forKey: briefStepKey), default: settings.brief)
+        settings.scenes = step(defaults.string(forKey: scenesStepKey), default: settings.scenes)
+        settings.scriptReview = step(defaults.string(forKey: scriptReviewStepKey), default: settings.scriptReview)
         settings.transcriptionLanguage = defaults.string(forKey: languageKey)
         settings.joinsLinesAfterTranslating = defaults.object(forKey: joinsLinesKey) as? Bool ?? true
         settings.translationStyle.register = defaults.string(forKey: registerKey).flatMap(TranslationStyle.Register.init) ?? .faithful
@@ -158,6 +213,11 @@ public struct AISettings: Sendable, Equatable {
         defaults.set(reasoningEffort.rawValue, forKey: Self.effortKey)
         defaults.set(allowsCloud, forKey: Self.allowsCloudKey)
         defaults.set(sendsVideoFrames, forKey: Self.sendsVideoFramesKey)
+        defaults.set(buildsBrief, forKey: Self.buildsBriefKey)
+        defaults.set(reviewsScript, forKey: Self.reviewsScriptKey)
+        defaults.set(Self.stored(brief), forKey: Self.briefStepKey)
+        defaults.set(Self.stored(scenes), forKey: Self.scenesStepKey)
+        defaults.set(Self.stored(scriptReview), forKey: Self.scriptReviewStepKey)
         defaults.set(transcriptionLanguage, forKey: Self.languageKey)
         defaults.set(joinsLinesAfterTranslating, forKey: Self.joinsLinesKey)
         defaults.set(translationStyle.register.rawValue, forKey: Self.registerKey)

@@ -71,19 +71,18 @@ public struct AIProviderFactory {
                 // GPT-6 Luna builds it, whatever translates: it costs about 4 cents an episode.
                 guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                 guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
-                return OpenAIBriefBuilder(apiKey: key, effort: settings.reasoningEffort)
+                return OpenAIBriefBuilder(apiKey: key, model: settings.brief.model.rawValue, effort: settings.brief.effort)
             },
             scriptReviewer: { settings in
                 guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                 guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
-                return OpenAIScriptReviewer(apiKey: key, effort: settings.reasoningEffort)
+                return OpenAIScriptReviewer(apiKey: key, model: settings.scriptReview.model.rawValue, effort: settings.scriptReview.effort)
             },
             sceneDescriber: { settings in
                 guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                 guard settings.sendsVideoFrames else { throw AIError.videoFramesNotAllowed }
                 guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
-                // High effort whatever the translation uses: a small model reads pictures better with time, for cents.
-                return OpenAISceneDescriber(apiKey: key, effort: .high)
+                return OpenAISceneDescriber(apiKey: key, model: settings.scenes.model.rawValue, effort: settings.scenes.effort)
             }
         )
     }
@@ -132,7 +131,7 @@ extension EditorState {
         case EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id:
             return idle && !track.cues.isEmpty
         case EditorCommand.cancelAITask.id:
-            return aiTask != nil
+            return aiTask != nil || aiFlow != nil
         case EditorCommand.acceptChange.id, EditorCommand.rejectChange.id:
             return selectedCueID.flatMap { pendingReview?.change(forCue: $0) } != nil
         case EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id:
@@ -450,6 +449,7 @@ extension EditorState {
             } catch {
                 guard let self else { return }
                 self.aiTask = nil
+                self.endAIFlow()
                 // What was written before the failure stays (and undoes like any edit).
                 if !(error is CancellationError), !Task.isCancelled {
                     self.reportError("\(title) stopped.", error)
@@ -463,6 +463,7 @@ extension EditorState {
         aiTaskHandle?.cancel()
         aiTaskHandle = nil
         aiTask = nil
+        endAIFlow()
     }
 
     /// Shows what a tool did in the AI bar until `aiSummaryDuration` has passed or another tool starts.
@@ -495,7 +496,7 @@ extension EditorState {
         return base.flatMap { $0 == "und" ? nil : $0 }
     }
 
-    private func transcribe() {
+    func transcribe() {
         guard let url = status.mediaURL else { return }
         let transcriber: any Transcriber
         do { transcriber = try aiProviders.transcriber(aiSettings) } catch {
@@ -533,7 +534,7 @@ extension EditorState {
         }
         // Then the episode brief, and the review waits until it is confirmed.
         startAITask(
-            status, afterward: { [weak self] in self?.buildEpisodeBrief(automatically: true) },
+            status, afterward: { [weak self] in self?.afterListening() },
             whenNothingWritten: { [weak self] in
                 listened.withLock { $0 }.flatMap { self?.addTranscript($0, thenBrief: true) }
             }, summary: Self.transcriptionSummary
@@ -655,7 +656,7 @@ extension EditorState {
         }
     }
 
-    private func translateUntranslatedCues() {
+    func translateUntranslatedCues() {
         let translator: any CueTranslator
         do { translator = try aiProviders.translator(aiSettings) } catch {
             reportError("Translation could not start.", error)
@@ -722,6 +723,7 @@ extension EditorState {
                 if !keepsSounds { self?.removeCuesOfSoundsOnly() }
                 self?.removeLeftOut(leftOut.withLock { $0 })
                 if joinsLines { self?.joinTranslatedLines() }
+                self?.aiFlowFinished(.translate)
             }, summary: Self.translationSummary
         ) { [weak self] report, propose in
             var grouped = ungrouped

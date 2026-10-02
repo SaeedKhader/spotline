@@ -287,6 +287,10 @@ public final class EditorState {
     public internal(set) var isBriefSheetShown = false
     /// True while the AI script review runs after the brief is confirmed; the review waits for it.
     public internal(set) var isReviewingScript = false
+    /// The run of Translate with AI in progress or waiting for the user, nil when none (`EditorState+AIFlow`).
+    public internal(set) var aiFlow: AIFlowRun?
+    /// Whether the Translate with AI plan is shown.
+    public internal(set) var isAIPlanShown = false
     /// The frames picked for each scene (AI › Scene Frames…), nil until picked. Kept while the media is open.
     public internal(set) var sceneFrames: [SceneFramePicker.Scene]?
     /// How far reading the frames has got, nil when not reading.
@@ -538,6 +542,8 @@ public final class EditorState {
         case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id,
              EditorCommand.describeScenes.id:
             canPerformSceneFrames(command)
+        case EditorCommand.planAIFlow.id, EditorCommand.continueAIFlow.id:
+            canPerformAIFlow(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
         // anything, so their menu items do not redraw on every frame.
@@ -694,6 +700,8 @@ public final class EditorState {
         case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id,
              EditorCommand.describeScenes.id:
             return performSceneFrames(command)
+        case EditorCommand.planAIFlow.id, EditorCommand.continueAIFlow.id:
+            return performAIFlow(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
         case EditorCommand.shuttleBackward.id:
@@ -810,6 +818,8 @@ public final class EditorState {
         isBriefSheetShown = false
         isReviewingScript = false
         resetSceneFrames()
+        aiFlow = nil
+        isAIPlanShown = false
         scrollTimeline(toCenter: 0)
     }
 

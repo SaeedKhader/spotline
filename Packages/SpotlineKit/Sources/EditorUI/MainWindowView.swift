@@ -61,6 +61,12 @@ public struct MainWindowView: View {
             EpisodeBriefSheet(editor: editor)
         }
         .sheet(isPresented: Binding(
+            get: { editor.isAIPlanShown },
+            set: { if !$0 { editor.dismissAIPlan() } }
+        )) {
+            AIPlanSheet(editor: editor)
+        }
+        .sheet(isPresented: Binding(
             get: { editor.isSceneFramesSheetShown },
             set: { if !$0 { editor.dismissSceneFrames() } }
         )) {
