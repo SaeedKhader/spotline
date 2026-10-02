@@ -134,9 +134,9 @@ public struct TranslationFlag: Hashable, Sendable, Codable {
         self.isResolved = isResolved
     }
 
-    /// True when the translator was sure of its recommendation (it reads "100% sure"):
-    /// nothing for the user to decide, so the line is not put up for review.
-    public var isSure: Bool { confidence >= 0.995 }
+    /// True when the translator was sure enough of its recommendation that the line is not
+    /// put up for review: it would read 95% sure or more (Saeed, 2026-10-02: only 94% and down show).
+    public var isSure: Bool { confidence >= 0.945 }
 
     /// The flag settled when the translator was sure: its variants stay, to swap in from the cue's row.
     public var settledWhenSure: TranslationFlag {

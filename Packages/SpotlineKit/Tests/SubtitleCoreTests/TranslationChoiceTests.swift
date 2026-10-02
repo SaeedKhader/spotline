@@ -22,8 +22,9 @@ struct TranslationChoiceTests {
         let sure = TranslationFlag(reasons: [.listener], variants: [toBeth, toBethAsMan], confidence: 1, note: "Jerry is talking to Beth")
         #expect(sure.settledWhenSure.isResolved)
         #expect(sure.settledWhenSure.variants == sure.variants, "The other reading stays, to swap in")
-        // 99% still reads as a doubt.
-        let nearly = TranslationFlag(reasons: [.listener], variants: [toBeth, toBethAsMan], confidence: 0.99, note: "")
+        // 95% and up is sure enough; 94% is still asked.
+        #expect(TranslationFlag(reasons: [.listener], variants: [toBeth, toBethAsMan], confidence: 0.95, note: "").settledWhenSure.isResolved)
+        let nearly = TranslationFlag(reasons: [.listener], variants: [toBeth, toBethAsMan], confidence: 0.94, note: "")
         #expect(!nearly.settledWhenSure.isResolved)
         var track = SubtitleTrack(cues: [
             Cue(start: .zero, end: MediaTime(value: 1, timescale: 1), text: "انتِ", flag: sure),
