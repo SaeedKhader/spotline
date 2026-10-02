@@ -390,6 +390,10 @@ final class TimelineView: NSView {
         playheadLayer.displayIfNeeded()
     }
 
+    /// Where the tiles are in the view, left to right, and how many are waiting to be drawn (tests).
+    var tileFrames: [CGRect] { tiles.values.map(\.frame).sorted { $0.minX < $1.minX } }
+    var tilesToDraw: Int { tiles.values.count { $0.needsDisplay() } }
+
     // MARK: - Drawing
 
     /// Everything that moves with the media, for the stretch `tileSpace` says.

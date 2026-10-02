@@ -263,6 +263,9 @@ public enum PerformanceRun {
         guard let layer = view.layer, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds),
               let context = NSGraphicsContext(bitmapImageRep: rep)?.cgContext
         else { return nil }
+        // Layers render bottom up; the picture is wanted top down.
+        context.translateBy(x: 0, y: view.bounds.height)
+        context.scaleBy(x: 1, y: -1)
         layer.render(in: context)
         return rep.representation(using: .png, properties: [:])
     }
@@ -362,7 +365,6 @@ public enum PerformanceRun {
             }
             report.timelineFrameMs = (MainThreadMonitor.now - start) * 1000 / Double(frames)
             if let png = picture(of: timeline) { try? png.write(to: snapshotURL) }
-            if let content = window?.contentView, let png = picture(of: content) { try? png.write(to: snapshotURL.deletingPathExtension().appendingPathExtension("window.png")) }
             timeline.content = shown
         }
 
