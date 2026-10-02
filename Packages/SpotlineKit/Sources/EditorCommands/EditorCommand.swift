@@ -320,6 +320,24 @@ extension EditorCommand {
     public static let rebuildEpisodeBrief = EditorCommand(
         id: "ai.rebuildEpisodeBrief", title: "Build Episode Brief Again", category: .ai
     )
+    /// The few frames of each scene that show who is there, picked on this Mac for a vision
+    /// model to describe: opens them, picking them the first time. Nothing is sent anywhere.
+    public static let showSceneFrames = EditorCommand(
+        id: "ai.sceneFrames", title: "Scene Frames…", category: .ai
+    )
+    /// Picks the scene frames again, after the lines changed.
+    public static let pickSceneFramesAgain = EditorCommand(
+        id: "ai.pickSceneFramesAgain", title: "Pick Scene Frames Again", category: .ai
+    )
+    /// Writes the picked frames and a list of them with each scene's lines to a folder.
+    public static let exportSceneFrames = EditorCommand(
+        id: "ai.exportSceneFrames", title: "Export Scene Frames…", category: .ai
+    )
+    /// Sends the picked frames of each scene to GPT-6 Luna, which writes who is in view into the
+    /// episode brief (a few cents an episode). Needs "Send video frames" on in Settings › AI.
+    public static let describeScenes = EditorCommand(
+        id: "ai.describeScenes", title: "Describe Scenes from Video", category: .ai
+    )
     /// Reviews the transcript with the confirmed episode brief, flagging lines that look
     /// wrong with fixes to try. Runs by itself when the brief is first confirmed.
     public static let reviewScriptWithAI = EditorCommand(
@@ -396,7 +414,7 @@ extension EditorCommand {
         toggleMilliseconds, toggleReviewSidebar,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
-        transcribe, syncSubtitlesToAudio, applySubtitleSync, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, reviewScriptWithAI, reviewScriptFindings, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        transcribe, syncSubtitlesToAudio, applySubtitleSync, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, showSceneFrames, pickSceneFramesAgain, exportSceneFrames, describeScenes, reviewScriptWithAI, reviewScriptFindings, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         reviewChanges, acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

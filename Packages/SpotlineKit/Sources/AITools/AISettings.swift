@@ -96,6 +96,9 @@ public struct AISettings: Sendable, Equatable {
     public var reasoningEffort: ReasoningEffort = .medium
     /// Off by default: the user allows sending audio and text to cloud providers.
     public var allowsCloud = false
+    /// Off by default, and only with `allowsCloud`: a few frames of each scene go to GPT-6 Luna, which
+    /// writes who is in view into the episode brief (`SceneDescriber`). Frames give a title away far more than text does.
+    public var sendsVideoFrames = false
     /// The spoken language for transcription, nil to use the audio track's language (else the Mac's).
     public var transcriptionLanguage: String?
     /// After translating, joins short lines and sentences split over two cues (`CueJoiner`).
@@ -119,6 +122,7 @@ public struct AISettings: Sendable, Equatable {
     static let translationKey = "AITranslationProvider"
     static let effortKey = "AIReasoningEffort"
     static let allowsCloudKey = "AIAllowsCloud"
+    static let sendsVideoFramesKey = "AISendsVideoFrames"
     static let languageKey = "AITranscriptionLanguage"
     static let joinsLinesKey = "AIJoinsLinesAfterTranslating"
     static let registerKey = "AITranslationRegister"
@@ -135,6 +139,7 @@ public struct AISettings: Sendable, Equatable {
         settings.translation = defaults.string(forKey: translationKey).flatMap(TranslationProvider.init) ?? .appleTranslation
         settings.reasoningEffort = defaults.string(forKey: effortKey).flatMap(ReasoningEffort.init) ?? .medium
         settings.allowsCloud = defaults.bool(forKey: allowsCloudKey)
+        settings.sendsVideoFrames = defaults.bool(forKey: sendsVideoFramesKey)
         settings.transcriptionLanguage = defaults.string(forKey: languageKey)
         settings.joinsLinesAfterTranslating = defaults.object(forKey: joinsLinesKey) as? Bool ?? true
         settings.translationStyle.register = defaults.string(forKey: registerKey).flatMap(TranslationStyle.Register.init) ?? .faithful
@@ -152,6 +157,7 @@ public struct AISettings: Sendable, Equatable {
         defaults.set(translation.rawValue, forKey: Self.translationKey)
         defaults.set(reasoningEffort.rawValue, forKey: Self.effortKey)
         defaults.set(allowsCloud, forKey: Self.allowsCloudKey)
+        defaults.set(sendsVideoFrames, forKey: Self.sendsVideoFramesKey)
         defaults.set(transcriptionLanguage, forKey: Self.languageKey)
         defaults.set(joinsLinesAfterTranslating, forKey: Self.joinsLinesKey)
         defaults.set(translationStyle.register.rawValue, forKey: Self.registerKey)

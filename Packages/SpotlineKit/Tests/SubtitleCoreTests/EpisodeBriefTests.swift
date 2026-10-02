@@ -92,4 +92,19 @@ struct EpisodeBriefTests {
         #expect(brief.storyNotes == "Plot: Dunk rides to Ashford.\n\nScenes (time, who talks to whom):\n0:00 Dunk talks to Egg.")
         #expect(EpisodeBrief(plot: " ", targetLanguage: "ar").storyNotes == nil)
     }
+
+    @Test func whatTheVideoShowsJoinsTheNotes() throws {
+        let brief = EpisodeBrief(scenes: "0:00 Dunk talks to Egg.", seen: "0:00 Two people by a tree. In view: Dunk (a tall man); a bald boy.\n", targetLanguage: "ar")
+        #expect(brief.storyNotes == """
+            Scenes (time, who talks to whom):
+            0:00 Dunk talks to Egg.
+
+            What the video shows (time, who is there, from a few frames of each scene):
+            0:00 Two people by a tree. In view: Dunk (a tall man); a bald boy.
+            """)
+        #expect(try JSONDecoder().decode(EpisodeBrief.self, from: JSONEncoder().encode(brief)).seen == brief.seen)
+        // Briefs saved before it have none.
+        let early = Data(#"{"people": [], "terms": [], "plot": "", "scenes": "", "targetLanguage": "ar", "isConfirmed": true}"#.utf8)
+        #expect(try JSONDecoder().decode(EpisodeBrief.self, from: early).seen.isEmpty)
+    }
 }
