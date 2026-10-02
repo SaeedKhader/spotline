@@ -303,6 +303,15 @@ extension EditorCommand {
     public static let rebuildEpisodeBrief = EditorCommand(
         id: "ai.rebuildEpisodeBrief", title: "Build Episode Brief Again", category: .ai
     )
+    /// Reviews the transcript with the confirmed episode brief, flagging lines that look
+    /// wrong with fixes to try. Runs by itself when the brief is first confirmed.
+    public static let reviewScriptWithAI = EditorCommand(
+        id: "ai.reviewScript", title: "Review Script with AI", category: .ai
+    )
+    /// A toggle: the review sidebar lists only the lines the AI script review flagged.
+    public static let reviewScriptFindings = EditorCommand(
+        id: "ai.reviewScriptFindings", title: "Review AI Fixes", category: .ai
+    )
     public static let clearTranscript = EditorCommand(
         id: "ai.clearTranscript", title: "Clear Transcript…", category: .ai
     )
@@ -370,7 +379,7 @@ extension EditorCommand {
         toggleMilliseconds, toggleReviewSidebar,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
-        transcribe, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        transcribe, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, reviewScriptWithAI, reviewScriptFindings, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         reviewChanges, acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

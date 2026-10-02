@@ -42,7 +42,7 @@ struct EpisodeBriefStateTests {
         #expect(brief?.targetLanguage == "ar")
         #expect(editor.isBriefSheetShown)
         // Nothing to review, and the sidebar stays as it was, until the brief is confirmed.
-        #expect(editor.isReviewHeldForBrief)
+        #expect(editor.isReviewHeld)
         #expect(editor.reviewItems(in: .all).isEmpty)
         #expect(!editor.hasAnythingToReview)
         #expect(!editor.isReviewSidebarVisible)
@@ -52,7 +52,7 @@ struct EpisodeBriefStateTests {
         edited.terms.append(EpisodeBrief.Term(term: "  "))
         editor.confirmEpisodeBrief(edited)
         #expect(!editor.isBriefSheetShown)
-        #expect(!editor.isReviewHeldForBrief)
+        #expect(!editor.isReviewHeld)
         #expect(editor.track.brief?.isConfirmed == true)
         #expect(editor.track.brief?.terms.map(\.term) == ["Citadel"])
         #expect(editor.track.cast.map(\.name) == ["Rick Sanchez"])
@@ -63,7 +63,7 @@ struct EpisodeBriefStateTests {
 
         // Confirming undoes as one step, and the review waits again.
         editor.perform(.undo)
-        #expect(editor.isReviewHeldForBrief)
+        #expect(editor.isReviewHeld)
         #expect(editor.track.cast.isEmpty)
     }
 
@@ -73,7 +73,7 @@ struct EpisodeBriefStateTests {
         await tests.finish(editor)
         editor.dismissEpisodeBrief()
         #expect(!editor.isBriefSheetShown)
-        #expect(editor.isReviewHeldForBrief)
+        #expect(editor.isReviewHeld)
         #expect(editor.canPerform(.showEpisodeBrief))
         #expect(editor.perform(.showEpisodeBrief))
         #expect(editor.isBriefSheetShown)
@@ -88,7 +88,7 @@ struct EpisodeBriefStateTests {
         editor.confirmEpisodeBrief(editor.track.brief!)
         #expect(editor.canPerform(.rebuildEpisodeBrief))
         #expect(editor.perform(.rebuildEpisodeBrief))
-        #expect(editor.isReviewHeldForBrief)
+        #expect(editor.isReviewHeld)
         await tests.finish(editor)
         #expect(editor.track.brief?.isConfirmed == false)
         #expect(editor.track.brief?.plot == "Rick wakes Morty to go on an adventure.")
@@ -102,7 +102,7 @@ struct EpisodeBriefStateTests {
         editor.perform(.transcribe)
         await tests.finish(editor)
         #expect(editor.track.brief == nil)
-        #expect(!editor.isReviewHeldForBrief)
+        #expect(!editor.isReviewHeld)
         #expect(!editor.reviewItems(in: .all).isEmpty)
         #expect(editor.isReviewSidebarVisible)
     }
@@ -115,7 +115,7 @@ struct EpisodeBriefStateTests {
         await tests.finish(editor)
         #expect(errors == ["The episode brief stopped."])
         #expect(editor.track.brief == nil)
-        #expect(!editor.isReviewHeldForBrief)
+        #expect(!editor.isReviewHeld)
         #expect(editor.isReviewSidebarVisible)
     }
 
@@ -143,7 +143,7 @@ struct EpisodeBriefStateTests {
         await tests.finish(editor)
         editor.clearTranscript()
         #expect(editor.track.brief == nil)
-        #expect(!editor.isReviewHeldForBrief)
+        #expect(!editor.isReviewHeld)
     }
 
     @Test func translationGetsTheConfirmedBriefsTerms() async throws {

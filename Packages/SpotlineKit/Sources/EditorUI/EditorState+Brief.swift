@@ -12,9 +12,10 @@ extension EditorState {
     /// The cues the brief is about: the source when translating, else the cues being edited.
     var briefSourceTrack: SubtitleTrack { sourceTrack ?? track }
 
-    /// True while the review waits for the brief: being built, or built and not confirmed.
-    public var isReviewHeldForBrief: Bool {
-        isBuildingBrief || track.brief.map { !$0.isConfirmed } == true
+    /// True while the review waits: for the brief (being built, or built and not
+    /// confirmed), then for the AI script review.
+    public var isReviewHeld: Bool {
+        isBuildingBrief || track.brief.map { !$0.isConfirmed } == true || isReviewingScript
     }
 
     /// The user's notes for the translator, then the confirmed brief's plot and scenes.
@@ -109,6 +110,8 @@ extension EditorState {
     /// into the cast (genders settled), and the terms ticked go into the glossary of the
     /// language pair. Then the review shows.
     public func confirmEpisodeBrief(_ edited: EpisodeBrief) {
+        // Confirming it the first time starts the script review; later edits rerun nothing.
+        let startsReview = track.brief?.isConfirmed != true
         var brief = edited
         brief.terms.removeAll { $0.term.trimmingCharacters(in: .whitespaces).isEmpty }
         brief.mergeDuplicateTerms()
@@ -126,6 +129,7 @@ extension EditorState {
             }
         }
         isBriefSheetShown = false
+        if startsReview { reviewScript(automatically: true) }
         if !reviewItems(in: .all).isEmpty { wantsReviewSidebar = true }
     }
 

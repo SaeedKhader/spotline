@@ -2,14 +2,15 @@ import EditorCommands
 import SpotlineAccessibility
 import XCTest
 
-/// The episode brief after transcribing: its dialog, and the review waiting for it.
+/// The episode brief after transcribing: its dialog, the review waiting for it, then the
+/// AI script review's card.
 final class EpisodeBriefUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
     }
 
     @MainActor
-    func testTheReviewWaitsUntilTheBriefIsConfirmed() throws {
+    func testTheReviewWaitsForTheBriefThenShowsTheScriptReview() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-UITestEpisodeBrief"]
         _ = launchApp(prepared: app)
@@ -36,7 +37,19 @@ final class EpisodeBriefUITests: XCTestCase {
         sheet.buttons[AccessibilityID.Brief.confirmButton].click()
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sheet)
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 10), .completed, "Confirm did not close the brief")
+        // Then the script review runs, and its card shows with the other checks.
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'review.card.' AND identifier ENDSWITH '.script'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "No AI Review card after the script review")
         XCTAssertFalse(app.descendants(matching: .any)[AccessibilityID.Brief.waiting].exists, "The review still waits")
+        let cardID = card.identifier
+        let itemID = String(cardID.dropFirst("review.card.".count))
+        let fix = app.descendants(matching: .any)[AccessibilityID.Review.fix(itemID, 0)]
+        XCTAssertEqual(fix.label, "72% sure")
+        fix.click()
+        waitForValue(of: app.cueCells(.text).element(boundBy: 0), toEqual: "Hello Rick. How are you?")
+        app.descendants(matching: .any)[AccessibilityID.Review.action(itemID, .confirm)].click()
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: card)
+        XCTAssertEqual(XCTWaiter().wait(for: [settled], timeout: 10), .completed, "Confirm did not settle the card")
 
         // AI › Episode Brief… opens it again, as confirmed.
         chooseAIMenuItem(.showEpisodeBrief, in: app)

@@ -10,6 +10,8 @@ public enum ReviewScope: String, CaseIterable, Sendable {
     case issues
     /// QC issues counted in frames: too close to a shot change, too short a gap to the next cue.
     case frames
+    /// Lines the AI script review thinks were misheard or make no sense, with fixes.
+    case script
     /// Words the transcriber was unsure of.
     case words
     /// Lines AI translation could word more than one way.
@@ -24,6 +26,8 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
     public enum Kind: Hashable, Sendable {
         case change
         case choice
+        /// A line the AI script review thinks is wrong.
+        case script
         /// The n-th unsure word of the cue.
         case word(Int)
         case issues
@@ -34,6 +38,7 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
             switch self {
             case .change: .changes
             case .choice: .choices
+            case .script: .script
             case .word: .words
             case .issues: .issues
             case .frames: .frames
@@ -45,7 +50,8 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
             switch self {
             case .change: 0
             case .choice: 1
-            case .word(let index): 2 + index
+            case .script: 2
+            case .word(let index): 3 + index
             case .issues: 1000
             case .frames: 1001
             }
@@ -71,6 +77,7 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
         let suffix = switch kind {
         case .change: "change"
         case .choice: "choice"
+        case .script: "script"
         case .word(let index): "word.\(index).\(word ?? "")"
         case .issues: "issues"
         case .frames: "frames"
@@ -107,9 +114,10 @@ public enum ReviewDecision: Equatable, Sendable {
     /// The card's blue button (Return): confirm what the card shows (the reading or fix
     /// picked), confirm the word, accept the change.
     case primary
-    /// Reject a proposed change (Delete).
+    /// Reject a proposed change, or keep a line the script review doubts as it is (Delete).
     case reject
-    /// Try the n-th reading of a line (1 to 9): it goes in, the card stays until confirmed.
+    /// Try the n-th reading of a line (1 to 9), or a script review card's n-th fix: it goes
+    /// in, the card stays until confirmed.
     case variant(Int)
     /// Try the n-th suggested fix of an issue card (1 to 9): applied, the card stays until confirmed.
     case suggestion(Int)
@@ -186,7 +194,7 @@ extension EditorState {
     /// Everything to review, or one kind of it, in time order.
     public func reviewItems(in scope: ReviewScope) -> [ReviewItem] {
         // Nothing shows until the episode brief is confirmed, so it is all reviewed with the brief in place.
-        guard !isReviewHeldForBrief else { return [] }
+        guard !isReviewHeld else { return [] }
         var items: [ReviewItem] = []
         for cue in track.cues {
             if scope == .all || scope == .changes, pendingReview?.change(forCue: cue.id) != nil {
@@ -194,6 +202,9 @@ extension EditorState {
             }
             if scope == .all || scope == .choices, cue.flag?.isResolved == false {
                 items.append(ReviewItem(cueID: cue.id, kind: .choice, start: cue.start))
+            }
+            if scope == .all || scope == .script, cue.scriptFinding != nil {
+                items.append(ReviewItem(cueID: cue.id, kind: .script, start: cue.start))
             }
             if scope == .all || scope == .words, let words = cue.unsureWords {
                 items += words.enumerated().map { ReviewItem(cueID: cue.id, kind: .word($0.offset), start: cue.start, word: $0.element.text) }
@@ -243,9 +254,9 @@ extension EditorState {
 
     /// Whether any card would show, without building them.
     var hasAnythingToReview: Bool {
-        guard !isReviewHeldForBrief else { return false }
+        guard !isReviewHeld else { return false }
         return pendingReview != nil || !issues.isEmpty
-            || track.cues.contains { $0.flag?.isResolved == false || $0.unsureWords?.isEmpty == false }
+            || track.cues.contains { $0.flag?.isResolved == false || $0.unsureWords?.isEmpty == false || $0.scriptFinding != nil }
     }
 
     /// Selects a card and its cue (the list, video and timeline go there).
@@ -296,6 +307,23 @@ extension EditorState {
             startTrial(of: item)
             if flag.chosen != index || !flag.isResolved { chooseVariant(index, forCue: item.cueID) }
             return
+        case (.script, .variant(let index)):
+            if currentReviewItem != item { selectReviewItem(item) }
+            tryScriptFix(index, forCue: item.cueID)
+            return
+        case (.script, .primary):
+            // Nothing tried yet: the most likely fix goes in to be seen; the next Return keeps it.
+            guard let finding = cue(withID: item.cueID)?.scriptFinding else { return }
+            guard let tried = finding.tried else {
+                tryScriptFix(0, forCue: item.cueID)
+                return
+            }
+            confirmScriptFix(forCue: item.cueID)
+            outcome = "Fix \(tried + 1) used"
+        case (.script, .reject):
+            guard cue(withID: item.cueID)?.scriptFinding != nil else { return }
+            keepScriptLine(forCue: item.cueID)
+            outcome = "Line kept"
         case (.choice, .primary):
             guard let flag = cue(withID: item.cueID)?.flag else { return }
             let original = reviewTrials[item.id].map { $0.before.first { $0.id == item.cueID }?.flag?.chosen } ?? flag.chosen
