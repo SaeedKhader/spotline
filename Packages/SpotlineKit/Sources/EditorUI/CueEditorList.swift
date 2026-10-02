@@ -361,7 +361,13 @@ private struct CueRow: View, Equatable {
     /// A text editor is an AppKit text view; one in every row made the list slow to lay out, scroll and jump in.
     @ViewBuilder private var text: some View {
         if isSelected {
+            // The text cell is this container, with the text as its value, in the editor and the plain
+            // line alike: automation then finds every row's text the same way and in the rows' order.
             textEditor
+                .accessibilityElement(children: .contain)
+                .accessibilityValue(cue.text)
+                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
+                .overlay(alignment: .topTrailing) { aiMark }
         } else {
             // The text as it is typed, markup and all, as the editor shows it.
             Text(cue.text)
@@ -377,7 +383,10 @@ private struct CueRow: View, Equatable {
                 .environment(\.layoutDirection, directions.target.layoutDirection)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: editText)
+                // An element of its own, so a cue with no text has its cell too.
+                .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Text")
                 .accessibilityValue(cue.text)
                 .accessibilityAction(.default, editText)
                 .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
@@ -432,9 +441,6 @@ private struct CueRow: View, Equatable {
                     return .handled
                 }
                 .environment(\.layoutDirection, directions.target.layoutDirection)
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
-                // After the identifier, so the text cell stays the text view itself (its value is the text).
-                .overlay(alignment: .topTrailing) { aiMark }
     }
 
     private var rowBackground: some View {
