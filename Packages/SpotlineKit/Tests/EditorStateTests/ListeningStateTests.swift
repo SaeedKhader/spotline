@@ -62,8 +62,14 @@ struct ListeningStateTests {
 
     @Test func transcribingASubtitledVideoAddsNoCuesAndTellsWhoSpeaks() async {
         let editor = makeEditor(cues: subtitles())
+        // The menu says what it will do to a subtitle file's cues.
+        #expect(editor.title(of: .transcribe) == "Match Subtitles to Audio")
+        #expect(makeEditor(cues: []).title(of: .transcribe) == "Transcribe Audio")
+        #expect(!editor.isMatchedToAudio(editor.track.cues[0]))
         #expect(editor.perform(.transcribe))
+        #expect(editor.aiTask?.title == "Audio Match")
         await tests.finish(editor)
+        #expect(editor.isMatchedToAudio(editor.track.cues[0]))
         #expect(editor.track.cues.map(\.text) == Self.lines, "The file's words stay as they are")
         #expect(editor.track.cues.allSatisfy { $0.isAIGenerated == nil })
         #expect(editor.track.cues.prefix(3).map(\.voices) == [["speaker_0"], ["speaker_1"], ["speaker_0"]])
@@ -127,7 +133,7 @@ struct ListeningStateTests {
         editor.dismissSubtitleSync()
         #expect(editor.subtitleSync == nil)
         #expect(editor.track.cues.map(\.start) == late.map(\.start))
-        // AI › Sync Subtitles to Audio… asks again; syncing is one undo step.
+        // AI › Fix Subtitle Timing… asks again; syncing is one undo step.
         #expect(editor.perform(.syncSubtitlesToAudio))
         #expect(editor.subtitleSync != nil)
         #expect(editor.perform(.applySubtitleSync))

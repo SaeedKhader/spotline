@@ -99,10 +99,14 @@ final class AIToolsUITests: XCTestCase {
         let texts = app.cueCells(.text)
         XCTAssertTrue(texts.firstMatch.waitForExistence(timeout: 10), "The subtitles were not imported")
         _ = button(.stepForward, in: app)
-        chooseAIMenuItem(.transcribe, in: app)
+        // With subtitles in the track, the menu item says what it does to them.
+        app.menuBars.menuBarItems["AI"].click()
+        let match = app.menuBars.menuItems[EditorCommand.matchSubtitlesTitle]
+        XCTAssertTrue(match.waitForExistence(timeout: 10), "Transcribe Audio was not renamed for a subtitled video")
+        match.click()
 
         let done = app.descendants(matching: .any)[AccessibilityID.CueList.aiSummary]
-        XCTAssertTrue(done.waitForExistence(timeout: 20), "No summary after transcribing")
+        XCTAssertTrue(done.waitForExistence(timeout: 20), "No summary after matching")
         waitForValue(of: done, toEqual: "Heard 2 of 2 cues in the audio")
         XCTAssertEqual(texts.count, 2, "Transcribing added cues to subtitles that were complete")
         waitForValue(of: texts.element(boundBy: 0), toEqual: "Hello there. How are you?")

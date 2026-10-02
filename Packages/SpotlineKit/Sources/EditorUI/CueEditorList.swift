@@ -327,16 +327,22 @@ private struct CueRow: View {
         let names = editor.speakerNames(of: cue)
         if !names.isEmpty {
             let text = names.joined(separator: ", ")
-            Label(text, systemImage: names.count > 1 ? "person.2" : "person")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.leading, 4)
-                .help("Says the line: \(text)")
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Speaker")
-                .accessibilityValue(text)
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .speaker))
+            // A waveform marks a cue matched to the audio: its speakers were heard, not typed.
+            let heard = editor.isMatchedToAudio(cue)
+            HStack(spacing: 4) {
+                Image(systemName: heard ? "waveform" : names.count > 1 ? "person.2" : "person")
+                    .foregroundStyle(heard ? AnyShapeStyle(Color.aiTint) : AnyShapeStyle(.secondary))
+                Text(text)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .font(.caption)
+            .padding(.leading, 4)
+            .help(heard ? "Matched to the audio. Says the line: \(text)" : "Says the line: \(text)")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(heard ? "Matched to the audio" : "Speaker")
+            .accessibilityValue(text)
+            .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .speaker))
         }
     }
 

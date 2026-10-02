@@ -61,7 +61,7 @@ public struct MainWindowView: View {
             EpisodeBriefSheet(editor: editor)
         }
         // Each button settles the question itself: closing the alert decides nothing.
-        .alert("Sync the subtitles to the audio?", isPresented: Binding(get: { editor.subtitleSync != nil }, set: { _ in })) {
+        .alert("Move the subtitles onto the audio?", isPresented: Binding(get: { editor.subtitleSync != nil }, set: { _ in })) {
             Button(EditorCommand.applySubtitleSync.title) { editor.perform(.applySubtitleSync) }
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier(AccessibilityID.Sync.apply)
@@ -153,16 +153,16 @@ struct CommandButton: View {
                 Button {
                     editor.perform(command)
                 } label: {
-                    Label(command.title, systemImage: systemImage)
+                    Label(editor.title(of: command), systemImage: systemImage)
                         .labelStyle(.iconOnly)
                         .foregroundStyle(editor.isOn(command) == true ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                 }
                 .buttonStyle(.borderless)
             } else {
-                Button(command.title) { editor.perform(command) }
+                Button(editor.title(of: command)) { editor.perform(command) }
             }
         }
-        .help(command.title)
+        .help(editor.title(of: command))
         .disabled(!editor.canPerform(command))
         .accessibilityIdentifier(AccessibilityID.command(command.id))
     }

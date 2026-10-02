@@ -1,4 +1,5 @@
 import AITools
+import EditorCommands
 import Foundation
 import QualityControl
 import SubtitleCore
@@ -16,6 +17,15 @@ extension EditorState {
         let spoken = briefSourceTrack.cues.filter { !SubtitleText.visibleLines(of: $0.text).joined().allSatisfy(\.isWhitespace) }
         guard !spoken.isEmpty else { return false }
         return spoken.count(where: { $0.isAIGenerated != true }) * 5 >= spoken.count * 4
+    }
+
+    /// True when Transcribe Audio would listen for the cues already there rather than make
+    /// cues: the track holds a subtitle file's. Its menu item and its progress say so.
+    public var matchesSubtitlesToAudio: Bool { !isTranslating && textIsFromSubtitles }
+
+    /// A command's title as menus and buttons show it now.
+    public func title(of command: EditorCommand) -> String {
+        command == .transcribe && matchesSubtitlesToAudio ? EditorCommand.matchSubtitlesTitle : command.title
     }
 
     /// The cues with text that AI did not write: what a transcript is matched to.
@@ -94,6 +104,12 @@ extension EditorState {
         return names
     }
 
+    /// Whether listening to the audio told who says the cue (the source cue when translating).
+    public func isMatchedToAudio(_ cue: Cue) -> Bool {
+        let spoken = sourceCues[cue.id] ?? cue
+        return spoken.isAIGenerated != true && spoken.voices?.isEmpty == false
+    }
+
     /// "speaker_2" as people count: "Voice 3".
     static func voiceName(_ label: String) -> String {
         guard let number = label.split(separator: "_").last.flatMap({ Int($0) }) else { return label }
@@ -102,7 +118,7 @@ extension EditorState {
 
     // MARK: Sync
 
-    /// AI › Sync Subtitles to Audio…: works the timing out again and asks, or says why not.
+    /// AI › Fix Subtitle Timing…: works the timing out again and asks, or says why not.
     func checkSubtitleSync() {
         guard let words = transcriptToMatch else { return }
         let alignment = TranscriptAligner.align(cuesOfTheirOwn, to: words)
@@ -128,7 +144,7 @@ extension EditorState {
         guard let sync = subtitleSync else { return }
         let rate = frameRate
         let oneFrame = MediaTime(frame: 1, rate: rate)
-        edit("Sync Subtitles to Audio") { track in
+        edit("Fix Subtitle Timing") { track in
             for index in track.cues.indices {
                 let start = sync.corrected(track.cues[index].start, rate: rate)
                 track.cues[index].start = start

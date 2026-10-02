@@ -279,14 +279,18 @@ extension EditorCommand {
         id: "ai.transcribe", title: "Transcribe Audio", category: .ai,
         defaultShortcut: KeyShortcut(.character("r"), modifiers: [.command, .control])
     )
+    /// What Transcribe Audio is called while the track holds a subtitle file's cues: it
+    /// listens to the audio and adds to those cues (who speaks, where the audio differs,
+    /// whether the timing is off) instead of making cues.
+    public static let matchSubtitlesTitle = "Match Subtitles to Audio"
     /// With a subtitle file's cues and a transcript of the audio: works out whether the
     /// file runs early, late or at another speed, and asks before moving every cue.
     public static let syncSubtitlesToAudio = EditorCommand(
-        id: "ai.syncSubtitles", title: "Sync Subtitles to Audio…", category: .ai
+        id: "ai.syncSubtitles", title: "Fix Subtitle Timing…", category: .ai
     )
     /// Moves every cue onto the audio: the Sync button of the question above.
     public static let applySubtitleSync = EditorCommand(
-        id: "ai.applySubtitleSync", title: "Sync Subtitles", category: .ai
+        id: "ai.applySubtitleSync", title: "Move Subtitles", category: .ai
     )
     /// Fills the empty target cues with context, glossary and memory.
     /// Outside translation mode the current cues become the source first.

@@ -506,14 +506,16 @@ extension EditorState {
         let provider = aiSettings.transcription
         // Words this project already got from the provider are used again, not paid for and uploaded again.
         let stored = storedTranscript(provider: provider, audioStream: stream, language: language)
+        // With a subtitle file's cues, it says what it is doing to them.
+        let title = matchesSubtitlesToAudio ? "Audio Match" : "Transcription"
         let status = if stored != nil {
             AITaskStatus(
-                title: "Transcription", provider: transcriber.name, stages: (leavesOutWalla ? ["Preparing audio"] : []) + ["Transcribing"],
+                title: title, provider: transcriber.name, stages: (leavesOutWalla ? ["Preparing audio"] : []) + ["Transcribing"],
                 detail: "Using the saved transcript"
             )
         } else {
             AITaskStatus(
-                title: "Transcription", provider: transcriber.name,
+                title: title, provider: transcriber.name,
                 stages: ["Preparing audio"] + (transcriber.uploadsInOnePiece ? ["Compressing audio", "Uploading"] : []) + ["Transcribing"]
             )
         }
