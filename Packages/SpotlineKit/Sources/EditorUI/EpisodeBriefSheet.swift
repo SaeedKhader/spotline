@@ -35,6 +35,11 @@ struct EpisodeBriefSheet: View {
         .padding(20)
         .frame(width: 720)
         .onAppear { draft = editor.track.brief }
+        // The brief changed under the dialog (built again, scenes described, an undo): show that.
+        // Typing here does not change it, so nothing typed is lost.
+        .onChange(of: editor.track.brief) { _, brief in
+            if let brief { draft = brief }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.Brief.sheet)
     }

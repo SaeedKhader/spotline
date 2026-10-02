@@ -25,7 +25,7 @@ final class SceneFramesUITests: XCTestCase {
 
         // The scene opens to show its lines.
         sheet.descendants(matching: .any)[AccessibilityID.SceneFrames.details(1)].click()
-        XCTAssertTrue(sheet.buttons["Hide Details"].waitForExistence(timeout: 5), "The scene did not open")
+        XCTAssertTrue(sheet.staticTexts["Before the cut"].waitForExistence(timeout: 5), "The scene did not open to its lines")
 
         sheet.buttons[AccessibilityID.SceneFrames.doneButton].click()
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sheet)
