@@ -23,7 +23,8 @@ public enum Proposals {
             guard let cue = byID[translation.cueID], !translation.isLeftOut else { return nil }
             var after = cue
             after.text = translation.text
-            after.flag = translation.flag
+            // A choice the translator was sure of is no question for the user.
+            after.flag = translation.flag?.settledWhenSure
             return ProposedChange.update(from: cue, to: after)
         }
         return ProposedChangeSet(title: title, changes: changes, cast: batch.cast)

@@ -10,6 +10,8 @@ public enum ReviewScope: String, CaseIterable, Sendable {
     case issues
     /// QC issues counted in frames: too close to a shot change, too short a gap to the next cue.
     case frames
+    /// In translation mode: lines whose source uses a glossary term and whose translation not its agreed one.
+    case glossary
     /// Lines the AI script review thinks were misheard or make no sense, with fixes.
     case script
     /// Words the transcriber was unsure of.
@@ -18,6 +20,16 @@ public enum ReviewScope: String, CaseIterable, Sendable {
     case choices
     /// Changes an AI tool proposes (cleanup), to accept or reject.
     case changes
+}
+
+extension ReviewScope {
+    /// Filters of one kind of card that says how sure it is: listed least sure first.
+    var listsLeastSureFirst: Bool {
+        switch self {
+        case .choices, .script, .words: true
+        case .all, .issues, .frames, .glossary, .changes: false
+        }
+    }
 }
 
 /// One thing to decide in the review sidebar: a cue's QC issues, one word to
@@ -33,6 +45,11 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
         case issues
         /// The cue's frame issues (shot changes, gaps), apart from its other issues.
         case frames
+        /// The glossary terms the cue's translation does not use, apart from its other issues.
+        case glossary
+
+        /// A card of QC issues, with one-click fixes to try.
+        public var isIssueCard: Bool { self == .issues || self == .frames || self == .glossary }
 
         var scope: ReviewScope {
             switch self {
@@ -42,6 +59,7 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
             case .word: .words
             case .issues: .issues
             case .frames: .frames
+            case .glossary: .glossary
             }
         }
 
@@ -54,6 +72,7 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
             case .word(let index): 3 + index
             case .issues: 1000
             case .frames: 1001
+            case .glossary: 999
             }
         }
     }
@@ -81,6 +100,7 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
         case .word(let index): "word.\(index).\(word ?? "")"
         case .issues: "issues"
         case .frames: "frames"
+        case .glossary: "glossary"
         }
         return "\(cueID.uuidString).\(suffix)"
     }
@@ -146,6 +166,8 @@ public struct ReviewSuggestion: Hashable, Sendable {
         case copySource(String)
         /// In translation mode: the best translation memory match.
         case useMemory(String)
+        /// In translation mode: the line with the word it used for a glossary term swapped for the agreed one.
+        case replaceTerm(String)
         /// Split in two where the speaker pauses; each half's text as it will read.
         case splitAt(PauseSplit, first: String, second: String)
     }
@@ -178,7 +200,7 @@ public struct ReviewSuggestion: Hashable, Sendable {
     public var group: Group {
         if !parts.isEmpty { return .all }
         switch action {
-        case .copySource, .useMemory: return .text
+        case .copySource, .useMemory, .replaceTerm: return .text
         case .splitAt: return .cue
         case .fix(let fix):
             switch fix.purpose {
@@ -210,7 +232,10 @@ extension EditorState {
                 items += words.enumerated().map { ReviewItem(cueID: cue.id, kind: .word($0.offset), start: cue.start, word: $0.element.text) }
             }
             let cueIssues = issues[cue.id] ?? []
-            if scope == .all || scope == .issues, cueIssues.contains(where: { !$0.kind.isFrameIssue }) {
+            if scope == .all || scope == .glossary, cueIssues.contains(where: \.kind.isGlossaryIssue) {
+                items.append(ReviewItem(cueID: cue.id, kind: .glossary, start: cue.start))
+            }
+            if scope == .all || scope == .issues, cueIssues.contains(where: { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue }) {
                 items.append(ReviewItem(cueID: cue.id, kind: .issues, start: cue.start))
             }
             if scope == .all || scope == .frames, cueIssues.contains(where: \.kind.isFrameIssue) {
@@ -221,7 +246,25 @@ extension EditorState {
         if scope == .all || scope == .changes {
             items += proposedInserts.map { ReviewItem(cueID: $0.cueID, kind: .change, start: $0.cue.start) }
         }
-        return items.sorted { $0.precedes($1) }
+        return ordered(items, in: scope)
+    }
+
+    /// Cards in the order a filter lists them. Under Choices, AI Review or Words, the least
+    /// sure first (what most needs a look), then by time; everything else, and All, by time.
+    func ordered(_ items: [ReviewItem], in scope: ReviewScope) -> [ReviewItem] {
+        guard scope.listsLeastSureFirst else { return items.sorted { $0.precedes($1) } }
+        let cues = Dictionary(track.cues.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func sureness(_ item: ReviewItem) -> Double {
+            guard let cue = cues[item.cueID] else { return 1 }
+            switch item.kind {
+            case .choice: return cue.flag?.confidence ?? 1
+            case .script: return cue.scriptFinding?.confidence ?? 1
+            case .word(let index): return cue.unsureWords?[safe: index]?.confidence ?? 0.5
+            case .change, .issues, .frames, .glossary: return 1
+            }
+        }
+        let keyed = items.map { (item: $0, sureness: sureness($0)) }
+        return keyed.sorted { $0.sureness != $1.sureness ? $0.sureness < $1.sureness : $0.item.precedes($1.item) }.map(\.item)
     }
 
     /// What the sidebar lists under its filter.
@@ -291,6 +334,8 @@ extension EditorState {
 
     /// Settles a card as asked, as one undoable edit, and moves on to the next card.
     public func decide(_ item: ReviewItem, _ decision: ReviewDecision) {
+        // Where the card is in a list not in time order, to move on to the card that takes its place.
+        let position = reviewScope.listsLeastSureFirst ? reviewCards.firstIndex(of: item) : nil
         let history = historySerial
         let trial = reviewTrials[item.id]
         let outcome: String
@@ -329,6 +374,12 @@ extension EditorState {
             let original = reviewTrials[item.id].map { $0.before.first { $0.id == item.cueID }?.flag?.chosen } ?? flag.chosen
             if !flag.isResolved { chooseVariant(flag.chosen, forCue: item.cueID) }
             outcome = original == flag.chosen ? "Reading kept" : "Other reading used"
+        case (.glossary, .primary):
+            // Replace: the agreed term goes in and the card is settled, in one step.
+            guard let replacement = glossaryReplacement(forCue: item.cueID), let index = track.cues.firstIndex(where: { $0.id == item.cueID })
+            else { return }
+            edit(replacement.title) { track in track.cues[index].text = replacement.text }
+            outcome = replacement.title.replacing("Replace ", with: "Replaced ", maxReplacements: 1)
         case (.issues, .suggestion(let index)), (.frames, .suggestion(let index)):
             guard index < reviewSuggestions(for: item).count else { return }
             tryFix(index, of: item)
@@ -366,7 +417,9 @@ extension EditorState {
         lastSettledReview = settledReviews.last
         // The next card: the first at or after the settled one (a cue's next word takes its place).
         let cards = reviewCards
-        if let next = cards.first(where: { $0.isAtOrAfter(item) }) ?? cards.first {
+        if let position, !cards.contains(where: { $0.id == item.id }), !cards.isEmpty {
+            selectReviewItem(cards[min(position, cards.count - 1)])
+        } else if let next = cards.first(where: { $0.isAtOrAfter(item) }) ?? cards.first {
             selectReviewItem(next)
         }
     }
@@ -379,7 +432,7 @@ extension EditorState {
         for item in pinned where (reviewScope == .all || item.kind.scope == reviewScope) && !cards.contains(where: { $0.id == item.id }) {
             cards.append(item)
         }
-        return cards.sorted { $0.precedes($1) }
+        return ordered(cards, in: reviewScope)
     }
 
     /// Whether the card offers Ignore: the cue reads too fast and no option fixes that.
@@ -393,8 +446,9 @@ extension EditorState {
     public func cardIssues(_ item: ReviewItem) -> [QCIssue] {
         let all = issues[item.cueID] ?? []
         switch item.kind {
-        case .issues: return all.filter { !$0.kind.isFrameIssue }
+        case .issues: return all.filter { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue }
         case .frames: return all.filter(\.kind.isFrameIssue)
+        case .glossary: return all.filter(\.kind.isGlossaryIssue)
         default: return []
         }
     }
@@ -462,7 +516,7 @@ extension EditorState {
         guard let trial = reviewTrials[item.id], trial.picks.contains(option.key) else { return false }
         let now = cue(withID: item.cueID)
         switch option.action {
-        case .copySource(let text), .useMemory(let text):
+        case .copySource(let text), .useMemory(let text), .replaceTerm(let text):
             return now?.text == text
         case .splitAt(let split, let first, _):
             return now?.text == first && now?.end == split.firstEnd
@@ -538,7 +592,7 @@ extension EditorState {
         guard let index = cues.firstIndex(where: { $0.id == id }) else { return cues }
         var cues = cues
         switch suggestion.action {
-        case .copySource(let text), .useMemory(let text):
+        case .copySource(let text), .useMemory(let text), .replaceTerm(let text):
             cues[index].text = text
         case .splitAt(let split, let first, let second):
             guard var (head, tail) = halves(of: cues[index], at: split.secondStart) else { return cues }
@@ -618,6 +672,7 @@ extension EditorState {
             case .splitAt: "splitAtPause"
             case .copySource: "copySource"
             case .useMemory: "useMemory"
+            case .replaceTerm: "replaceTerm"
             case .fix(let fix): "\(fix.purpose)"
             }
             result[position].key = "\(kind)#\(counts[kind, default: 0])"
@@ -814,6 +869,12 @@ extension EditorState {
 }
 
 extension QCIssue.Kind {
+    /// A glossary term the translation does not use: reviewed under its own filter.
+    var isGlossaryIssue: Bool {
+        if case .glossaryTermNotUsed = self { return true }
+        return false
+    }
+
     /// Counted in frames: close to a shot change, or too short a gap before the next cue.
     var isFrameIssue: Bool {
         switch self {

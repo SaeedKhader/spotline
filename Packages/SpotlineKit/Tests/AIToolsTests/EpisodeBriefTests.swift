@@ -43,6 +43,17 @@ struct EpisodeBriefBuilderTests {
         #expect((untitled["instructions"] as? String)?.contains("search the web") == false)
     }
 
+    @Test func aSubtitleFilesWordsAreSaidToBeRight() throws {
+        var subtitled = request()
+        subtitled.isFromSubtitles = true
+        let instructions = OpenAIBriefBuilder.instructions(for: subtitled)
+        #expect(instructions.contains("The subtitles' words and spellings are right"))
+        #expect(!instructions.contains("automatic English transcript"))
+        #expect(instructions.contains("In \"people\", list who each voice is:"))
+        #expect(OpenAIBriefBuilder.input(for: subtitled).contains("Subtitles (time, voice, line):"))
+        #expect(OpenAIBriefBuilder.instructions(for: request()).contains("automatic English transcript"))
+    }
+
     @Test func answerBecomesABriefWithARowForEveryVoice() throws {
         let output = """
             {"people": [

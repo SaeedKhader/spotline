@@ -168,6 +168,10 @@ extension EditorCommand {
     public static let reviewFrames = EditorCommand(
         id: "review.reviewFrames", title: "Review Frame Issues", category: .review
     )
+    /// A toggle: the review sidebar lists only the lines that do not use a glossary term's agreed translation.
+    public static let reviewGlossary = EditorCommand(
+        id: "review.reviewGlossary", title: "Review Glossary Terms", category: .review
+    )
     public static let shuttleBackward = EditorCommand(
         id: "playback.shuttleBackward", title: "Shuttle Backward", category: .playback,
         defaultShortcut: KeyShortcut(.character("j"))
@@ -279,6 +283,19 @@ extension EditorCommand {
         id: "ai.transcribe", title: "Transcribe Audio", category: .ai,
         defaultShortcut: KeyShortcut(.character("r"), modifiers: [.command, .control])
     )
+    /// What Transcribe Audio is called while the track holds a subtitle file's cues: it
+    /// listens to the audio and adds to those cues (who speaks, where the audio differs,
+    /// whether the timing is off) instead of making cues.
+    public static let matchSubtitlesTitle = "Match Subtitles to Audio"
+    /// With a subtitle file's cues and a transcript of the audio: works out whether the
+    /// file runs early, late or at another speed, and asks before moving every cue.
+    public static let syncSubtitlesToAudio = EditorCommand(
+        id: "ai.syncSubtitles", title: "Fix Subtitle Timing…", category: .ai
+    )
+    /// Moves every cue onto the audio: the Sync button of the question above.
+    public static let applySubtitleSync = EditorCommand(
+        id: "ai.applySubtitleSync", title: "Move Subtitles", category: .ai
+    )
     /// Fills the empty target cues with context, glossary and memory.
     /// Outside translation mode the current cues become the source first.
     public static let translateWithAI = EditorCommand(
@@ -373,13 +390,13 @@ extension EditorCommand {
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
         previousCue, nextCue, deselectCue, previousShotChange, nextShotChange,
-        showAllCues, toggleIssuesPanel, reviewFrames, previousIssue, nextIssue, fixOverlaps, joinShortLines,
+        showAllCues, toggleIssuesPanel, reviewFrames, reviewGlossary, previousIssue, nextIssue, fixOverlaps, joinShortLines,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
         toggleMilliseconds, toggleReviewSidebar,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
-        transcribe, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, reviewScriptWithAI, reviewScriptFindings, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        transcribe, syncSubtitlesToAudio, applySubtitleSync, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, reviewScriptWithAI, reviewScriptFindings, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         reviewChanges, acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 

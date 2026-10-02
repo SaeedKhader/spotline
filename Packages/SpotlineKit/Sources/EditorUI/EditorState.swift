@@ -287,6 +287,13 @@ public final class EditorState {
     public internal(set) var isBriefSheetShown = false
     /// True while the AI script review runs after the brief is confirmed; the review waits for it.
     public internal(set) var isReviewingScript = false
+    /// The correction that would put a subtitle file's cues on the audio, while the
+    /// question whether to make it is open (`EditorState+Listening`).
+    public internal(set) var subtitleSync: SubtitleSync?
+    /// Each cue's words (normalized), kept until the cues change: review cards ask for them on every redraw.
+    @ObservationIgnored var cueWordSets: [Cue.ID: Set<String>]?
+    /// The episode brief is built once the sync question is answered.
+    @ObservationIgnored var briefAwaitsSync = false
     @ObservationIgnored private var embeddedSubtitlesTask: Task<Void, Never>?
     /// Lists and reads the media's subtitle tracks off the main actor. Tests replace them.
     @ObservationIgnored public var listEmbeddedSubtitles: @Sendable (URL) async throws -> [EmbeddedSubtitleTrack] = { url in
@@ -482,7 +489,9 @@ public final class EditorState {
         case EditorCommand.toggleMilliseconds.id:
             true
         case EditorCommand.toggleIssuesPanel.id:
-            issues.values.contains { $0.contains { !$0.kind.isFrameIssue } }
+            issues.values.contains { $0.contains { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue } }
+        case EditorCommand.reviewGlossary.id:
+            issues.values.contains { $0.contains(where: \.kind.isGlossaryIssue) }
         case EditorCommand.reviewFrames.id:
             issues.values.contains { $0.contains(where: \.kind.isFrameIssue) }
         case EditorCommand.openSourceSubtitles.id:
@@ -504,7 +513,8 @@ public final class EditorState {
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id,
              EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id,
-             EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id:
+             EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id,
+             EditorCommand.syncSubtitlesToAudio.id, EditorCommand.applySubtitleSync.id:
             canPerformAI(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
@@ -553,6 +563,7 @@ public final class EditorState {
         case EditorCommand.toggleReviewSidebar.id: isReviewSidebarVisible
         case EditorCommand.toggleIssuesPanel.id: isShowingReview(.issues)
         case EditorCommand.reviewFrames.id: isShowingReview(.frames)
+        case EditorCommand.reviewGlossary.id: isShowingReview(.glossary)
         case EditorCommand.reviewChanges.id: isShowingReview(.changes)
         case EditorCommand.reviewChoices.id: isShowingReview(.choices)
         case EditorCommand.reviewScriptFindings.id: isShowingReview(.script)
@@ -615,6 +626,8 @@ public final class EditorState {
             toggleReviewFilter(.issues)
         case EditorCommand.reviewFrames.id:
             toggleReviewFilter(.frames)
+        case EditorCommand.reviewGlossary.id:
+            toggleReviewFilter(.glossary)
         case EditorCommand.showAllCues.id:
             showReview(.all)
         case EditorCommand.toggleReviewSidebar.id:
@@ -653,7 +666,8 @@ public final class EditorState {
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
              EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id,
              EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id,
-             EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id:
+             EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id,
+             EditorCommand.syncSubtitlesToAudio.id, EditorCommand.applySubtitleSync.id:
             return performAI(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
@@ -765,6 +779,8 @@ public final class EditorState {
         embeddedSubtitles = []
         embeddedSubtitlesJob = nil
         isEmbeddedSubtitlesSheetShown = false
+        subtitleSync = nil
+        briefAwaitsSync = false
         isBuildingBrief = false
         isBriefSheetShown = false
         isReviewingScript = false
@@ -778,6 +794,7 @@ public final class EditorState {
             replaceTrack(with: imported)
             subtitleFile = SubtitleFileReference(url: url, format: format)
             hasUnsavedChanges = false
+            matchImportedSubtitles()
         } catch {
             reportError("“\(url.lastPathComponent)” could not be imported.", error)
         }
@@ -863,6 +880,8 @@ public final class EditorState {
 
     /// Recomputes `issues`; it changes (and redraws its observers) only when the result differs.
     private func updateIssues() {
+        // Made from the cues' text, which may have changed.
+        cueWordSets = nil
         let context = QualityControl.Context(frameRate: frameRate, shotChanges: shotChangeFrames)
         var found = QualityControl.check(track.cues, preset: qcPreset, context: context)
         addTranslationIssues(to: &found)
@@ -1445,6 +1464,7 @@ public final class EditorState {
                 self.replaceTrack(with: imported)
                 self.subtitleFile = nil
                 self.hasUnsavedChanges = true
+                self.matchImportedSubtitles()
                 if savesCopy, let format = embedded.fileFormat {
                     let language = imported.languageCode == "und" ? "" : ".\(imported.languageCode)"
                     let name = url.deletingPathExtension().lastPathComponent + language + "." + format.fileExtension
