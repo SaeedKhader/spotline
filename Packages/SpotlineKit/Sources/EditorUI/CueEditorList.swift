@@ -361,12 +361,18 @@ private struct CueRow: View, Equatable {
     /// A text editor is an AppKit text view; one in every row made the list slow to lay out, scroll and jump in.
     @ViewBuilder private var text: some View {
         if isSelected {
-            // The text cell is this container, with the text as its value, in the editor and the plain
-            // line alike: automation then finds every row's text the same way and in the rows' order.
             textEditor
-                .accessibilityElement(children: .contain)
-                .accessibilityValue(cue.text)
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
+                // The text cell automation finds (by its ID, with the text as its value) is an element
+                // behind the editor, of the same kind as the plain line's in the other rows. The editor's
+                // own element is the AppKit text view, which is not listed in the rows' order when it
+                // is made after its row, and a container's value is not reported.
+                .background {
+                    Color.clear
+                        .accessibilityElement()
+                        .accessibilityLabel("Text")
+                        .accessibilityValue(cue.text)
+                        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
+                }
                 .overlay(alignment: .topTrailing) { aiMark }
         } else {
             // The text as it is typed, markup and all, as the editor shows it.
