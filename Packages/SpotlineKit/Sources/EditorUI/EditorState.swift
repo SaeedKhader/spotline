@@ -33,7 +33,11 @@ public final class EditorState {
     /// so menus depending on it redraw only when it flips.
     public private(set) var isAtStart = true
     public var frameRate: FrameRate {
-        didSet { if frameRate != oldValue { updateIssues() } }
+        didSet {
+            guard frameRate != oldValue else { return }
+            updateIssues()
+            updateCurrentCue()
+        }
     }
     /// The subtitles being edited; in translation mode, the target (translation).
     public internal(set) var track: SubtitleTrack {
@@ -41,6 +45,7 @@ public final class EditorState {
             if track.languageCode != oldValue.languageCode { translationPairDidChange() }
             guard track.cues != oldValue.cues else { return }
             cueIndexes = nil
+            cueSpans = nil
             cueWordSets = nil
             reviewDerived = ReviewDerived()
             // An edit to a cue's words leaves every cue with the source cue it had.
@@ -158,6 +163,10 @@ public final class EditorState {
     /// The cue on screen at the playhead. Kept apart from `position` so the
     /// cue list redraws only when it changes, not every frame.
     public private(set) var currentCueID: Cue.ID?
+    /// The cues shown on the frame under the playhead: at most one at the bottom and one at the
+    /// top (a sign over dialogue). Changed only when they change, so the picture's subtitles
+    /// redraw then and not on every frame.
+    public private(set) var cuesAtPlayhead: [Cue] = []
     /// Cues that break the QC preset's rules, with why. Kept in step with the
     /// cues, the preset, the frame rate and the shot changes.
     public private(set) var issues: [Cue.ID: [QCIssue]] = [:] {
@@ -167,6 +176,9 @@ public final class EditorState {
     @ObservationIgnored private var checkedCues: [Cue.ID: CheckedCue] = [:]
     /// Where each cue is in `track.cues`, until the cues change.
     @ObservationIgnored private var cueIndexes: [Cue.ID: Int]?
+    /// Whether the cues are in order of their starts and how long the longest is, until the cues
+    /// change: finding the cues at a time then looks at the few around it, not at all of them.
+    @ObservationIgnored private var cueSpans: (inOrder: Bool, longest: MediaTime)?
     /// What is worked out from the cues, their issues and the proposed changes, kept until one of them changes.
     @ObservationIgnored var reviewDerived = ReviewDerived()
     /// `shotChangeFrames` as last worked out, with what it was worked out from.
@@ -500,18 +512,31 @@ public final class EditorState {
     /// The cue shown on the frame under the playhead.
     public var cueAtPlayhead: Cue? {
         guard hasMedia else { return nil }
-        let time = currentTime
-        return track.cues.last { $0.start <= time && time < $0.end }
+        return cues(at: currentTime).first
     }
 
-    /// The cues shown on the frame under the playhead: at most one at the
-    /// bottom and one at the top (a sign over dialogue).
-    public var cuesAtPlayhead: [Cue] {
-        guard hasMedia else { return [] }
-        let time = currentTime
-        return CuePosition.allCases.compactMap { position in
-            track.cues.last { $0.position == position && $0.start <= time && time < $0.end }
+    /// The cues showing at `time`, the latest in the list first.
+    private func cues(at time: MediaTime) -> [Cue] {
+        let cues = track.cues
+        let spans = cueSpans ?? {
+            let inOrder = zip(cues, cues.dropFirst()).allSatisfy { $0.start <= $1.start }
+            let spans = (inOrder, cues.map(\.duration).max() ?? .zero)
+            cueSpans = spans
+            return spans
+        }()
+        guard spans.inOrder else { return cues.reversed().filter { $0.start <= time && time < $0.end } }
+        // The first cue starting after `time`, then back until no earlier cue can still be showing.
+        var low = 0, high = cues.count
+        while low < high {
+            let middle = (low + high) / 2
+            if cues[middle].start <= time { low = middle + 1 } else { high = middle }
         }
+        var showing: [Cue] = []
+        for cue in cues[..<low].reversed() {
+            if cue.start + spans.longest <= time { break }
+            if time < cue.end { showing.append(cue) }
+        }
+        return showing
     }
 
     // MARK: - Commands
@@ -1045,8 +1070,11 @@ public final class EditorState {
     }
 
     private func updateCurrentCue() {
-        let id = cueAtPlayhead?.id
+        let showing = hasMedia ? cues(at: currentTime) : []
+        let id = showing.first?.id
         if id != currentCueID { currentCueID = id }
+        let shown = CuePosition.allCases.compactMap { position in showing.first { $0.position == position } }
+        if shown != cuesAtPlayhead { cuesAtPlayhead = shown }
     }
 
     public func setTimelineScale(_ scale: Double) {
@@ -1488,10 +1516,9 @@ public final class EditorState {
         var withoutPosition = status
         withoutPosition.position = self.status.position
         if withoutPosition != self.status { self.status = status }
-        if status.position != position {
-            position = status.position
-            updateCurrentCue()
-        }
+        if status.position != position { position = status.position }
+        // Also when the media opens or closes, with the playhead where it was.
+        updateCurrentCue()
         // A word played for checking stops just after it.
         if let stop = playbackStopTime, status.position >= stop {
             playbackStopTime = nil
