@@ -323,8 +323,8 @@ private struct CueRow: View, Equatable {
                     }
                 }
             VStack(alignment: .leading, spacing: 6) {
-                TimeField(editor: editor, cue: cue, edge: .start, showsFrame: isHovered || isSelected)
-                TimeField(editor: editor, cue: cue, edge: .end, showsFrame: isHovered || isSelected)
+                TimeField(editor: editor, cue: cue, edge: .start, showsFrame: isHovered || isSelected, isEditable: isSelected) { editor.select(cue.id) }
+                TimeField(editor: editor, cue: cue, edge: .end, showsFrame: isHovered || isSelected, isEditable: isSelected) { editor.select(cue.id) }
                 speedAndIssues
                 speakers
             }
@@ -677,7 +677,14 @@ struct TimeField: View {
     let edge: Edge
     /// The field's box shows only on the hovered or selected row, or while typing.
     let showsFrame: Bool
+    /// False in a cue list row that is not selected: the time shows as plain text (a text field is
+    /// an AppKit view, and two in every row made the list slow), and a click selects the row and types here.
+    var isEditable = true
+    /// Selects the row, for a click on the time while it is plain text.
+    var activate: () -> Void = {}
     @State private var draft = ""
+    /// A click on the plain text asked to type here, once the field is there.
+    @State private var wantsFocus = false
     @FocusState private var isFocused: Bool
 
     private var time: MediaTime { edge == .start ? cue.start : cue.end }
@@ -690,20 +697,40 @@ struct TimeField: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
             Divider().frame(height: 18).opacity(showsFrame || isFocused ? 1 : 0)
-            TextField(edge == .start ? "Start" : "End", text: $draft)
-                .textFieldStyle(.plain)
-                .font(.system(.callout, design: .monospaced))
-                .frame(width: 104)
-                .padding(.horizontal, 6)
-                .focused($isFocused)
-                .onSubmit(commit)
-                .onChange(of: isFocused) { _, focused in
-                    editor.isEditingText = focused
-                    if !focused { commit() }
-                }
-                // Removed while focused (an issue card's edit finished): typing is over.
-                .onDisappear { if isFocused { editor.isEditingText = false } }
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, edge == .start ? .inPoint : .outPoint))
+            if isEditable {
+                TextField(edge == .start ? "Start" : "End", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(width: 104)
+                    .padding(.horizontal, 6)
+                    .focused($isFocused)
+                    .onSubmit(commit)
+                    .onChange(of: isFocused) { _, focused in
+                        editor.isEditingText = focused
+                        if !focused { commit() }
+                    }
+                    .onAppear {
+                        guard wantsFocus else { return }
+                        wantsFocus = false
+                        DispatchQueue.main.async { isFocused = true }
+                    }
+                    // Removed while focused (an issue card's edit finished, another row selected): typing is over.
+                    .onDisappear { if isFocused { editor.isEditingText = false } }
+                    .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, edge == .start ? .inPoint : .outPoint))
+            } else {
+                Text(label)
+                    .font(.system(.callout, design: .monospaced))
+                    .lineLimit(1)
+                    .frame(width: 104, alignment: .leading)
+                    .padding(.horizontal, 6)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        wantsFocus = true
+                        activate()
+                    }
+                    .accessibilityValue(label)
+                    .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, edge == .start ? .inPoint : .outPoint))
+            }
         }
         .padding(.vertical, 4)
         .background(.background.opacity(showsFrame || isFocused ? 0.6 : 0), in: RoundedRectangle(cornerRadius: 6))

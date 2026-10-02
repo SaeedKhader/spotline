@@ -200,6 +200,8 @@ public enum PerformanceRun {
 
     public static func start(workspace: EditorWorkspace, reportURL: URL, quitsWhenDone: Bool) {
         monitor.start()
+        // Behind other windows macOS would slow the app's timers down (App Nap), and the run with them.
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "Performance run")
         let launched = processStart ?? MainThreadMonitor.now
         Task { @MainActor in
             var report = PerformanceReport()
@@ -230,6 +232,7 @@ public enum PerformanceRun {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try? encoder.encode(report).write(to: reportURL)
+            ProcessInfo.processInfo.endActivity(activity)
             // The project is a throwaway copy: leave at once, without the document saving on the way out.
             if quitsWhenDone { exit(0) }
         }
