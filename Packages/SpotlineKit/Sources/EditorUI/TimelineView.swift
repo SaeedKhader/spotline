@@ -173,6 +173,8 @@ final class TimelineView: NSView {
 
     /// Cues that overlap a cue in the other position (a sign over dialogue).
     private var stackedCueIDs: Set<Cue.ID> = []
+    /// The waveform's loudest peak (0 to 255), found once per waveform and not on every redraw.
+    private var loudestPeak: UInt8 = 0
 
     static func stackedCueIDs(in cues: [Cue]) -> Set<Cue.ID> {
         let sorted = cues.sorted { $0.start < $1.start }
@@ -212,6 +214,7 @@ final class TimelineView: NSView {
     private func contentDidChange(from old: TimelineContent) {
         guard content != old else { return }
         if content.cues != old.cues { stackedCueIDs = Self.stackedCueIDs(in: content.cues) }
+        if content.waveform != old.waveform { loudestPeak = content.waveform?.peaks.max() ?? 0 }
         if let request = content.scrollRequest, request != old.scrollRequest {
             freeCenter = clamp(request.centerSeconds)
         }
@@ -340,7 +343,7 @@ final class TimelineView: NSView {
         guard let waveform = content.waveform else { return }
         let band = waveformRect
         // Normalize to the loudest peak so quiet mixes stay readable.
-        let loudest = max(Double(waveform.peaks.max() ?? 0) / 255, 0.05)
+        let loudest = max(Double(loudestPeak) / 255, 0.05)
         let gain = 0.95 / loudest
         let plain = NSColor.secondaryLabelColor.withAlphaComponent(0.4)
         let spoken = NSColor.labelColor.withAlphaComponent(0.55)
@@ -349,23 +352,30 @@ final class TimelineView: NSView {
         let classifiedUntil = content.speech == nil ? -Double.infinity : content.speechAnalyzedUntil?.seconds ?? .infinity
         var regionIndex = 0
         let secondsPerPoint = 1 / scale
+        let origin = originSeconds
         var column = max(x(forSeconds: 0).rounded(.down), 0)
         let lastColumn = min(x(forSeconds: contentEndSeconds), bounds.width)
+        // The columns of each colour are filled together: setting a colour for every column costs more than drawing it.
+        var plainColumns: [NSRect] = [], spokenColumns: [NSRect] = [], dimmedColumns: [NSRect] = []
         while column < lastColumn {
-            let start = seconds(atX: column)
+            let start = origin + Double(column) / scale
             let end = start + secondsPerPoint
             let peak = min(Double(waveform.peak(from: start, to: end)) * gain, 1)
             let height = max(CGFloat(peak) * band.height, 0.5)
+            let rect = NSRect(x: column, y: band.maxY - height, width: 1, height: height)
             // Speech bright, music and effects dimmed, where speech detection has run.
             if start < classifiedUntil {
                 while regionIndex < regions.count, regions[regionIndex].end.seconds <= start { regionIndex += 1 }
                 let isSpeech = regionIndex < regions.count && regions[regionIndex].start.seconds < end
-                (isSpeech ? spoken : dimmed).setFill()
+                if isSpeech { spokenColumns.append(rect) } else { dimmedColumns.append(rect) }
             } else {
-                plain.setFill()
+                plainColumns.append(rect)
             }
-            NSRect(x: column, y: band.maxY - height, width: 1, height: height).fill()
             column += 1
+        }
+        for (color, columns) in [(plain, plainColumns), (spoken, spokenColumns), (dimmed, dimmedColumns)] where !columns.isEmpty {
+            color.setFill()
+            columns.fill()
         }
     }
 
@@ -393,8 +403,14 @@ final class TimelineView: NSView {
     }
 
     private func drawCues() {
+        // Only the cues in view: the rest are passed over by their times, before any geometry.
+        // (A block is two points wide at least, so a cue just out of view by its times may still show.)
+        let margin = 4 / scale
+        let first = originSeconds - margin, last = originSeconds + visibleSeconds + margin
         for cue in content.cues {
-            let rect = blockRect(for: cue)
+            let (start, end) = timing(of: cue)
+            guard end.seconds >= first, start.seconds <= last else { continue }
+            let rect = blockRect(for: cue, start: start, end: end)
             guard rect.maxX >= 0, rect.minX <= bounds.width else { continue }
             let isSelected = cue.id == content.selectedCueID
             let isAI = cue.isAIGenerated == true

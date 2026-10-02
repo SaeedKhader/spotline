@@ -46,16 +46,22 @@ struct ReviewSidebar: View {
     private var cards: some View {
         let entries = self.entries
         let current = editor.currentReviewItem
+        let editing = editor.reviewEditingItem
+        let selected = editor.selectedCueID
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 6) {
                     ForEach(entries) { entry in
                         switch entry {
                         case .open(let item):
-                            ReviewCard(editor: editor, item: item, isCurrent: item.id == current?.id || item == editor.reviewEditingItem) {
+                            ReviewCard(
+                                editor: editor, item: item, isCurrent: item.id == current?.id || item == editing,
+                                isOnSelectedCue: item.cueID == selected
+                            ) {
                                 editor.selectReviewItem(item)
                                 isFocused = true
                             }
+                            .equatable()
                         case .settled(let settled):
                             SettledCard(editor: editor, settled: settled)
                         }
@@ -413,14 +419,21 @@ private struct ScopeButton: View {
 
 /// One thing to decide: what it is, on which cue and when, enough of the line
 /// to decide without looking away, and its buttons (the blue one is Return).
-private struct ReviewCard: View {
+///
+/// The sidebar tells it whether it is marked (compared by `==`), so a selection redraws the
+/// cards it marks and unmarks, not every card; what it shows of its cue it reads itself.
+private struct ReviewCard: View, Equatable {
     let editor: EditorState
     let item: ReviewItem
     let isCurrent: Bool
+    let isOnSelectedCue: Bool
     let pick: () -> Void
 
+    nonisolated static func == (lhs: ReviewCard, rhs: ReviewCard) -> Bool {
+        lhs.item == rhs.item && lhs.isCurrent == rhs.isCurrent && lhs.isOnSelectedCue == rhs.isOnSelectedCue
+    }
+
     private var cue: Cue? { editor.cue(withID: item.cueID) ?? editor.proposedChange(forCue: item.cueID)?.cue }
-    private var isOnSelectedCue: Bool { editor.selectedCueID == item.cueID }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

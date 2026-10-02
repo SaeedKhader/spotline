@@ -114,12 +114,13 @@ public enum TextDirection: Sendable, Equatable {
 
     /// Right to left for Arabic, Hebrew, Persian, Urdu and other RTL languages;
     /// for an unknown language ("und"), from the text's first letters.
-    public static func of(languageCode: String, sample: String = "") -> TextDirection {
+    /// (`sample` is only read for an unknown language.)
+    public static func of(languageCode: String, sample: @autoclosure () -> String = "") -> TextDirection {
         let language = Locale.Language(identifier: languageCode)
         if languageCode != "und", !languageCode.isEmpty, language.languageCode != nil {
             return language.characterDirection == .rightToLeft ? .rightToLeft : .leftToRight
         }
-        return of(text: sample)
+        return of(text: sample())
     }
 
     /// From the text's letters: right to left when most are in an RTL script.

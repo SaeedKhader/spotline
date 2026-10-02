@@ -28,6 +28,13 @@ public enum SubtitleText {
         }
     }
 
+    /// True when a viewer would read nothing: no text, or only spaces and markup.
+    public static func isBlank(_ text: String) -> Bool {
+        // Plain text (most cues) is read as it is; markup and entities are taken out first.
+        guard text.contains(where: { $0 == "<" || $0 == "{" || $0 == "&" }) else { return text.allSatisfy(\.isWhitespace) }
+        return visibleLines(of: text).joined().allSatisfy(\.isWhitespace)
+    }
+
     /// Decodes the entities SRT and WebVTT text uses (`&amp;`, `&lt;`, `&gt;`, `&nbsp;`, `&lrm;`, `&rlm;`).
     public static func decodeEntities(_ text: String) -> String {
         guard text.contains("&") else { return text }

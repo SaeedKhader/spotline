@@ -63,64 +63,75 @@ public enum QualityControl {
 
     /// The issues of each cue that has any, for cues sorted by start time.
     public static func check(_ cues: [Cue], preset: QCPreset, context: Context) -> [Cue.ID: [QCIssue]] {
-        let rate = context.frameRate
         var result: [Cue.ID: [QCIssue]] = [:]
         for (index, cue) in cues.enumerated() {
-            var issues: [QCIssue] = []
-            func add(_ kind: QCIssue.Kind, _ message: String) { issues.append(QCIssue(kind: kind, message: message)) }
-
-            let lines = SubtitleText.visibleLines(of: cue.text)
-            if lines.allSatisfy({ $0.allSatisfy(\.isWhitespace) }) {
-                add(.empty, "No text")
-            } else {
-                if let max = preset.maxLines, lines.count > max {
-                    add(.tooManyLines(lines.count), "\(lines.count) lines (max \(max))")
-                }
-                if let max = preset.maxCharactersPerLine {
-                    for (number, line) in lines.enumerated() where line.count > max {
-                        add(.lineTooLong(line: number, characters: line.count), "Line \(number + 1) has \(line.count) characters (max \(max))")
-                    }
-                }
-                // A speed the user accepted stays accepted until the cue reads faster.
-                if let max = preset.maxCharactersPerSecond, cue.readingSpeed > max,
-                   cue.acceptedReadingSpeed.map({ cue.readingSpeed > $0 + 0.005 }) ?? true {
-                    add(.readingSpeed(cue.readingSpeed), "Reading speed \(Int(cue.readingSpeed.rounded())) c/s (max \(max.compact))")
-                }
-            }
-            if let minimum = preset.minimumDuration, cue.duration < minimum {
-                add(.tooShort(cue.duration), "Shown for \(cue.duration.shortSeconds) (min \(minimum.shortSeconds))")
-            }
-            if let maximum = preset.maximumDuration, cue.duration > maximum {
-                add(.tooLong(cue.duration), "Shown for \(cue.duration.shortSeconds) (max \(maximum.shortSeconds))")
-            }
             // A top cue (a sign) may run alongside bottom dialogue; only the same position counts.
-            if let next = cues[(index + 1)...].first(where: { $0.position == cue.position }) {
-                if next.start < cue.end {
-                    add(.overlapsNext, "Overlaps the next cue")
-                } else {
-                    let gap = next.start.firstFrame(at: rate) - cue.end.firstFrame(at: rate)
-                    if gap < preset.minimumGapFrames {
-                        add(.gapTooShort(frames: gap), "\(frames(gap)) before the next cue (min \(preset.minimumGapFrames))")
-                    }
-                }
-            }
-            if let threshold = preset.shotChangeFrames, !context.shotChanges.isEmpty {
-                let start = cue.start.firstFrame(at: rate)
-                if let shot = nearest(to: start, in: context.shotChanges), shot != start, abs(start - shot) < threshold {
-                    let offset = start - shot
-                    add(.startNearShotChange(frames: offset), "Starts \(frames(abs(offset))) \(offset > 0 ? "after" : "before") a shot change")
-                }
-                let end = cue.end.firstFrame(at: rate)
-                if let shot = nearest(to: end, in: context.shotChanges), shot != end, shot - end != preset.minimumGapFrames,
-                   abs(end - shot) < threshold
-                {
-                    let offset = end - shot
-                    add(.endNearShotChange(frames: offset), "Ends \(frames(abs(offset))) \(offset > 0 ? "after" : "before") a shot change")
-                }
-            }
+            let next = cues[(index + 1)...].first(where: { $0.position == cue.position })
+            let issues = issues(of: cue, nextStart: next?.start, preset: preset, context: context)
             if !issues.isEmpty { result[cue.id] = issues }
         }
         return result
+    }
+
+    /// One cue's issues. They depend on the cue itself and on when the next cue in the same
+    /// position starts (`nextStart`, nil for the last), so a caller can keep them until either changes.
+    public static func issues(of cue: Cue, nextStart: MediaTime?, preset: QCPreset, context: Context) -> [QCIssue] {
+        let rate = context.frameRate
+        var issues: [QCIssue] = []
+        func add(_ kind: QCIssue.Kind, _ message: String) { issues.append(QCIssue(kind: kind, message: message)) }
+
+        let lines = SubtitleText.visibleLines(of: cue.text)
+        if lines.allSatisfy({ $0.allSatisfy(\.isWhitespace) }) {
+            add(.empty, "No text")
+        } else {
+            if let max = preset.maxLines, lines.count > max {
+                add(.tooManyLines(lines.count), "\(lines.count) lines (max \(max))")
+            }
+            if let max = preset.maxCharactersPerLine {
+                for (number, line) in lines.enumerated() where line.count > max {
+                    add(.lineTooLong(line: number, characters: line.count), "Line \(number + 1) has \(line.count) characters (max \(max))")
+                }
+            }
+            // A speed the user accepted stays accepted until the cue reads faster.
+            if let max = preset.maxCharactersPerSecond {
+                let seconds = cue.duration.seconds
+                let speed = seconds > 0 ? Double(lines.reduce(0) { $0 + $1.count }) / seconds : 0
+                if speed > max, cue.acceptedReadingSpeed.map({ speed > $0 + 0.005 }) ?? true {
+                    add(.readingSpeed(speed), "Reading speed \(Int(speed.rounded())) c/s (max \(max.compact))")
+                }
+            }
+        }
+        if let minimum = preset.minimumDuration, cue.duration < minimum {
+            add(.tooShort(cue.duration), "Shown for \(cue.duration.shortSeconds) (min \(minimum.shortSeconds))")
+        }
+        if let maximum = preset.maximumDuration, cue.duration > maximum {
+            add(.tooLong(cue.duration), "Shown for \(cue.duration.shortSeconds) (max \(maximum.shortSeconds))")
+        }
+        if let nextStart {
+            if nextStart < cue.end {
+                add(.overlapsNext, "Overlaps the next cue")
+            } else {
+                let gap = nextStart.firstFrame(at: rate) - cue.end.firstFrame(at: rate)
+                if gap < preset.minimumGapFrames {
+                    add(.gapTooShort(frames: gap), "\(frames(gap)) before the next cue (min \(preset.minimumGapFrames))")
+                }
+            }
+        }
+        if let threshold = preset.shotChangeFrames, !context.shotChanges.isEmpty {
+            let start = cue.start.firstFrame(at: rate)
+            if let shot = nearest(to: start, in: context.shotChanges), shot != start, abs(start - shot) < threshold {
+                let offset = start - shot
+                add(.startNearShotChange(frames: offset), "Starts \(frames(abs(offset))) \(offset > 0 ? "after" : "before") a shot change")
+            }
+            let end = cue.end.firstFrame(at: rate)
+            if let shot = nearest(to: end, in: context.shotChanges), shot != end, shot - end != preset.minimumGapFrames,
+               abs(end - shot) < threshold
+            {
+                let offset = end - shot
+                add(.endNearShotChange(frames: offset), "Ends \(frames(abs(offset))) \(offset > 0 ? "after" : "before") a shot change")
+            }
+        }
+        return issues
     }
 
     private static func frames(_ count: Int64) -> String {
