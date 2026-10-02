@@ -38,7 +38,7 @@ final class EpisodeBriefUITests: XCTestCase {
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sheet)
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 10), .completed, "Confirm did not close the brief")
         // Then the script review runs, and its card shows with the other checks.
-        let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier ENDSWITH %@", ".script")).firstMatch
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'review.card.' AND identifier ENDSWITH '.script'")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 20), "No AI Review card after the script review")
         XCTAssertFalse(app.descendants(matching: .any)[AccessibilityID.Brief.waiting].exists, "The review still waits")
         let cardID = card.identifier
