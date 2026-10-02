@@ -281,6 +281,10 @@ public final class EditorState {
     public private(set) var isEmbeddedSubtitlesSheetShown = false
     /// How far reading the chosen embedded track has got, nil when not reading.
     public private(set) var embeddedSubtitlesJob: AnalysisJob?
+    /// True while the episode brief is being built; the review waits for it.
+    public internal(set) var isBuildingBrief = false
+    /// Whether the episode brief dialog is shown.
+    public internal(set) var isBriefSheetShown = false
     @ObservationIgnored private var embeddedSubtitlesTask: Task<Void, Never>?
     /// Lists and reads the media's subtitle tracks off the main actor. Tests replace them.
     @ObservationIgnored public var listEmbeddedSubtitles: @Sendable (URL) async throws -> [EmbeddedSubtitleTrack] = { url in
@@ -366,7 +370,7 @@ public final class EditorState {
         self.qcPreset = settings?.string(forKey: Self.qcPresetKey).flatMap(QCPreset.named) ?? .standard
         self.wantsReviewSidebar = settings?.object(forKey: Self.reviewSidebarKey) as? Bool ?? true
         self.aiSettings = AISettings.load(from: settings)
-        self.aiProviders = launchOptions.isUITestMode ? .scripted : .live()
+        self.aiProviders = launchOptions.isUITestMode ? .scripted(buildsBrief: launchOptions.buildsEpisodeBrief) : .live()
         self.undoManager = UndoManager()
         updateIssues()
         // One undo step per edit, also where no run loop groups events (unit tests).
@@ -496,7 +500,8 @@ public final class EditorState {
              EditorCommand.clearTranslation.id, EditorCommand.clearTranscript.id, EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
-             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id:
+             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id,
+             EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id:
             canPerformAI(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
@@ -642,7 +647,8 @@ public final class EditorState {
              EditorCommand.clearTranslation.id, EditorCommand.clearTranscript.id, EditorCommand.reviewWords.id, EditorCommand.confirmRemainingWords.id,
              EditorCommand.maskProfanity.id, EditorCommand.removeHearingImpaired.id, EditorCommand.fixPunctuation.id,
              EditorCommand.cancelAITask.id, EditorCommand.acceptChange.id, EditorCommand.rejectChange.id,
-             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id:
+             EditorCommand.acceptAllChanges.id, EditorCommand.rejectAllChanges.id, EditorCommand.reviewChanges.id,
+             EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id:
             return performAI(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
@@ -754,6 +760,8 @@ public final class EditorState {
         embeddedSubtitles = []
         embeddedSubtitlesJob = nil
         isEmbeddedSubtitlesSheetShown = false
+        isBuildingBrief = false
+        isBriefSheetShown = false
         scrollTimeline(toCenter: 0)
     }
 

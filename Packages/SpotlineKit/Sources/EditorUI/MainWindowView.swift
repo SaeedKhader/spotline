@@ -54,6 +54,12 @@ public struct MainWindowView: View {
         )) {
             EmbeddedSubtitlesSheet(editor: editor)
         }
+        .sheet(isPresented: Binding(
+            get: { editor.isBriefSheetShown },
+            set: { if !$0 { editor.dismissEpisodeBrief() } }
+        )) {
+            EpisodeBriefSheet(editor: editor)
+        }
         .transaction { transaction in
             if editor.launchOptions.isUITestMode { transaction.disablesAnimations = true }
         }

@@ -35,6 +35,15 @@ extension XCTestCase {
         return app
     }
 
+    /// Chooses `command` in the AI menu.
+    @MainActor
+    func chooseAIMenuItem(_ command: EditorCommand, in app: XCUIApplication) {
+        app.menuBars.menuBarItems["AI"].click()
+        let item = app.menuBars.menuItems[command.title]
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "No \(command.title) menu item")
+        item.click()
+    }
+
     /// The button for `command`, once it exists and is enabled (media has loaded).
     @MainActor
     func button(_ command: EditorCommand, in app: XCUIApplication) -> XCUIElement {

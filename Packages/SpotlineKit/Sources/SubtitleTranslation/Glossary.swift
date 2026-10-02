@@ -116,15 +116,20 @@ public struct GlossaryIndex: Sendable {
     public var isEmpty: Bool { terms.isEmpty }
 
     /// Entries whose source term occurs in `source` as whole words, in source order.
+    /// The longest term wins: where a term sits inside a longer one that is there too
+    /// ("the Seven" in "the Seven Kingdoms"), only the longer one counts. The shorter
+    /// one still counts where it stands by itself.
     public func entries(inSource source: String) -> [Glossary.Entry] {
         guard !terms.isEmpty else { return [] }
         let source = MatchText.normalize(source)
         guard !source.isEmpty else { return [] }
-        return terms.compactMap { item -> (Glossary.Entry, String.Index)? in
-            guard !item.term.isEmpty, MatchText.contains(source, term: item.term),
-                  let position = source.range(of: item.term)?.lowerBound
-            else { return nil }
-            return (item.entry, position)
+        let found = terms.map { MatchText.ranges(of: $0.term, in: source) }
+        let all = found.joined()
+        return zip(terms, found).compactMap { item, ranges -> (Glossary.Entry, String.Index)? in
+            let standing = ranges.first { range in
+                !all.contains { $0 != range && $0.lowerBound <= range.lowerBound && range.upperBound <= $0.upperBound }
+            }
+            return standing.map { (item.entry, $0.lowerBound) }
         }
         .sorted { $0.1 < $1.1 }
         .map(\.0)

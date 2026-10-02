@@ -6,14 +6,6 @@ import XCTest
 /// go straight into the cue list, one undo step per batch.
 final class AIToolsUITests: XCTestCase {
     @MainActor
-    func chooseAIMenuItem(_ command: EditorCommand, in app: XCUIApplication) {
-        app.menuBars.menuBarItems["AI"].click()
-        let item = app.menuBars.menuItems[command.title]
-        XCTAssertTrue(item.waitForExistence(timeout: 10), "No \(command.title) menu item")
-        item.click()
-    }
-
-    @MainActor
     func testSettingsOfferLunaForTranslationAndSayWhatItNeeds() throws {
         let app = launchApp()
         app.typeKey(",", modifierFlags: .command)
