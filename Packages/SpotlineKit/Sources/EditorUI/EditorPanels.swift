@@ -50,6 +50,17 @@ enum EditorPanels {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
+    static func chooseSceneFramesFolder() -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = EditorCommand.exportSceneFrames.title
+        panel.message = "Choose a folder for the frames and the list of scenes."
+        panel.prompt = "Export"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
     /// The glossary's floating panel, kept while the app runs.
     private static var glossaryPanel: NSPanel?
 

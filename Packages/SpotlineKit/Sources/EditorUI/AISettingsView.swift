@@ -90,10 +90,14 @@ public struct AISettingsView: View {
                     keyField("ElevenLabs API key", text: $elevenLabsKey, provider: .elevenLabs)
                 }
                 .disabled(!editor.aiSettings.allowsCloud)
+                Toggle("Send video frames", isOn: $editor.aiSettings.sendsVideoFrames)
+                    .disabled(!editor.aiSettings.allowsCloud)
+                    .help("A few frames of each scene go to GPT-6 Luna, which writes who is in view into the episode brief. A few cents an episode.")
+                    .accessibilityIdentifier(AccessibilityID.AISettings.sendsVideoFrames)
             } header: {
                 Text("Cloud")
             } footer: {
-                Text("Cloud providers receive the dialogue audio or the subtitle text; check your contract before sending material under NDA. Keys are saved in your Keychain when you leave the field.")
+                Text("Cloud providers receive the dialogue audio or the subtitle text, and, only with Send video frames on, a few small frames of each scene (OpenAI, not kept). Check your contract before sending material under NDA. Keys are saved in your Keychain when you leave the field.")
                     .foregroundStyle(.secondary)
             }
         }

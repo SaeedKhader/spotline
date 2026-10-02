@@ -1,4 +1,5 @@
 import AITools
+import EditorCommands
 import SpotlineAccessibility
 import SubtitleCore
 import SubtitleTranslation
@@ -34,6 +35,11 @@ struct EpisodeBriefSheet: View {
         .padding(20)
         .frame(width: 720)
         .onAppear { draft = editor.track.brief }
+        // The brief changed under the dialog (built again, scenes described, an undo): show that.
+        // Typing here does not change it, so nothing typed is lost.
+        .onChange(of: editor.track.brief) { _, brief in
+            if let brief { draft = brief }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.Brief.sheet)
     }
@@ -151,6 +157,28 @@ struct EpisodeBriefSheet: View {
                 .background(RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary))
                 .accessibilityLabel("Scenes")
                 .accessibilityIdentifier(AccessibilityID.Brief.scenes)
+            HStack(alignment: .firstTextBaseline) {
+                Text("In the Video").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button(EditorCommand.describeScenes.title) {
+                    if let draft { editor.describeScenes(keeping: draft) }
+                }
+                .controlSize(.small)
+                .disabled(!editor.canPerform(.describeScenes))
+                .help("Sends a few frames of each scene to GPT-6 Luna. A few cents an episode.")
+                .accessibilityIdentifier(AccessibilityID.command(EditorCommand.describeScenes.id))
+            }
+            Text("Who is in view in each scene, from a few frames of it. The translator uses this to tell how many people a line is spoken to, and who they are.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: Binding(get: { draft?.seen ?? "" }, set: { draft?.seen = $0 }))
+                .font(.body)
+                .frame(height: 140)
+                .scrollContentBackground(.hidden)
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 5).strokeBorder(.quaternary))
+                .accessibilityLabel("In the video")
+                .accessibilityIdentifier(AccessibilityID.Brief.seen)
         }
     }
 

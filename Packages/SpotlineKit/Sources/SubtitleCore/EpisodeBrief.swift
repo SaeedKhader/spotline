@@ -69,6 +69,9 @@ public struct EpisodeBrief: Hashable, Sendable, Codable {
     public var plot: String
     /// Scene by scene, who talks to whom and about what: one line each, "12:40 Dunk asks Egg…".
     public var scenes: String
+    /// What the video shows, scene by scene: one line each, "12:40 Dunk stands before the steward's desk. In view: …".
+    /// Written from a few frames of each scene (`SceneDescriber`), when sending frames is allowed; else empty.
+    public var seen: String
     /// The language the brief spells names in (BCP 47), the translation's target.
     public var targetLanguage: String
     /// What the brief is about, from the file name: "A Knight of the Seven Kingdoms S01E01".
@@ -77,41 +80,45 @@ public struct EpisodeBrief: Hashable, Sendable, Codable {
     public var isConfirmed: Bool
 
     public init(
-        people: [Person] = [], terms: [Term] = [], plot: String = "", scenes: String = "", targetLanguage: String, work: String? = nil,
-        isConfirmed: Bool = false
+        people: [Person] = [], terms: [Term] = [], plot: String = "", scenes: String = "", seen: String = "", targetLanguage: String,
+        work: String? = nil, isConfirmed: Bool = false
     ) {
         self.people = people
         self.terms = terms
         self.plot = plot
         self.scenes = scenes
+        self.seen = seen
         self.targetLanguage = targetLanguage
         self.work = work
         self.isConfirmed = isConfirmed
     }
 
     private enum CodingKeys: String, CodingKey {
-        case people, terms, plot, scenes, targetLanguage, work, isConfirmed
+        case people, terms, plot, scenes, seen, targetLanguage, work, isConfirmed
     }
 
-    /// Briefs saved before the plot and scenes have none.
+    /// Briefs saved before the plot and scenes, or before what the video shows, have none.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         people = try container.decode([Person].self, forKey: .people)
         terms = try container.decode([Term].self, forKey: .terms)
         plot = try container.decodeIfPresent(String.self, forKey: .plot) ?? ""
         scenes = try container.decodeIfPresent(String.self, forKey: .scenes) ?? ""
+        seen = try container.decodeIfPresent(String.self, forKey: .seen) ?? ""
         targetLanguage = try container.decode(String.self, forKey: .targetLanguage)
         work = try container.decodeIfPresent(String.self, forKey: .work)
         isConfirmed = try container.decode(Bool.self, forKey: .isConfirmed)
     }
 
-    /// The plot and scenes as notes for a translator or reviewer, nil when both are empty.
+    /// The plot, the scenes and what the video shows as notes for a translator or reviewer, nil when all are empty.
     public var storyNotes: String? {
         var parts: [String] = []
         let plot = plot.trimmingCharacters(in: .whitespacesAndNewlines)
         let scenes = scenes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !plot.isEmpty { parts.append("Plot: \(plot)") }
         if !scenes.isEmpty { parts.append("Scenes (time, who talks to whom):\n\(scenes)") }
+        let seen = seen.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !seen.isEmpty { parts.append("What the video shows (time, who is there, from a few frames of each scene):\n\(seen)") }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 

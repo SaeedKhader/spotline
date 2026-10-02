@@ -265,6 +265,8 @@ public struct TranslationBatch: Sendable, Equatable {
 
 public enum AIError: Error, LocalizedError, Equatable {
     case cloudNotAllowed
+    /// Describing scenes needs frames of the video sent, which is its own switch.
+    case videoFramesNotAllowed
     case missingAPIKey(provider: String)
     case languageNotSupported(String)
     case languageNotInstalled(source: String, target: String)
@@ -280,6 +282,8 @@ public enum AIError: Error, LocalizedError, Equatable {
         switch self {
         case .cloudNotAllowed:
             "Cloud AI is off. Turn on “Allow cloud providers” in Settings › AI, or choose an on-device provider."
+        case .videoFramesNotAllowed:
+            "Sending video frames is off. Turn on “Send video frames” in Settings › AI to have the scenes described."
         case .missingAPIKey(let provider):
             "Add your \(provider) API key in Settings › AI. It is kept in your Keychain."
         case .languageNotSupported(let language):

@@ -185,6 +185,7 @@ public enum AccessibilityID {
         public static let soundDescriptions = "settings.ai.soundDescriptions"
         public static let leavesOutWalla = "settings.ai.leavesOutWalla"
         public static let leavesOutFictionalLanguages = "settings.ai.leavesOutFictionalLanguages"
+        public static let sendsVideoFrames = "settings.ai.sendsVideoFrames"
         public static let register = "settings.ai.register"
         public static let dropsFinalPunctuation = "settings.ai.dropsFinalPunctuation"
         public static let namesInParentheses = "settings.ai.namesInParentheses"
@@ -234,10 +235,28 @@ public enum AccessibilityID {
         public static let plot = "brief.plot"
         /// Scene by scene, who talks to whom, as editable text.
         public static let scenes = "brief.scenes"
+        /// What the video shows, scene by scene, as editable text.
+        public static let seen = "brief.seen"
         public static let confirmButton = "brief.confirm"
         public static let notNowButton = "brief.notNow"
         /// In the review sidebar while the review waits for the brief.
         public static let waiting = "review.briefWaiting"
+    }
+
+    /// The scene frames dialog (AI › Scene Frames…).
+    public enum SceneFrames {
+        public static let sheet = "sceneFrames"
+        /// Shown while the frames are read; its value is how far that has got.
+        public static let progress = "sceneFrames.progress"
+        /// How many scenes and frames were picked.
+        public static let summary = "sceneFrames.summary"
+        /// One scene, by its number from 1; its label says when it is and how many lines it has.
+        public static func scene(_ number: Int) -> String { "sceneFrames.scene.\(number)" }
+        /// One picked frame of a scene, by its order from 1; its value says why it was kept. Shows it in the video.
+        public static func frame(_ scene: Int, _ order: Int) -> String { "\(Self.scene(scene)).frame.\(order)" }
+        /// Shows or hides the scene's lines and the frames left out.
+        public static func details(_ scene: Int) -> String { "\(Self.scene(scene)).details" }
+        public static let doneButton = "sceneFrames.done"
     }
 
     public enum EmbeddedSubtitles {

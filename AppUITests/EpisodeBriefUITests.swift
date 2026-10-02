@@ -57,4 +57,29 @@ final class EpisodeBriefUITests: XCTestCase {
         XCTAssertTrue(sheet.textFields.matching(NSPredicate(format: "value == %@", "Rick Sanchez")).firstMatch.exists, "The edit was not kept")
         sheet.buttons[AccessibilityID.Brief.notNowButton].click()
     }
+
+    /// From the brief: the scenes described from a few frames of each, under "In the Video".
+    @MainActor
+    func testDescribesTheScenesFromTheVideoIntoTheBrief() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-UITestEpisodeBrief"]
+        _ = launchApp(prepared: app)
+        _ = button(.stepForward, in: app)
+        chooseAIMenuItem(.transcribe, in: app)
+
+        let sheet = app.descendants(matching: .any)[AccessibilityID.Brief.sheet]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 20), "No brief after transcribing")
+        let seen = sheet.descendants(matching: .any)[AccessibilityID.Brief.seen]
+        XCTAssertEqual(seen.value as? String, "", "Nothing from the video yet")
+        // From the menu: the dialog's own button is below the fold of its scroll view.
+        sheet.buttons[AccessibilityID.Brief.notNowButton].click()
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sheet)
+        XCTAssertEqual(XCTWaiter().wait(for: [closed], timeout: 10), .completed, "Not Now did not close the brief")
+        chooseAIMenuItem(.describeScenes, in: app)
+
+        // The frames are picked and described, then the brief opens with what they show.
+        let described = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND value CONTAINS %@", "In view: Rick"), object: seen)
+        XCTAssertEqual(XCTWaiter().wait(for: [described], timeout: 40), .completed, "The scenes were not described")
+        sheet.buttons[AccessibilityID.Brief.notNowButton].click()
+    }
 }

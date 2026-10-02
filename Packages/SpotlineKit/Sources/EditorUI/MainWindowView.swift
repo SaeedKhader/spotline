@@ -60,6 +60,12 @@ public struct MainWindowView: View {
         )) {
             EpisodeBriefSheet(editor: editor)
         }
+        .sheet(isPresented: Binding(
+            get: { editor.isSceneFramesSheetShown },
+            set: { if !$0 { editor.dismissSceneFrames() } }
+        )) {
+            SceneFramesSheet(editor: editor)
+        }
         // Each button settles the question itself: closing the alert decides nothing.
         .alert("Move the subtitles onto the audio?", isPresented: Binding(get: { editor.subtitleSync != nil }, set: { _ in })) {
             Button(EditorCommand.applySubtitleSync.title) { editor.perform(.applySubtitleSync) }
