@@ -84,14 +84,23 @@ extension EditorState {
         let generation = aiTaskGeneration
         aiTaskHandle = Task { [weak self] in
             do {
-                let brief = try await builder.buildBrief(request)
+                var brief = try await builder.buildBrief(request)
                 guard let self else { return }
                 self.isBuildingBrief = false
                 guard !Task.isCancelled, self.aiTaskGeneration == generation else { return }
                 self.aiTask = nil
+                // What the video showed stays when the brief is built again; describing the scenes replaces it.
+                if brief.seen.isEmpty { brief.seen = self.track.brief?.seen ?? "" }
                 self.edit("Episode Brief") { track in track.brief = brief }
-                self.isBriefSheetShown = true
-                self.onAITaskEnd?(AITaskEnd(title: "Episode brief ready", message: "Check who is who, then confirm it to see the review.", succeeded: true))
+                if self.aiSettings.sendsVideoFrames, self.hasMedia {
+                    // The brief opens once the scenes are described, or at once when they cannot be.
+                    self.describeScenes(automatically: true)
+                } else {
+                    self.isBriefSheetShown = true
+                }
+                if self.isBriefSheetShown {
+                    self.onAITaskEnd?(AITaskEnd(title: "Episode brief ready", message: "Check who is who, then confirm it to see the review.", succeeded: true))
+                }
             } catch {
                 guard let self else { return }
                 self.isBuildingBrief = false

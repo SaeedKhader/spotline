@@ -525,7 +525,8 @@ public final class EditorState {
              EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id,
              EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id:
             canPerformAI(command)
-        case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id:
+        case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id,
+             EditorCommand.describeScenes.id:
             canPerformSceneFrames(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
@@ -676,7 +677,8 @@ public final class EditorState {
              EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id,
              EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id:
             return performAI(command)
-        case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id:
+        case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id,
+             EditorCommand.describeScenes.id:
             return performSceneFrames(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)

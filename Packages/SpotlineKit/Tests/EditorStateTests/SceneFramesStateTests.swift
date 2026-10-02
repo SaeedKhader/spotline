@@ -1,3 +1,4 @@
+import AITools
 import EditorCommands
 import Foundation
 import MediaAnalysis
@@ -155,5 +156,126 @@ struct SceneFramesStateTests {
 
     @Test func agentsCannotOpenTheExportDialog() {
         #expect(EditorState.commandsAgentsCannotRun.contains(EditorCommand.exportSceneFrames.id))
+    }
+}
+
+/// Describing the scenes from their frames, into the episode brief.
+@MainActor
+struct SceneSheetStateTests {
+    let frames = SceneFramesStateTests()
+
+    /// An editor with media, four lines, a brief naming speaker_0 Rick, and the scripted describer.
+    func makeEditor(describer: (any SceneDescriber)? = ScriptedSceneDescriber()) async -> EditorState {
+        let editor = frames.makeEditor()
+        editor.aiProviders = AIProviderFactory(
+            transcriber: { _ in ScriptedTranscriber.fixture }, translator: { _ in ScriptedTranslator() },
+            briefBuilder: { _ in ScriptedBriefBuilder() }, sceneDescriber: { _ in describer }
+        )
+        editor.open(frames.media)
+        await frames.settle { editor.hasMedia }
+        editor.edit("Brief") { track in
+            track.brief = EpisodeBrief(people: [EpisodeBrief.Person(voices: ["speaker_0"], name: "Rick", gender: .male)], targetLanguage: "ar")
+        }
+        return editor
+    }
+
+    func finish(_ editor: EditorState) async {
+        for _ in 0..<300 where editor.aiTask != nil { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    @Test func needsABrief() async {
+        let editor = await makeEditor()
+        #expect(editor.canPerform(.describeScenes))
+        editor.edit("No brief") { track in track.brief = nil }
+        #expect(!editor.canPerform(.describeScenes))
+    }
+
+    @Test func picksTheFramesDescribesTheScenesAndOpensTheBrief() async throws {
+        let editor = await makeEditor()
+        #expect(editor.sceneFrames == nil)
+        #expect(editor.perform(.describeScenes))
+        #expect(editor.aiTask?.stages == ["Picking frames", "Describing scenes"])
+        #expect(!editor.canPerform(.describeScenes), "Already running")
+        await finish(editor)
+
+        #expect(editor.sceneFrames?.count == 1, "The frames were picked on the way")
+        #expect(editor.track.brief?.seen == "0:00 Two people talk in a room (2 frames, 4 lines). In view: Rick (a man in a lab coat).")
+        #expect(editor.isBriefSheetShown)
+        #expect(editor.track.brief?.isConfirmed == false)
+        // The translator gets it once the brief is confirmed.
+        #expect(editor.translatorNotesWithBrief == nil)
+        editor.confirmEpisodeBrief(try #require(editor.track.brief))
+        #expect(editor.translatorNotesWithBrief?.contains("What the video shows") == true)
+        // One undoable edit.
+        editor.perform(.undo)
+        editor.perform(.undo)
+        #expect(editor.track.brief?.seen.isEmpty == true)
+    }
+
+    @Test func theRequestNamesWhoSpeaksFromTheBrief() async throws {
+        let editor = await makeEditor()
+        editor.perform(.showSceneFrames)
+        await frames.settle { editor.sceneFrames != nil }
+        let requests = editor.sceneRequests(for: try #require(editor.sceneFrames), brief: try #require(editor.track.brief))
+        #expect(requests.count == 1)
+        #expect(requests[0].frames.map(\.isWidest) == [true, false])
+        #expect(requests[0].lines.map(\.name) == ["Rick", nil, "Rick", nil])
+        #expect(requests[0].lines.map(\.voices) == [["speaker_0"], ["speaker_1"], ["speaker_0"], ["speaker_1"]])
+        #expect(requests[0].people == [SceneRequest.Person(name: "Rick", gender: .male)])
+    }
+
+    @Test func fromTheDialogWhatWasEditedThereIsKept() async throws {
+        let editor = await makeEditor()
+        var draft = try #require(editor.track.brief)
+        draft.people[0].name = "Rick Sanchez"
+        editor.isBriefSheetShown = true
+        editor.describeScenes(keeping: draft)
+        #expect(!editor.isBriefSheetShown)
+        await finish(editor)
+        #expect(editor.track.brief?.people[0].name == "Rick Sanchez")
+        #expect(editor.track.brief?.seen.contains("In view: Rick Sanchez") == true)
+        #expect(editor.isBriefSheetShown)
+    }
+
+    @Test func withoutAllowingFramesNothingIsSent() async {
+        let editor = await makeEditor()
+        var reported: [String] = []
+        editor.reportError = { _, error in reported.append(error.localizedDescription) }
+        editor.aiProviders.sceneDescriber = { settings in
+            guard settings.sendsVideoFrames else { throw AIError.videoFramesNotAllowed }
+            return ScriptedSceneDescriber()
+        }
+        #expect(editor.perform(.describeScenes))
+        #expect(editor.aiTask == nil)
+        #expect(reported.first?.contains("Send video frames") == true)
+        #expect(editor.track.brief?.seen.isEmpty == true)
+    }
+
+    @Test func afterTheBriefIsBuiltTheScenesAreDescribedWhenFramesMayBeSent() async {
+        let editor = await makeEditor()
+        editor.aiSettings.sendsVideoFrames = true
+        editor.buildEpisodeBrief(automatically: false)
+        for _ in 0..<300 where editor.track.brief?.seen.isEmpty != false { try? await Task.sleep(for: .milliseconds(10)) }
+        await finish(editor)
+        #expect(editor.track.brief?.seen.contains("In view: Rick") == true)
+        #expect(editor.isBriefSheetShown)
+
+        // Off: the brief opens as before, and what the video showed stays.
+        editor.dismissEpisodeBrief()
+        editor.aiSettings.sendsVideoFrames = false
+        editor.buildEpisodeBrief(automatically: false)
+        for _ in 0..<300 where !editor.isBriefSheetShown { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(editor.track.brief?.seen.contains("In view: Rick") == true)
+    }
+
+    @Test func settingIsOffByDefaultAndSaved() throws {
+        #expect(!AISettings().sendsVideoFrames)
+        let suite = "SceneSheetStateTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var settings = AISettings()
+        settings.sendsVideoFrames = true
+        settings.save(to: defaults)
+        #expect(AISettings.load(from: defaults).sendsVideoFrames)
     }
 }

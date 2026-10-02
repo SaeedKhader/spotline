@@ -57,7 +57,7 @@ public struct EditorMenuCommands: Commands {
                 .disabled(!editor.isTranslating)
         }
         CommandMenu("AI") {
-            buttons(for: .ai, only: [.transcribe, .showEpisodeBrief, .rebuildEpisodeBrief, .showSceneFrames, .translateWithAI])
+            buttons(for: .ai, only: [.transcribe, .showEpisodeBrief, .rebuildEpisodeBrief, .showSceneFrames, .describeScenes, .translateWithAI])
             Divider()
             buttons(for: .ai, only: [.clearTranslation, .clearTranscript])
             Divider()

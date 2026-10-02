@@ -361,6 +361,16 @@ The video itself says things the dialogue does not: how many people are spoken t
 - **Setups and picks** (`setups`, `picks`). Within a scene, frames whose signatures are close are one camera setup; in a scene whose frames all look alike (a dark room) the bar is lowered to a share of the scene's typical distance. The frame with the most faces stands for its setup. Kept are the widest view (most faces, smallest), then, up to √lines + 1 frames (2 to 9), the setup that adds most each time: many lines spoken over it, and unlike those kept. The setups left out count with the kept one they look most like.
 - **The dialog** (`SceneFramesSheet`). One row a scene: the kept frames with faces outlined, time, lines spoken over the setup and how many similar frames each stands for; a frame shows in the video when clicked; a scene opens to its lines and the frames left out. Export Scene Frames… writes the JPEGs and `scenes.json` (scenes, frames, lines with voices) to a folder, to try on a model by hand. The frames are kept while the media is open and are not saved in the project; they are derived, and the scene notes they lead to will be.
 
+### The scene sheet (step 2)
+
+GPT-6 Luna looks at the frames picked for each scene and writes who is in view into the episode brief; the user confirms it with the brief, and the translator reads it as text. Luna only reports what it sees and never words a line (Saeed, 2026-10-02).
+
+- **When.** After the brief is built and before it is confirmed, by itself when Settings › AI › Send video frames is on; and from AI › Describe Scenes from Video or the button in the brief's dialog (which keeps what was edited there). It picks the scene frames first when there are none yet. The brief opens when it is done.
+- **The request** (`OpenAISceneDescriber`, AITools). One Responses API request a scene, four at a time, at high effort: the brief's people, the scene's lines with time, voice and the name the brief gives that voice, then each kept frame under its time (the widest view marked) as a base64 JPEG. `store` is off. A 768×384 frame is about 350 input tokens, so an episode is a few cents.
+- **The answer** (`SceneNote`). A summary (where, who is with whom, how many take part), the people in view (a description starting with man, woman, boy or girl when clear, and a name only when frames and lines agree: never from a face) and any writing meant to be read. Names the brief does not have are dropped. A scene the model declines gets no note.
+- **In the brief.** `EpisodeBrief.seen`, one line a scene ("12:02 Dunk stands before a man at a desk. In view: Dunk (a tall young man); an older man in black."), editable under "In the Video", saved with the project, kept when the brief is built again, and part of `storyNotes`, so the translator and the script review get it once the brief is confirmed.
+- **Privacy.** `AISettings.sendsVideoFrames` is off by default and needs Allow cloud providers. Without it nothing is sent, and the command says which switch to turn on.
+
 ## 8. Testing from day one
 
 - `SubtitleCore`, `SubtitleFormats`, `QualityControl`: Swift Testing unit tests, no app needed, run in seconds.

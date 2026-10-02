@@ -29,16 +29,30 @@ extension EditorState {
         isSceneFramesSheetShown = false
     }
 
+    /// Reads the frames of `url` and groups them into scenes, off the main actor. `report` gets how far reading has got.
+    func loadSceneFrames(
+        from url: URL, report: @escaping @Sendable (MediaAnalyzer.Progress<Int>) -> Void
+    ) async throws -> [SceneFramePicker.Scene] {
+        let lines = sceneFrameLines
+        let samples = SceneFramePicker.samples(lines: lines, shotChanges: shotChanges ?? [])
+        let grabbed = try await grabFrames(url, samples.map(\.time), report)
+        return try await EditorState.runDetached {
+            let frames = grabbed.filter { samples.indices.contains($0.index) }.map { frame in
+                SceneFramePicker.Frame(
+                    id: frame.index, time: frame.time, line: samples[frame.index].line, signature: frame.signature,
+                    faces: frame.faces, jpeg: frame.jpeg, width: frame.width, height: frame.height
+                )
+            }
+            return SceneFramePicker.scenes(frames: frames, lines: lines)
+        }
+    }
+
     /// Reads the frames in the background and groups them into scenes, replacing what was picked before.
     func pickSceneFrames() {
         sceneFramesTask?.cancel()
-        guard let url = status.mediaURL else { return }
-        let lines = sceneFrameLines
-        guard !lines.isEmpty else { return }
-        let samples = SceneFramePicker.samples(lines: lines, shotChanges: shotChanges ?? [])
+        guard let url = status.mediaURL, !sceneFrameLines.isEmpty else { return }
         sceneFrames = nil
         sceneFramesJob = AnalysisJob()
-        let grab = grabFrames
         let report: @Sendable (MediaAnalyzer.Progress<Int>) -> Void = { [weak self] progress in
             guard let editor = self else { return }
             Task { @MainActor in
@@ -48,16 +62,7 @@ extension EditorState {
         }
         sceneFramesTask = Task { [weak self] in
             do {
-                let grabbed = try await grab(url, samples.map(\.time), report)
-                let scenes = try await EditorState.runDetached {
-                    let frames = grabbed.filter { samples.indices.contains($0.index) }.map { frame in
-                        SceneFramePicker.Frame(
-                            id: frame.index, time: frame.time, line: samples[frame.index].line, signature: frame.signature,
-                            faces: frame.faces, jpeg: frame.jpeg, width: frame.width, height: frame.height
-                        )
-                    }
-                    return SceneFramePicker.scenes(frames: frames, lines: lines)
-                }
+                guard let scenes = try await self?.loadSceneFrames(from: url, report: report) else { return }
                 guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
                 self.sceneFrames = scenes
                 self.sceneFramesJob = nil
@@ -135,6 +140,8 @@ extension EditorState {
         case EditorCommand.showSceneFrames.id: canPickSceneFrames
         case EditorCommand.pickSceneFramesAgain.id: canPickSceneFrames && sceneFramesJob == nil
         case EditorCommand.exportSceneFrames.id: sceneFrames?.isEmpty == false
+        case EditorCommand.describeScenes.id:
+            aiTask == nil && pendingReview == nil && track.brief != nil && canPickSceneFrames && sceneFramesJob == nil
         default: false
         }
     }
@@ -147,6 +154,9 @@ extension EditorState {
         case EditorCommand.exportSceneFrames.id:
             guard let folder = chooseSceneFramesFolder() else { return false }
             exportSceneFrames(to: folder)
+        case EditorCommand.describeScenes.id:
+            isBriefSheetShown = false
+            describeScenes(automatically: false)
         default: return false
         }
         return true

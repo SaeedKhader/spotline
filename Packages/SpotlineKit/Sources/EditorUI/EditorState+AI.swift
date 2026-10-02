@@ -17,17 +17,21 @@ public struct AIProviderFactory {
     public var briefBuilder: @MainActor (AISettings) throws -> (any EpisodeBriefBuilder)?
     /// Reviews the transcript once the brief is confirmed; nil when there is none to use.
     public var scriptReviewer: @MainActor (AISettings) throws -> (any ScriptReviewer)?
+    /// Describes each scene from its picked frames, for the brief; nil when there is none to use.
+    public var sceneDescriber: @MainActor (AISettings) throws -> (any SceneDescriber)?
 
     public init(
         transcriber: @escaping @MainActor (AISettings) throws -> any Transcriber,
         translator: @escaping @MainActor (AISettings) throws -> any CueTranslator,
         briefBuilder: @escaping @MainActor (AISettings) throws -> (any EpisodeBriefBuilder)? = { _ in nil },
-        scriptReviewer: @escaping @MainActor (AISettings) throws -> (any ScriptReviewer)? = { _ in nil }
+        scriptReviewer: @escaping @MainActor (AISettings) throws -> (any ScriptReviewer)? = { _ in nil },
+        sceneDescriber: @escaping @MainActor (AISettings) throws -> (any SceneDescriber)? = { _ in nil }
     ) {
         self.transcriber = transcriber
         self.translator = translator
         self.briefBuilder = briefBuilder
         self.scriptReviewer = scriptReviewer
+        self.sceneDescriber = sceneDescriber
     }
 
     public static func live(keys: APIKeyStore = APIKeyStore()) -> AIProviderFactory {
@@ -73,6 +77,13 @@ public struct AIProviderFactory {
                 guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                 guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
                 return OpenAIScriptReviewer(apiKey: key, effort: settings.reasoningEffort)
+            },
+            sceneDescriber: { settings in
+                guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
+                guard settings.sendsVideoFrames else { throw AIError.videoFramesNotAllowed }
+                guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
+                // High effort whatever the translation uses: a small model reads pictures better with time, for cents.
+                return OpenAISceneDescriber(apiKey: key, effort: .high)
             }
         )
     }
@@ -84,7 +95,8 @@ public struct AIProviderFactory {
             transcriber: { _ in ScriptedTranscriber.fixture },
             translator: { _ in ScriptedTranslator() },
             briefBuilder: { _ in buildsBrief ? ScriptedBriefBuilder() : nil },
-            scriptReviewer: { _ in buildsBrief ? ScriptedScriptReviewer() : nil }
+            scriptReviewer: { _ in buildsBrief ? ScriptedScriptReviewer() : nil },
+            sceneDescriber: { _ in buildsBrief ? ScriptedSceneDescriber() : nil }
         )
     }
 }

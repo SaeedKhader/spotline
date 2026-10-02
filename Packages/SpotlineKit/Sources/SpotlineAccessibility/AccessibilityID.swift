@@ -181,6 +181,7 @@ public enum AccessibilityID {
         public static let soundDescriptions = "settings.ai.soundDescriptions"
         public static let leavesOutWalla = "settings.ai.leavesOutWalla"
         public static let leavesOutFictionalLanguages = "settings.ai.leavesOutFictionalLanguages"
+        public static let sendsVideoFrames = "settings.ai.sendsVideoFrames"
         public static let register = "settings.ai.register"
         public static let dropsFinalPunctuation = "settings.ai.dropsFinalPunctuation"
         public static let namesInParentheses = "settings.ai.namesInParentheses"
@@ -224,6 +225,8 @@ public enum AccessibilityID {
         public static let plot = "brief.plot"
         /// Scene by scene, who talks to whom, as editable text.
         public static let scenes = "brief.scenes"
+        /// What the video shows, scene by scene, as editable text.
+        public static let seen = "brief.seen"
         public static let confirmButton = "brief.confirm"
         public static let notNowButton = "brief.notNow"
         /// In the review sidebar while the review waits for the brief.
