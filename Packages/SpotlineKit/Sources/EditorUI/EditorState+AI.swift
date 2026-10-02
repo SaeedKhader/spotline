@@ -98,6 +98,10 @@ extension EditorState {
         switch command.id {
         case EditorCommand.transcribe.id:
             return idle && hasMedia
+        case EditorCommand.syncSubtitlesToAudio.id:
+            return idle && !isTranslating && subtitleSync == nil && transcriptToMatch != nil && !cuesOfTheirOwn.isEmpty
+        case EditorCommand.applySubtitleSync.id:
+            return subtitleSync != nil
         case EditorCommand.translateWithAI.id:
             // Outside translation mode, the cues being edited become the source.
             return idle && (isTranslating ? !untranslatedCues.isEmpty : track.cues.contains { !$0.text.isEmpty })
@@ -139,6 +143,8 @@ extension EditorState {
     func performAI(_ command: EditorCommand) -> Bool {
         switch command.id {
         case EditorCommand.transcribe.id: transcribe()
+        case EditorCommand.syncSubtitlesToAudio.id: checkSubtitleSync()
+        case EditorCommand.applySubtitleSync.id: applySubtitleSync()
         case EditorCommand.translateWithAI.id:
             // Words the transcription was unsure of would be translated wrong too: offer to check them first.
             let unsure = cuesWithUnsureSource
@@ -369,6 +375,7 @@ extension EditorState {
     private func startAITask(
         _ status: AITaskStatus,
         afterward: (@MainActor () -> Void)? = nil,
+        whenNothingWritten: (@MainActor () -> AITaskSummary?)? = nil,
         summary: @escaping @MainActor (_ written: [Cue]) -> AITaskSummary,
         _ work: @escaping @MainActor (
             _ report: @escaping @Sendable (AITaskStep) -> Void, _ propose: @escaping @Sendable (ProposedChangeSet) -> Void
@@ -410,6 +417,13 @@ extension EditorState {
                 self.applyResults(final)
                 let written = self.track.cues.filter { self.appliedAIChanges.contains($0.id) }
                 self.aiTask = nil
+                // A tool that had cues of the user's to work with wrote none, and says what it did instead.
+                if written.isEmpty, let done = whenNothingWritten?() {
+                    self.show(done)
+                    if !self.reviewItems(in: .all).isEmpty { self.wantsReviewSidebar = true }
+                    self.onAITaskEnd?(AITaskEnd(title: "\(title) finished", message: done.fullText, succeeded: true))
+                    return
+                }
                 if written.isEmpty {
                     afterward?()
                     self.reportError("\(title) found nothing to add.", AIError.nothingToDo("Every cue is already as the tool would make it."))
@@ -440,7 +454,7 @@ extension EditorState {
     }
 
     /// Shows what a tool did in the AI bar until `aiSummaryDuration` has passed or another tool starts.
-    private func show(_ summary: AITaskSummary) {
+    func show(_ summary: AITaskSummary) {
         aiSummary = summary
         let generation = aiTaskGeneration
         let duration = aiSummaryDuration
@@ -484,6 +498,10 @@ extension EditorState {
         )
         let leavesOutWalla = aiSettings.leavesOutWalla
         let existing = track.cues
+        // Cues with words of their own (a subtitle file's, or typed) may be the audio's subtitles
+        // already: then the transcript adds no cues, and is matched to them instead.
+        let own = isTranslating ? [] : cuesOfTheirOwn
+        let listened = Mutex<TranscriptAlignment?>(nil)
         let prepare = prepareAudio
         let provider = aiSettings.transcription
         // Words this project already got from the provider are used again, not paid for and uploaded again.
@@ -500,8 +518,12 @@ extension EditorState {
             )
         }
         // Then the episode brief, and the review waits until it is confirmed.
-        startAITask(status, afterward: { [weak self] in self?.buildEpisodeBrief(automatically: true) }, summary: Self.transcriptionSummary) {
-            [weak self] report, propose in
+        startAITask(
+            status, afterward: { [weak self] in self?.buildEpisodeBrief(automatically: true) },
+            whenNothingWritten: { [weak self] in
+                listened.withLock { $0 }.flatMap { self?.addTranscript($0, thenBrief: true) }
+            }, summary: Self.transcriptionSummary
+        ) { [weak self] report, propose in
             let words: [TranscribedWord]
             let accumulator: TranscriptAccumulator
             var pipeline = basePipeline
@@ -530,8 +552,8 @@ extension EditorState {
                     if case .waiting = progress { waitStarted.withLock { if $0 == nil { $0 = Date() } } }
                     report(.provider(progress))
                 } found: { words in
-                    // Cues show as soon as they are complete.
-                    propose(Proposals.transcription(accumulator.add(words), existing: existing))
+                    // Cues show as soon as they are complete; not while they may be in the track already.
+                    if own.isEmpty { propose(Proposals.transcription(accumulator.add(words), existing: existing)) }
                 }
                 if let started = waitStarted.withLock({ $0 }), seconds > 0 {
                     self?.recordWait(Date().timeIntervalSince(started) / seconds, provider: provider.rawValue)
@@ -539,6 +561,14 @@ extension EditorState {
                 self?.storeTranscript(words, provider: provider, audioStream: stream, language: language)
             }
             guard !words.isEmpty else { throw AIError.nothingToDo("No speech was heard.") }
+            if !own.isEmpty {
+                let heard = pipeline.corrected(words)
+                let alignment = try await Self.runDetached { TranscriptAligner.align(own, to: heard) }
+                if alignment.coversAudio {
+                    listened.withLock { $0 = alignment }
+                    return ProposedChangeSet(title: "Transcription", changes: [])
+                }
+            }
             let cues = try await Self.runDetached { accumulator.finish(with: words) }
             return Proposals.transcription(cues, existing: existing)
         }
@@ -840,15 +870,24 @@ extension EditorState {
 
     /// Removes the transcribed cues and the transcripts the project keeps. In translation
     /// mode the transcript is the source, so the translation made from it goes too and
-    /// the editor leaves translation mode, back in the source's language. One undoable edit.
+    /// the editor leaves translation mode, back in the source's language. A subtitle
+    /// file's cues stay, without what listening to the audio added to them. One undoable edit.
     func clearTranscript() {
         let language = sourceTrack?.languageCode
+        let keepsSubtitles = !isTranslating && textIsFromSubtitles && !storedTranscripts.isEmpty
         editIncludingSources("Clear Transcript") { track, sources in
-            track.cues = []
+            track.cues = !keepsSubtitles ? [] : track.cues.filter { $0.isAIGenerated != true }.map { cue in
+                var cue = cue
+                cue.voices = nil
+                if cue.scriptFinding?.tried == nil { cue.scriptFinding = nil }
+                return cue
+            }
             track.brief = nil
             if let language { track.languageCode = language }
             sources = SourceState(sourceTrack: nil, sourceFile: nil, transcripts: [])
         }
+        subtitleSync = nil
+        briefAwaitsSync = false
         translationPairDidChange()
     }
 

@@ -60,6 +60,16 @@ public struct MainWindowView: View {
         )) {
             EpisodeBriefSheet(editor: editor)
         }
+        // Each button settles the question itself: closing the alert decides nothing.
+        .alert("Sync the subtitles to the audio?", isPresented: Binding(get: { editor.subtitleSync != nil }, set: { _ in })) {
+            Button(EditorCommand.applySubtitleSync.title) { editor.perform(.applySubtitleSync) }
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier(AccessibilityID.Sync.apply)
+            Button("Leave as They Are", role: .cancel) { editor.dismissSubtitleSync() }
+                .accessibilityIdentifier(AccessibilityID.Sync.leave)
+        } message: {
+            Text((editor.subtitleSyncSummary ?? "") + " Every cue moves onto when its line is said; you can undo it.")
+        }
         .transaction { transaction in
             if editor.launchOptions.isUITestMode { transaction.disablesAnimations = true }
         }

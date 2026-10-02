@@ -31,6 +31,9 @@ public struct BriefRequest: Sendable, Equatable {
     public var cast: [CastMember]
     /// Agreed spellings (source term, target term).
     public var spellings: [Spelling]
+    /// True when the lines are a subtitle file's (their words are right) and only the
+    /// voice labels come from a transcriber.
+    public var isFromSubtitles = false
 
     public struct Spelling: Sendable, Equatable {
         public var source: String
@@ -157,10 +160,20 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
     static func instructions(for request: BriefRequest) -> String {
         let source = Languages.name(request.sourceLanguage)
         let target = Languages.name(request.targetLanguage)
-        var text = """
-            You prepare a brief for the subtitlers of a film or TV episode, from its automatic \(source) transcript. \
-            The transcriber labelled each voice ("speaker_0") without knowing who it is, and sometimes mishears names; \
-            words it was unsure of are in [brackets?].
+        let opening = request.isFromSubtitles
+            ? """
+                You prepare a brief for the translators of a film or TV episode, from its \(source) subtitles. The \
+                subtitles' words and spellings are right: keep them. A transcriber listened to the audio and labelled \
+                the voice of each line ("speaker_0") without knowing who it is; a label can be wrong on a short line, \
+                and "?" means it could not tell. A name before a colon ("DUNK: ...") is the subtitles' own label of who speaks.
+                """
+            : """
+                You prepare a brief for the subtitlers of a film or TV episode, from its automatic \(source) transcript. \
+                The transcriber labelled each voice ("speaker_0") without knowing who it is, and sometimes mishears names; \
+                words it was unsure of are in [brackets?].
+                """
+        var text = opening + """
+
 
             In "people", list who each voice is:
             - voices: the voice labels that are this person (usually one; two when the transcriber split one person).
@@ -203,7 +216,7 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
     static func input(for request: BriefRequest) -> String {
         var text = ""
         if let work = request.work { text += "What is being watched (from the file name): \(work)\n\n" }
-        text += "Transcript (time, voice, line):\n"
+        text += request.isFromSubtitles ? "Subtitles (time, voice, line):\n" : "Transcript (time, voice, line):\n"
         for line in request.lines {
             let seconds = Int(line.start.seconds)
             let voice = line.voices.isEmpty ? "?" : line.voices.joined(separator: " then ")

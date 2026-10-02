@@ -41,7 +41,8 @@ public struct TranscriptionPipeline: Sendable {
         return (text.hasPrefix("(") && text.hasSuffix(")")) || (text.hasPrefix("[") && text.hasSuffix("]"))
     }
 
-    func corrected(_ words: [TranscribedWord]) -> [TranscribedWord] {
+    /// The words with their starts where the voice starts.
+    public func corrected(_ words: [TranscribedWord]) -> [TranscribedWord] {
         guard wordStartLead != 0 else { return words }
         let lead = MediaTime(value: Int64((wordStartLead * 1000).rounded()), timescale: 1000)
         return words.map { word in

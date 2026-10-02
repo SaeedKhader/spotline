@@ -198,6 +198,12 @@ public enum AccessibilityID {
     }
 
     /// The sheet offering the subtitle tracks muxed into the media for import.
+    /// The question whether to move a subtitle file's cues onto the audio (AI › Sync Subtitles to Audio…).
+    public enum Sync {
+        public static let apply = "sync.apply"
+        public static let leave = "sync.leave"
+    }
+
     /// The episode brief dialog (AI › Episode Brief…).
     public enum Brief {
         public static let sheet = "brief"

@@ -92,6 +92,24 @@ final class AIToolsUITests: XCTestCase {
         XCTAssertEqual(texts.count, 1)
     }
 
+    /// A video that has its subtitles already: transcribing listens to the audio and adds no cues.
+    @MainActor
+    func testTranscribingASubtitledVideoKeepsItsCues() throws {
+        let app = launchApp(openSubtitles: true, subtitles: "spoken-23.976.srt")
+        let texts = app.cueCells(.text)
+        XCTAssertTrue(texts.firstMatch.waitForExistence(timeout: 10), "The subtitles were not imported")
+        _ = button(.stepForward, in: app)
+        chooseAIMenuItem(.transcribe, in: app)
+
+        let done = app.descendants(matching: .any)[AccessibilityID.CueList.aiSummary]
+        XCTAssertTrue(done.waitForExistence(timeout: 20), "No summary after transcribing")
+        waitForValue(of: done, toEqual: "Heard 2 of 2 cues in the audio")
+        XCTAssertEqual(texts.count, 2, "Transcribing added cues to subtitles that were complete")
+        waitForValue(of: texts.element(boundBy: 0), toEqual: "Hello there. How are you?")
+        // In sync with the audio: nothing is asked.
+        XCTAssertFalse(app.buttons[AccessibilityID.Sync.apply].exists)
+    }
+
     @MainActor
     func testTranslationFlagsLinesAndAPickSwapsInOneClick() throws {
         let app = launchApp(source: "translation-source-23.976.srt")

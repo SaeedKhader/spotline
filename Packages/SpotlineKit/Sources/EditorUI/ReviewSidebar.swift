@@ -374,7 +374,7 @@ private struct ScopeButton: View {
         case .frames: "Cues too close to a shot change or the next cue"
         case .words: "Words the transcription wasn't sure of"
         case .choices: "Lines the translation could word more than one way"
-        case .script: "Lines the AI script review thinks were misheard or make no sense"
+        case .script: "Lines the AI script review thinks were misheard or make no sense, or where the audio says something else"
         case .changes: "Changes \(editor.pendingReview?.title ?? "an AI tool") proposes"
         }
     }
