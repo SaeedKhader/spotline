@@ -270,6 +270,44 @@ struct SceneSheetStateTests {
         #expect(editor.track.brief?.seen.contains("In view: Rick") == true)
     }
 
+    @Test func theFramesAreReadWhileTheBriefIsBuiltAndOnlyOnce() async {
+        let editor = await makeEditor()
+        let reads = Reads()
+        editor.grabFrames = { _, times, _ in
+            reads.add()
+            return SceneFramesStateTests.grabbed(times)
+        }
+        // Off: building the brief reads no frames.
+        editor.buildEpisodeBrief(automatically: false)
+        #expect(editor.sceneFramesJob == nil)
+        for _ in 0..<300 where !editor.isBriefSheetShown { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(reads.count == 0)
+
+        editor.dismissEpisodeBrief()
+        editor.aiSettings.sendsVideoFrames = true
+        editor.buildEpisodeBrief(automatically: false)
+        #expect(editor.sceneFramesJob != nil, "Reading starts with the brief, not after it")
+        for _ in 0..<300 where !editor.isBriefSheetShown { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(editor.track.brief?.seen.contains("In view: Rick") == true)
+        #expect(reads.count == 1, "Describing waits for the frames being read instead of reading them again")
+    }
+
+    @Test func theDialogCanTurnOnSendingFramesAndDescribe() async throws {
+        let editor = await makeEditor()
+        #expect(!editor.aiSettings.sendsVideoFrames)
+        editor.describeScenes(keeping: try #require(editor.track.brief), allowingFrames: true)
+        #expect(editor.aiSettings.sendsVideoFrames)
+        await finish(editor)
+        #expect(editor.track.brief?.seen.contains("In view: Rick") == true)
+    }
+
+    final class Reads: @unchecked Sendable {
+        private let lock = NSLock()
+        private var reads = 0
+        var count: Int { lock.withLock { reads } }
+        func add() { lock.withLock { reads += 1 } }
+    }
+
     @Test func settingIsOffByDefaultAndSaved() throws {
         #expect(!AISettings().sendsVideoFrames)
         let suite = "SceneSheetStateTests-\(UUID().uuidString)"

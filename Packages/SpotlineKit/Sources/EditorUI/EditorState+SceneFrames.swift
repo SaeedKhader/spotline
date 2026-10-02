@@ -141,7 +141,7 @@ extension EditorState {
         case EditorCommand.pickSceneFramesAgain.id: canPickSceneFrames && sceneFramesJob == nil
         case EditorCommand.exportSceneFrames.id: sceneFrames?.isEmpty == false
         case EditorCommand.describeScenes.id:
-            aiTask == nil && pendingReview == nil && track.brief != nil && canPickSceneFrames && sceneFramesJob == nil
+            aiTask == nil && pendingReview == nil && track.brief != nil && canPickSceneFrames
         default: false
         }
     }

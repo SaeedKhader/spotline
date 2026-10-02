@@ -237,6 +237,8 @@ public enum AccessibilityID {
         public static let scenes = "brief.scenes"
         /// What the video shows, scene by scene, as editable text.
         public static let seen = "brief.seen"
+        /// Under "In the Video": what it is for, or that sending frames is off.
+        public static let seenHint = "brief.seen.hint"
         public static let confirmButton = "brief.confirm"
         public static let notNowButton = "brief.notNow"
         /// In the review sidebar while the review waits for the brief.

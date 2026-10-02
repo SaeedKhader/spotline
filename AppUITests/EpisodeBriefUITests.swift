@@ -71,6 +71,13 @@ final class EpisodeBriefUITests: XCTestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 20), "No brief after transcribing")
         let seen = sheet.descendants(matching: .any)[AccessibilityID.Brief.seen]
         XCTAssertEqual(seen.value as? String, "", "Nothing from the video yet")
+        // Sending frames is off: the dialog says so, and its button offers to turn it on.
+        let hint = sheet.descendants(matching: .any)[AccessibilityID.Brief.seenHint]
+        // A text's words are its value on macOS, a button's its title; the label can be either.
+        let said = hint.label + " " + (hint.value as? String ?? "")
+        XCTAssertTrue(said.contains("Send video frames is off"), "The dialog does not say why nothing was described: \(said)")
+        let describe = sheet.buttons[AccessibilityID.command(EditorCommand.describeScenes.id)]
+        XCTAssertTrue((describe.title + " " + describe.label).contains("Turn On Video Frames and Describe Scenes"), "The button does not offer to turn frames on")
         // From the menu: the dialog's own button is below the fold of its scroll view.
         sheet.buttons[AccessibilityID.Brief.notNowButton].click()
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sheet)
