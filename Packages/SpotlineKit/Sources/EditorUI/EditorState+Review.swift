@@ -374,7 +374,13 @@ extension EditorState {
             let original = reviewTrials[item.id].map { $0.before.first { $0.id == item.cueID }?.flag?.chosen } ?? flag.chosen
             if !flag.isResolved { chooseVariant(flag.chosen, forCue: item.cueID) }
             outcome = original == flag.chosen ? "Reading kept" : "Other reading used"
-        case (.issues, .suggestion(let index)), (.frames, .suggestion(let index)), (.glossary, .suggestion(let index)):
+        case (.glossary, .primary):
+            // Replace: the agreed term goes in and the card is settled, in one step.
+            guard let replacement = glossaryReplacement(forCue: item.cueID), let index = track.cues.firstIndex(where: { $0.id == item.cueID })
+            else { return }
+            edit(replacement.title) { track in track.cues[index].text = replacement.text }
+            outcome = replacement.title.replacing("Replace ", with: "Replaced ", maxReplacements: 1)
+        case (.issues, .suggestion(let index)), (.frames, .suggestion(let index)):
             guard index < reviewSuggestions(for: item).count else { return }
             tryFix(index, of: item)
             return
@@ -383,7 +389,7 @@ extension EditorState {
             let speed = track.cues[index].readingSpeed
             edit("Ignore Reading Speed") { track in track.cues[index].acceptedReadingSpeed = speed }
             outcome = "Reading speed \(Int(speed.rounded())) c/s accepted"
-        case (.issues, .primary), (.frames, .primary), (.glossary, .primary):
+        case (.issues, .primary), (.frames, .primary):
             // Nothing tried yet: the first option goes in to be seen; the next Return confirms it.
             let picked = pickedSuggestions(of: item)
             guard !picked.isEmpty else {
@@ -633,10 +639,10 @@ extension EditorState {
         if base != nil {
             let window = max(0, index - 2)..<min(cues.count, index + 3)
             issues = (QualityControl.check(Array(cues[window]), preset: qcPreset, context: context)[id] ?? [])
-                + issues.filter { $0.kind == .notTranslated || $0.kind.isGlossaryIssue }
+                + issues.filter { $0.kind == .notTranslated }
         }
         guard !issues.isEmpty else { return [] }
-        var result: [ReviewSuggestion] = glossaryReplacements(for: cue, issues: issues)
+        var result: [ReviewSuggestion] = []
         if issues.contains(where: { $0.kind == .notTranslated || $0.kind == .empty }), let source = sourceCues[id], !source.text.isEmpty {
             if let match = memoryMatches(for: id).first {
                 result.append(ReviewSuggestion(title: "Use Memory Match (\(match.percent))", preview: match.entry.target, action: .useMemory(match.entry.target), fixes: "not translated", clears: ["not translated"]))
@@ -646,7 +652,7 @@ extension EditorState {
         let spoken = spokenSpan(of: cue)
         for fix in QualityControl.fixes(for: index, in: cues, preset: qcPreset, context: context, speaker: speaker(of:)) {
             // An untranslated cue is filled, not removed.
-            if fix.purpose == .delete, result.contains(where: { $0.clears.contains("not translated") }) { continue }
+            if fix.purpose == .delete, !result.isEmpty { continue }
             // Timing stays over the words: never starting after the first or ending before the last.
             if fix.purpose.changesTimingOfCue, let spoken, fix.start > spoken.start || fix.end < spoken.end { continue }
             var names: [String] = []

@@ -304,10 +304,9 @@ extension EditorState {
             guard case .glossaryTermNotUsed(_, let target) = issue.kind else { continue }
             let agreed = MatchText.normalize(target)
             // The other lines that miss this term, and how often each word is in them and in the whole translation.
-            let missing = track.cues.filter { other in self.issues[other.id]?.contains { $0.kind == issue.kind } == true }
-            func words(_ text: String) -> Set<String> { Set(Self.wordRanges(in: text).map { MatchText.normalize(String(text[$0])) }) }
-            let inMissing = missing.map { words($0.text) }
-            let everywhere = track.cues.map { words($0.text) }
+            let sets = wordSets()
+            let everywhere = track.cues.compactMap { sets[$0.id] }
+            let inMissing = track.cues.filter { other in self.issues[other.id]?.contains { $0.kind == issue.kind } == true }.compactMap { sets[$0.id] }
             var scored: [(range: Range<String.Index>, word: String, score: Double)] = []
             var seen = Set<String>()
             for range in Self.wordRanges(in: cue.text) {
@@ -338,6 +337,26 @@ extension EditorState {
             }
         }
         return result
+    }
+
+    /// Each cue's words, normalized: worked out once for the cues as they are (`cueWordSets`).
+    func wordSets() -> [Cue.ID: Set<String>] {
+        if let cueWordSets { return cueWordSets }
+        let sets = Dictionary(track.cues.map { cue in
+            (cue.id, Set(Self.wordRanges(in: cue.text).map { MatchText.normalize(String(cue.text[$0])) }))
+        }, uniquingKeysWith: { first, _ in first })
+        cueWordSets = sets
+        return sets
+    }
+
+    /// The line with the word it used for a glossary term swapped for the agreed one: what the
+    /// card's Replace button puts in. Nil when nothing points to a word.
+    public func glossaryReplacement(forCue id: Cue.ID) -> (title: String, text: String)? {
+        guard let cue = cue(withID: id) else { return nil }
+        for option in glossaryReplacements(for: cue, issues: issues[id] ?? []) {
+            if case .replaceTerm(let text) = option.action { return (option.title, text) }
+        }
+        return nil
     }
 
     /// Where each word of a line is, without the punctuation around it.

@@ -290,6 +290,8 @@ public final class EditorState {
     /// The correction that would put a subtitle file's cues on the audio, while the
     /// question whether to make it is open (`EditorState+Listening`).
     public internal(set) var subtitleSync: SubtitleSync?
+    /// Each cue's words (normalized), kept until the cues change: review cards ask for them on every redraw.
+    @ObservationIgnored var cueWordSets: [Cue.ID: Set<String>]?
     /// The episode brief is built once the sync question is answered.
     @ObservationIgnored var briefAwaitsSync = false
     @ObservationIgnored private var embeddedSubtitlesTask: Task<Void, Never>?
@@ -878,6 +880,8 @@ public final class EditorState {
 
     /// Recomputes `issues`; it changes (and redraws its observers) only when the result differs.
     private func updateIssues() {
+        // Made from the cues' text, which may have changed.
+        cueWordSets = nil
         let context = QualityControl.Context(frameRate: frameRate, shotChanges: shotChangeFrames)
         var found = QualityControl.check(track.cues, preset: qcPreset, context: context)
         addTranslationIssues(to: &found)

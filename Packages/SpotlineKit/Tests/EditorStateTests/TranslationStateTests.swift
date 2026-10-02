@@ -148,17 +148,17 @@ struct TranslationStateTests {
         #expect(editor.reviewScope == .glossary)
         // The word the translation used wherever the source says "ser" is offered for the agreed one.
         let first = try #require(editor.reviewItems.first)
-        #expect(editor.reviewSuggestions(for: first).map(\.title) == ["Replace “سيدي” with “سير”"])
-        editor.decide(first, .suggestion(0))
-        #expect(editor.cue(withID: ids[0])?.text == "ليتك لم تمت يا سير")
+        #expect(editor.glossaryReplacement(forCue: first.cueID)?.title == "Replace “سيدي” with “سير”")
+        // The card's button replaces and settles in one step, one undoable edit.
         editor.decide(first, .primary)
+        #expect(editor.cue(withID: ids[0])?.text == "ليتك لم تمت يا سير")
         #expect(editor.reviewItems.map(\.cueID) == Array(ids.dropFirst()))
-        // Trying the option was the one edit; confirming it changed nothing more.
+        #expect(editor.lastSettledReview?.outcome == "Replaced “سيدي” with “سير”")
         editor.perform(.undo)
         #expect(editor.cue(withID: ids[0])?.text == "ليتك لم تمت يا سيدي")
         // A spelling close to the agreed one is found by itself; "سيدي" there is "my lord", not the term.
         let last = try #require(editor.reviewItems.last)
-        #expect(editor.reviewSuggestions(for: last).map(\.preview) == ["يا دانك، سيدي هنا"])
+        #expect(editor.glossaryReplacement(forCue: last.cueID)?.text == "يا دانك، سيدي هنا")
     }
 
     func glossaryIssues(_ editor: EditorState, _ id: Cue.ID) -> [String] {

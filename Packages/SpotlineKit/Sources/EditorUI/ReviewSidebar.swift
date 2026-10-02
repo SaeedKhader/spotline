@@ -105,7 +105,7 @@ struct ReviewSidebar: View {
         guard let item = editor.currentReviewItem else { return .ignored }
         switch press.key {
         case .return:
-            if item.kind.isIssueCard, editor.reviewSuggestions(for: item).isEmpty {
+            if item.kind == .glossary ? editor.glossaryReplacement(forCue: item.cueID) == nil : item.kind.isIssueCard && editor.reviewSuggestions(for: item).isEmpty {
                 editor.editReviewItem(item)
             } else {
                 editor.decide(item, .primary)
@@ -127,7 +127,7 @@ struct ReviewSidebar: View {
             guard let index = Int(digit) else { return .ignored }
             switch item.kind {
             case .choice, .script: editor.decide(item, .variant(index - 1))
-            case .issues, .frames, .glossary: editor.decide(item, .suggestion(index - 1))
+            case .issues, .frames: editor.decide(item, .suggestion(index - 1))
             default: return .ignored
             }
         default:
@@ -511,7 +511,8 @@ private struct ReviewCard: View {
         case .choice: choiceContent
         case .script: scriptContent
         case .word(let index): wordContent(index)
-        case .issues, .frames, .glossary: issuesContent
+        case .issues, .frames: issuesContent
+        case .glossary: glossaryContent
         }
     }
 
@@ -728,6 +729,50 @@ private struct ReviewCard: View {
                     editor.decide(item, .primary)
                 }
                 .disabled(picked.isEmpty)
+            }
+        }
+    }
+
+    /// A glossary term the line does not use: the line as Replace would make it (the word it
+    /// used struck out, the agreed one in), and Replace as the card's button. With no word to
+    /// replace, the line as it is and Edit.
+    @ViewBuilder private var glossaryContent: some View {
+        let issues = editor.cardIssues(item)
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.attentionTint)
+                    Text(issue.message)
+                }
+                .font(.callout)
+            }
+        }
+        let replacement = editor.glossaryReplacement(forCue: item.cueID)
+        if let cue, !cue.text.isEmpty {
+            Group {
+                if let replacement {
+                    DiffText(old: SubtitleText.visibleLines(of: cue.text).joined(separator: "\n"), new: SubtitleText.visibleLines(of: replacement.text).joined(separator: "\n"))
+                } else {
+                    Text(SubtitleText.visibleLines(of: cue.text).joined(separator: "\n")).foregroundStyle(.secondary)
+                }
+            }
+            .font(SpotlineStyle.cueFont)
+            .lineLimit(3)
+            .environment(\.layoutDirection, direction.layoutDirection)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        buttons {
+            CardButton(editor: editor, item: item, action: .play, title: "Play", key: "P") { editor.playReviewItem(item) }
+                .disabled(!editor.hasMedia || cue == nil)
+            CardButton(editor: editor, item: item, action: .edit, title: "Edit", key: replacement == nil ? "Return or E" : "E", isPrimary: replacement == nil) {
+                editor.editReviewItem(item)
+            }
+            .disabled(cue == nil)
+            if let replacement {
+                CardButton(editor: editor, item: item, action: .confirm, title: "Replace", key: "Return", isPrimary: true) {
+                    editor.decide(item, .primary)
+                }
+                .help("\(replacement.title) (Return)")
             }
         }
     }
