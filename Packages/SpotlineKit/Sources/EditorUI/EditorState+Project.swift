@@ -52,6 +52,8 @@ extension EditorState {
         self.projectURL = projectURL
         frameRate = project.frameRate
         track = project.track
+        // Projects saved before sure choices were left out of the review.
+        track.settleSureFlags()
         sourceFile = project.sourceFile?.reference
         sourceTrack = project.sourceTrack
         subtitleFile = project.subtitleFile?.reference

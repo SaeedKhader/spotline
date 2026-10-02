@@ -134,6 +134,18 @@ public struct TranslationFlag: Hashable, Sendable, Codable {
         self.isResolved = isResolved
     }
 
+    /// True when the translator was sure of its recommendation (it reads "100% sure"):
+    /// nothing for the user to decide, so the line is not put up for review.
+    public var isSure: Bool { confidence >= 0.995 }
+
+    /// The flag settled when the translator was sure: its variants stay, to swap in from the cue's row.
+    public var settledWhenSure: TranslationFlag {
+        guard !isResolved, isSure else { return self }
+        var flag = self
+        flag.isResolved = true
+        return flag
+    }
+
     public var chosenVariant: TranslationVariant? {
         variants.indices.contains(chosen) ? variants[chosen] : nil
     }
@@ -241,6 +253,11 @@ extension SubtitleTrack {
         var changed: [Cue.ID] = []
         for index in cues.indices where cues[index].rerankFlag(with: cast) { changed.append(cues[index].id) }
         return changed
+    }
+
+    /// Settles the open flags the translator was sure of (`TranslationFlag.isSure`).
+    public mutating func settleSureFlags() {
+        for index in cues.indices { cues[index].flag = cues[index].flag?.settledWhenSure }
     }
 
     /// Settles every open flag, keeping each cue's text.

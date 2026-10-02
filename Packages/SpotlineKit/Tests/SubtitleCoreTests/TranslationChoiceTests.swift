@@ -18,6 +18,21 @@ struct TranslationChoiceTests {
         #expect(TranslationVariant(text: "?", listeners: ["Morty"], listenerGender: .female).fits(confirmed), "Nothing known about Morty")
     }
 
+    @Test func aChoiceTheTranslatorWasSureOfIsNotPutUpForReview() {
+        let sure = TranslationFlag(reasons: [.listener], variants: [toBeth, toBethAsMan], confidence: 1, note: "Jerry is talking to Beth")
+        #expect(sure.settledWhenSure.isResolved)
+        #expect(sure.settledWhenSure.variants == sure.variants, "The other reading stays, to swap in")
+        // 99% still reads as a doubt.
+        let nearly = TranslationFlag(reasons: [.listener], variants: [toBeth, toBethAsMan], confidence: 0.99, note: "")
+        #expect(!nearly.settledWhenSure.isResolved)
+        var track = SubtitleTrack(cues: [
+            Cue(start: .zero, end: MediaTime(value: 1, timescale: 1), text: "انتِ", flag: sure),
+            Cue(start: MediaTime(value: 2, timescale: 1), end: MediaTime(value: 3, timescale: 1), text: "انتِ", flag: nearly),
+        ])
+        track.settleSureFlags()
+        #expect(track.cues.map { $0.flag?.isResolved } == [true, false])
+    }
+
     @Test func groupsFitTheirMembers() {
         let cast = [CastMember(name: "Beth", gender: .female, isConfirmed: true), CastMember(name: "Summer", gender: .female, isConfirmed: true),
                     CastMember(name: "Jerry", gender: .male, isConfirmed: true)]
