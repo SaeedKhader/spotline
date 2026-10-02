@@ -21,11 +21,38 @@ jobs:
       - name: Test SpotlineKit
         run: swift test --package-path Packages/SpotlineKit
 
-  app:
-    name: App build and UI tests
+  # macOS runs one UI test at a time, so the suite is split across runners instead.
+  # Shards 1 and 2 name their test classes; shard 3 runs every class they don't name,
+  # so a new test class runs there until it is given a shard.
+  ui-tests:
+    name: UI tests (shard ${{ matrix.shard }})
     runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      SHARD_1: AIToolsUITests EpisodeBriefUITests
+      SHARD_2: EditingUITests MainWindowUITests ProjectUITests AgentBridgeUITests
     steps:
       - uses: actions/checkout@v4
+      - name: Pick this shard's tests
+        run: |
+          # A misspelled class would select no tests and still pass.
+          for class in $SHARD_1 $SHARD_2; do
+            grep -qE "class $class: XCTestCase" AppUITests/*.swift \
+              || { echo "::error::No UI test class named $class"; exit 1; }
+          done
+          case "${{ matrix.shard }}" in
+            1) flag=-only-testing; classes="$SHARD_1" ;;
+            2) flag=-only-testing; classes="$SHARD_2" ;;
+            3) flag=-skip-testing; classes="$SHARD_1 $SHARD_2" ;;
+          esac
+          selection=""
+          for class in $classes; do
+            selection="$selection $flag:SpotlineUITests/$class"
+          done
+          echo "TEST_SELECTION=$selection" >> "$GITHUB_ENV"
       - name: Install XcodeGen and libmpv
         run: brew install xcodegen mpv
       - name: Generate project
@@ -37,7 +64,8 @@ jobs:
             -project Spotline.xcodeproj \
             -scheme Spotline \
             -destination 'platform=macOS' \
-            -resultBundlePath build/UITests.xcresult
+            -resultBundlePath build/UITests.xcresult \
+            $TEST_SELECTION
       - name: Show app logs
         if: failure()
         run: |
@@ -49,5 +77,17 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: UITests.xcresult
+          name: UITests-shard-${{ matrix.shard }}.xcresult
           path: build/UITests.xcresult
+
+  # The check the main ruleset requires: green only when every shard is.
+  app:
+    name: App build and UI tests
+    needs: ui-tests
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check every shard passed
+        run: |
+          echo "UI test shards: ${{ needs.ui-tests.result }}"
+          test "${{ needs.ui-tests.result }}" = "success"
