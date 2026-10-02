@@ -27,17 +27,23 @@ public enum MatchText {
 
     /// Whether `term` occurs in `text` as whole words. Both are normalized.
     public static func contains(_ text: String, term: String) -> Bool {
-        guard !term.isEmpty else { return false }
+        !ranges(of: term, in: text, limit: 1).isEmpty
+    }
+
+    /// Where `term` occurs in `text` as whole words, in order. Both are normalized.
+    static func ranges(of term: String, in text: String, limit: Int = .max) -> [Range<String.Index>] {
+        guard !term.isEmpty else { return [] }
+        var found: [Range<String.Index>] = []
         var searchRange = text.startIndex..<text.endIndex
-        while let range = text.range(of: term, range: searchRange) {
+        while found.count < limit, let range = text.range(of: term, range: searchRange) {
             let before = range.lowerBound == text.startIndex ? nil : text[text.index(before: range.lowerBound)]
             let after = range.upperBound == text.endIndex ? nil : text[range.upperBound]
             if !(before.map(isWordCharacter) ?? false), !(after.map(isWordCharacter) ?? false) {
-                return true
+                found.append(range)
             }
             searchRange = text.index(after: range.lowerBound)..<text.endIndex
         }
-        return false
+        return found
     }
 
     private static func isWordCharacter(_ character: Character) -> Bool {

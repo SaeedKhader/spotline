@@ -174,7 +174,9 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
 
             In "terms", list the places, titles, houses, made-up words and other names that recur or that the transcript \
             may have misheard, with the show's spelling (term), how the transcript heard it when differently (heard_as), \
-            its \(target) spelling (translation), a short note and your confidence. Leave out everyday words.
+            its \(target) spelling (translation), a short note and your confidence. Leave out everyday words. \
+            List each term once, without a leading "the" ("Seven Kingdoms", not also "the Seven Kingdoms"); a shorter \
+            name that means something else ("the Seven", the gods) is its own term.
 
             In "plot", say what happens in the episode in 3 to 5 plain sentences, using the names.
 
@@ -306,6 +308,7 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             scenes: scenes.joined(separator: "\n"), targetLanguage: request.targetLanguage, work: request.work
         )
         brief.addMissingVoices(request.voices)
+        brief.mergeDuplicateTerms()
         return brief
     }
 

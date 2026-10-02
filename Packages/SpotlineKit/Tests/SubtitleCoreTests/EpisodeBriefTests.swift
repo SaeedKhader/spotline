@@ -16,6 +16,28 @@ struct EpisodeBriefTests {
         #expect(brief.people.count == 1)
     }
 
+    @Test func termsThatDifferByAnArticleBecomeOne() {
+        var brief = EpisodeBrief(
+            terms: [
+                EpisodeBrief.Term(term: "the Seven Kingdoms", heardAs: ["Seven Kingdom"], translation: "", note: "", confidence: 0.6, addsToGlossary: false),
+                EpisodeBrief.Term(term: "the Seven", translation: "الآلهة السبعة", note: "The gods"),
+                EpisodeBrief.Term(term: "Seven Kingdoms", heardAs: ["7 Kingdoms"], translation: "الممالك السبع", note: "The realm", confidence: 0.9),
+                EpisodeBrief.Term(term: "seven kingdoms", translation: "x"),
+            ],
+            targetLanguage: "ar"
+        )
+        brief.mergeDuplicateTerms()
+        #expect(brief.terms.map(\.term) == ["Seven Kingdoms", "the Seven"])
+        let realm = brief.terms[0]
+        #expect(realm.translation == "الممالك السبع")
+        #expect(realm.note == "The realm")
+        #expect(realm.heardAs == ["Seven Kingdom", "7 Kingdoms"])
+        #expect(realm.confidence == 1)
+        #expect(realm.addsToGlossary)
+        // "the Seven" means something else: it stays.
+        #expect(brief.terms[1].translation == "الآلهة السبعة")
+    }
+
     @Test func everyVoiceGetsARow() {
         var brief = EpisodeBrief(people: [EpisodeBrief.Person(voices: ["speaker_0"], name: "Dunk")], targetLanguage: "ar")
         brief.addMissingVoices(["speaker_0", "speaker_1"])

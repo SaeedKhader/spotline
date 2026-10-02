@@ -44,6 +44,27 @@ struct GlossaryTests {
         #expect(matches.map(\.isUsed) == [true, false])
     }
 
+    @Test func theLongestTermWinsWhereTermsOverlap() {
+        let glossary = Glossary(entries: [
+            .init(source: "the Seven", target: "الآلهة السبعة"),
+            .init(source: "Seven Kingdoms", target: "الممالك السبع"),
+            .init(source: "the Seven Kingdoms", target: "الممالك السبع"),
+            .init(source: "Kingdoms", target: "ممالك"),
+        ])
+        func terms(_ source: String) -> [String] { glossary.matches(source: source, target: "").map(\.entry.source) }
+        // The shorter terms sit inside the longest one: only it counts.
+        #expect(terms("He rules the Seven Kingdoms.") == ["the Seven Kingdoms"])
+        #expect(terms("All Seven Kingdoms know.") == ["Seven Kingdoms"])
+        // By itself, the shorter term counts.
+        #expect(terms("By the Seven!") == ["the Seven"])
+        #expect(terms("By the Seven, the Seven Kingdoms are lost.") == ["the Seven", "the Seven Kingdoms"])
+        // One word of a term is not the term.
+        #expect(terms("Seven of them came.").isEmpty)
+        // The same term twice in the glossary: both count.
+        let twice = Glossary(entries: [.init(source: "Winterfell", target: "أ"), .init(source: "winterfell", target: "ب")])
+        #expect(twice.matches(source: "To Winterfell.", target: "").count == 2)
+    }
+
     @Test func ignoresPartialWords() {
         #expect(glossary.matches(source: "Concatenate", target: "").isEmpty)
     }

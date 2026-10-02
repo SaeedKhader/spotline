@@ -123,6 +123,40 @@ public struct EpisodeBrief: Hashable, Sendable, Codable {
         }
     }
 
+    /// A term without a leading article, in lower case: "the Seven Kingdoms" and "Seven Kingdoms" are one term.
+    static func termKey(_ term: String) -> String {
+        var key = term.trimmingCharacters(in: .whitespaces).lowercased()
+        for article in ["the ", "a ", "an "] where key.hasPrefix(article) && key.count > article.count {
+            key.removeFirst(article.count)
+            break
+        }
+        return key
+    }
+
+    /// Makes terms that differ only by case or a leading article one term, so the glossary
+    /// gets each once: the spelling without the article stays (it matches both in a
+    /// line), with the first translation and note there are, and every way it was heard.
+    public mutating func mergeDuplicateTerms() {
+        var merged: [Term] = []
+        for term in terms {
+            let key = Self.termKey(term.term)
+            guard !key.isEmpty, let index = merged.firstIndex(where: { Self.termKey($0.term) == key }) else {
+                merged.append(term)
+                continue
+            }
+            var kept = merged[index]
+            let spelling = term.term.trimmingCharacters(in: .whitespaces)
+            if spelling.count < kept.term.trimmingCharacters(in: .whitespaces).count { kept.term = spelling }
+            if kept.translation.trimmingCharacters(in: .whitespaces).isEmpty { kept.translation = term.translation }
+            if kept.note.isEmpty { kept.note = term.note }
+            for heard in term.heardAs where !kept.heardAs.contains(heard) { kept.heardAs.append(heard) }
+            kept.confidence = max(kept.confidence, term.confidence)
+            kept.addsToGlossary = kept.addsToGlossary || term.addsToGlossary
+            merged[index] = kept
+        }
+        terms = merged
+    }
+
     /// Makes `person` and `other` one person: the other's voices join the person's, and
     /// the other goes. What the person says (name, gender, spelling) stays.
     public mutating func merge(_ other: Person.ID, into person: Person.ID) {

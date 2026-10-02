@@ -111,6 +111,7 @@ extension EditorState {
     public func confirmEpisodeBrief(_ edited: EpisodeBrief) {
         var brief = edited
         brief.terms.removeAll { $0.term.trimmingCharacters(in: .whitespaces).isEmpty }
+        brief.mergeDuplicateTerms()
         edit("Confirm Episode Brief") { track in track.confirm(brief) }
         let entries = brief.terms.filter { $0.addsToGlossary && !$0.translation.trimmingCharacters(in: .whitespaces).isEmpty }
             .map { Glossary.Entry(source: $0.term, target: $0.translation, note: $0.note) }
