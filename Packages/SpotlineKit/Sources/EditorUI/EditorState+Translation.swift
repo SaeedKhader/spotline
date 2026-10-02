@@ -1,3 +1,4 @@
+import AITools
 import EditorCommands
 import Foundation
 import NaturalLanguage
@@ -286,5 +287,75 @@ extension EditorState {
             }
             if !found.isEmpty { issues[cue.id, default: []] += found }
         }
+    }
+}
+
+// MARK: - Glossary replacements
+
+extension EditorState {
+    /// For each glossary term the cue's translation does not use: the line with the word it
+    /// used instead swapped for the agreed one, likeliest first. The word is found two ways:
+    /// it is spelled much like the agreed translation ("دنك" for "دانك"), or it is in most of
+    /// the lines that miss this term and in few others ("سيدي" wherever the source says "ser").
+    /// No option when nothing points to a word; the line is then edited by hand.
+    func glossaryReplacements(for cue: Cue, issues: [QCIssue]) -> [ReviewSuggestion] {
+        var result: [ReviewSuggestion] = []
+        for issue in issues {
+            guard case .glossaryTermNotUsed(_, let target) = issue.kind else { continue }
+            let agreed = MatchText.normalize(target)
+            // The other lines that miss this term, and how often each word is in them and in the whole translation.
+            let missing = track.cues.filter { other in self.issues[other.id]?.contains { $0.kind == issue.kind } == true }
+            func words(_ text: String) -> Set<String> { Set(Self.wordRanges(in: text).map { MatchText.normalize(String(text[$0])) }) }
+            let inMissing = missing.map { words($0.text) }
+            let everywhere = track.cues.map { words($0.text) }
+            var scored: [(range: Range<String.Index>, word: String, score: Double)] = []
+            var seen = Set<String>()
+            for range in Self.wordRanges(in: cue.text) {
+                let word = String(cue.text[range])
+                let key = MatchText.normalize(word)
+                guard key.count > 1, key != agreed, seen.insert(key).inserted else { continue }
+                var score = 0.0
+                // A third of the letters at most: "سيدي" is not a spelling of "سير".
+                if TranscriptAligner.soundsAlike(key, agreed, share: 1.0 / 3) {
+                    score = 2
+                } else {
+                    let with = inMissing.count { $0.contains(key) }
+                    let total = everywhere.count { $0.contains(key) }
+                    if with >= 2, total > 0 { score = Double(with) / Double(total) }
+                }
+                if score >= 0.5 { scored.append((range, word, score)) }
+            }
+            // Every word spelled like the agreed one, and the one word that best goes with the term
+            // (the longer on a tie: "سيدي" rather than the "يا" before it).
+            let best = scored.filter { $0.score < 2 }.max { ($0.score, $0.word.count) < ($1.score, $1.word.count) }
+            let offered = scored.filter { $0.score == 2 } + [best].compactMap(\.self)
+            for candidate in offered.prefix(2) {
+                let text = cue.text.replacingCharacters(in: candidate.range, with: target)
+                result.append(ReviewSuggestion(
+                    title: "Replace “\(candidate.word)” with “\(target)”", preview: text, action: .replaceTerm(text),
+                    fixes: "glossary term", clears: ["glossary term"]
+                ))
+            }
+        }
+        return result
+    }
+
+    /// Where each word of a line is, without the punctuation around it.
+    static func wordRanges(in text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var start: String.Index?
+        var index = text.startIndex
+        func isWord(_ character: Character) -> Bool { character.isLetter || character.isNumber || character.unicodeScalars.allSatisfy { $0.properties.generalCategory == .nonspacingMark } }
+        while index < text.endIndex {
+            if isWord(text[index]) {
+                if start == nil { start = index }
+            } else if let begun = start {
+                ranges.append(begun..<index)
+                start = nil
+            }
+            index = text.index(after: index)
+        }
+        if let begun = start { ranges.append(begun..<text.endIndex) }
+        return ranges
     }
 }

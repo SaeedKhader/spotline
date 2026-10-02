@@ -81,6 +81,8 @@ public enum AccessibilityID {
         public static func proposedCell(_ cueID: UUID, _ column: Column) -> String { "\(proposedRow(cueID)).\(column.rawValue)" }
         /// The review sidebar's Frames filter chip: how many cues are too close to a shot change or the next cue.
         public static let framesSummary = "cueList.frames"
+        /// The review sidebar's Glossary filter chip: how many lines do not use a glossary term.
+        public static let glossarySummary = "cueList.glossary"
         /// The review sidebar's Choices filter chip: how many lines still read more than one way.
         public static let choicesSummary = "cueList.choices"
         /// The AI Review chip: lines the AI script review flagged.

@@ -487,7 +487,9 @@ public final class EditorState {
         case EditorCommand.toggleMilliseconds.id:
             true
         case EditorCommand.toggleIssuesPanel.id:
-            issues.values.contains { $0.contains { !$0.kind.isFrameIssue } }
+            issues.values.contains { $0.contains { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue } }
+        case EditorCommand.reviewGlossary.id:
+            issues.values.contains { $0.contains(where: \.kind.isGlossaryIssue) }
         case EditorCommand.reviewFrames.id:
             issues.values.contains { $0.contains(where: \.kind.isFrameIssue) }
         case EditorCommand.openSourceSubtitles.id:
@@ -559,6 +561,7 @@ public final class EditorState {
         case EditorCommand.toggleReviewSidebar.id: isReviewSidebarVisible
         case EditorCommand.toggleIssuesPanel.id: isShowingReview(.issues)
         case EditorCommand.reviewFrames.id: isShowingReview(.frames)
+        case EditorCommand.reviewGlossary.id: isShowingReview(.glossary)
         case EditorCommand.reviewChanges.id: isShowingReview(.changes)
         case EditorCommand.reviewChoices.id: isShowingReview(.choices)
         case EditorCommand.reviewScriptFindings.id: isShowingReview(.script)
@@ -621,6 +624,8 @@ public final class EditorState {
             toggleReviewFilter(.issues)
         case EditorCommand.reviewFrames.id:
             toggleReviewFilter(.frames)
+        case EditorCommand.reviewGlossary.id:
+            toggleReviewFilter(.glossary)
         case EditorCommand.showAllCues.id:
             showReview(.all)
         case EditorCommand.toggleReviewSidebar.id:

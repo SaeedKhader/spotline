@@ -168,6 +168,10 @@ extension EditorCommand {
     public static let reviewFrames = EditorCommand(
         id: "review.reviewFrames", title: "Review Frame Issues", category: .review
     )
+    /// A toggle: the review sidebar lists only the lines that do not use a glossary term's agreed translation.
+    public static let reviewGlossary = EditorCommand(
+        id: "review.reviewGlossary", title: "Review Glossary Terms", category: .review
+    )
     public static let shuttleBackward = EditorCommand(
         id: "playback.shuttleBackward", title: "Shuttle Backward", category: .playback,
         defaultShortcut: KeyShortcut(.character("j"))
@@ -386,7 +390,7 @@ extension EditorCommand {
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
         previousCue, nextCue, deselectCue, previousShotChange, nextShotChange,
-        showAllCues, toggleIssuesPanel, reviewFrames, previousIssue, nextIssue, fixOverlaps, joinShortLines,
+        showAllCues, toggleIssuesPanel, reviewFrames, reviewGlossary, previousIssue, nextIssue, fixOverlaps, joinShortLines,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
         toggleMilliseconds, toggleReviewSidebar,

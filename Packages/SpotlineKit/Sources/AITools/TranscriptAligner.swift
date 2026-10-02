@@ -218,10 +218,11 @@ public enum TranscriptAligner {
         return (CueSegmenter.join(match.heard.map(\.text)), confidence)
     }
 
-    /// Two spellings close enough to be one word heard two ways: at most half the letters differ.
-    static func soundsAlike(_ a: String, _ b: String) -> Bool {
+    /// Two spellings close enough to be one word heard two ways: at most half the letters
+    /// differ, or the `share` of them given.
+    public static func soundsAlike(_ a: String, _ b: String, share: Double = 0.5) -> Bool {
         let a = Array(a), b = Array(b)
-        guard a.count > 1, b.count > 1, abs(a.count - b.count) * 2 <= max(a.count, b.count) else { return false }
+        guard a.count > 1, b.count > 1, Double(abs(a.count - b.count)) <= share * Double(max(a.count, b.count)) else { return false }
         var row = Array(0...b.count)
         for i in 1...a.count {
             var previous = row[0]
@@ -232,7 +233,7 @@ public enum TranscriptAligner {
                 previous = current
             }
         }
-        return row[b.count] * 2 <= max(a.count, b.count)
+        return Double(row[b.count]) <= share * Double(max(a.count, b.count))
     }
 
     // MARK: Sync

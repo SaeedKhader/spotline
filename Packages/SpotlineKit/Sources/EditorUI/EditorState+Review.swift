@@ -10,6 +10,8 @@ public enum ReviewScope: String, CaseIterable, Sendable {
     case issues
     /// QC issues counted in frames: too close to a shot change, too short a gap to the next cue.
     case frames
+    /// In translation mode: lines whose source uses a glossary term and whose translation not its agreed one.
+    case glossary
     /// Lines the AI script review thinks were misheard or make no sense, with fixes.
     case script
     /// Words the transcriber was unsure of.
@@ -25,7 +27,7 @@ extension ReviewScope {
     var listsLeastSureFirst: Bool {
         switch self {
         case .choices, .script, .words: true
-        case .all, .issues, .frames, .changes: false
+        case .all, .issues, .frames, .glossary, .changes: false
         }
     }
 }
@@ -43,6 +45,11 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
         case issues
         /// The cue's frame issues (shot changes, gaps), apart from its other issues.
         case frames
+        /// The glossary terms the cue's translation does not use, apart from its other issues.
+        case glossary
+
+        /// A card of QC issues, with one-click fixes to try.
+        public var isIssueCard: Bool { self == .issues || self == .frames || self == .glossary }
 
         var scope: ReviewScope {
             switch self {
@@ -52,6 +59,7 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
             case .word: .words
             case .issues: .issues
             case .frames: .frames
+            case .glossary: .glossary
             }
         }
 
@@ -64,6 +72,7 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
             case .word(let index): 3 + index
             case .issues: 1000
             case .frames: 1001
+            case .glossary: 999
             }
         }
     }
@@ -91,6 +100,7 @@ public struct ReviewItem: Identifiable, Hashable, Sendable {
         case .word(let index): "word.\(index).\(word ?? "")"
         case .issues: "issues"
         case .frames: "frames"
+        case .glossary: "glossary"
         }
         return "\(cueID.uuidString).\(suffix)"
     }
@@ -156,6 +166,8 @@ public struct ReviewSuggestion: Hashable, Sendable {
         case copySource(String)
         /// In translation mode: the best translation memory match.
         case useMemory(String)
+        /// In translation mode: the line with the word it used for a glossary term swapped for the agreed one.
+        case replaceTerm(String)
         /// Split in two where the speaker pauses; each half's text as it will read.
         case splitAt(PauseSplit, first: String, second: String)
     }
@@ -188,7 +200,7 @@ public struct ReviewSuggestion: Hashable, Sendable {
     public var group: Group {
         if !parts.isEmpty { return .all }
         switch action {
-        case .copySource, .useMemory: return .text
+        case .copySource, .useMemory, .replaceTerm: return .text
         case .splitAt: return .cue
         case .fix(let fix):
             switch fix.purpose {
@@ -220,7 +232,10 @@ extension EditorState {
                 items += words.enumerated().map { ReviewItem(cueID: cue.id, kind: .word($0.offset), start: cue.start, word: $0.element.text) }
             }
             let cueIssues = issues[cue.id] ?? []
-            if scope == .all || scope == .issues, cueIssues.contains(where: { !$0.kind.isFrameIssue }) {
+            if scope == .all || scope == .glossary, cueIssues.contains(where: \.kind.isGlossaryIssue) {
+                items.append(ReviewItem(cueID: cue.id, kind: .glossary, start: cue.start))
+            }
+            if scope == .all || scope == .issues, cueIssues.contains(where: { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue }) {
                 items.append(ReviewItem(cueID: cue.id, kind: .issues, start: cue.start))
             }
             if scope == .all || scope == .frames, cueIssues.contains(where: \.kind.isFrameIssue) {
@@ -245,7 +260,7 @@ extension EditorState {
             case .choice: return cue.flag?.confidence ?? 1
             case .script: return cue.scriptFinding?.confidence ?? 1
             case .word(let index): return cue.unsureWords?[safe: index]?.confidence ?? 0.5
-            case .change, .issues, .frames: return 1
+            case .change, .issues, .frames, .glossary: return 1
             }
         }
         let keyed = items.map { (item: $0, sureness: sureness($0)) }
@@ -359,7 +374,7 @@ extension EditorState {
             let original = reviewTrials[item.id].map { $0.before.first { $0.id == item.cueID }?.flag?.chosen } ?? flag.chosen
             if !flag.isResolved { chooseVariant(flag.chosen, forCue: item.cueID) }
             outcome = original == flag.chosen ? "Reading kept" : "Other reading used"
-        case (.issues, .suggestion(let index)), (.frames, .suggestion(let index)):
+        case (.issues, .suggestion(let index)), (.frames, .suggestion(let index)), (.glossary, .suggestion(let index)):
             guard index < reviewSuggestions(for: item).count else { return }
             tryFix(index, of: item)
             return
@@ -368,7 +383,7 @@ extension EditorState {
             let speed = track.cues[index].readingSpeed
             edit("Ignore Reading Speed") { track in track.cues[index].acceptedReadingSpeed = speed }
             outcome = "Reading speed \(Int(speed.rounded())) c/s accepted"
-        case (.issues, .primary), (.frames, .primary):
+        case (.issues, .primary), (.frames, .primary), (.glossary, .primary):
             // Nothing tried yet: the first option goes in to be seen; the next Return confirms it.
             let picked = pickedSuggestions(of: item)
             guard !picked.isEmpty else {
@@ -425,8 +440,9 @@ extension EditorState {
     public func cardIssues(_ item: ReviewItem) -> [QCIssue] {
         let all = issues[item.cueID] ?? []
         switch item.kind {
-        case .issues: return all.filter { !$0.kind.isFrameIssue }
+        case .issues: return all.filter { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue }
         case .frames: return all.filter(\.kind.isFrameIssue)
+        case .glossary: return all.filter(\.kind.isGlossaryIssue)
         default: return []
         }
     }
@@ -494,7 +510,7 @@ extension EditorState {
         guard let trial = reviewTrials[item.id], trial.picks.contains(option.key) else { return false }
         let now = cue(withID: item.cueID)
         switch option.action {
-        case .copySource(let text), .useMemory(let text):
+        case .copySource(let text), .useMemory(let text), .replaceTerm(let text):
             return now?.text == text
         case .splitAt(let split, let first, _):
             return now?.text == first && now?.end == split.firstEnd
@@ -570,7 +586,7 @@ extension EditorState {
         guard let index = cues.firstIndex(where: { $0.id == id }) else { return cues }
         var cues = cues
         switch suggestion.action {
-        case .copySource(let text), .useMemory(let text):
+        case .copySource(let text), .useMemory(let text), .replaceTerm(let text):
             cues[index].text = text
         case .splitAt(let split, let first, let second):
             guard var (head, tail) = halves(of: cues[index], at: split.secondStart) else { return cues }
@@ -617,10 +633,10 @@ extension EditorState {
         if base != nil {
             let window = max(0, index - 2)..<min(cues.count, index + 3)
             issues = (QualityControl.check(Array(cues[window]), preset: qcPreset, context: context)[id] ?? [])
-                + issues.filter { $0.kind == .notTranslated }
+                + issues.filter { $0.kind == .notTranslated || $0.kind.isGlossaryIssue }
         }
         guard !issues.isEmpty else { return [] }
-        var result: [ReviewSuggestion] = []
+        var result: [ReviewSuggestion] = glossaryReplacements(for: cue, issues: issues)
         if issues.contains(where: { $0.kind == .notTranslated || $0.kind == .empty }), let source = sourceCues[id], !source.text.isEmpty {
             if let match = memoryMatches(for: id).first {
                 result.append(ReviewSuggestion(title: "Use Memory Match (\(match.percent))", preview: match.entry.target, action: .useMemory(match.entry.target), fixes: "not translated", clears: ["not translated"]))
@@ -630,7 +646,7 @@ extension EditorState {
         let spoken = spokenSpan(of: cue)
         for fix in QualityControl.fixes(for: index, in: cues, preset: qcPreset, context: context, speaker: speaker(of:)) {
             // An untranslated cue is filled, not removed.
-            if fix.purpose == .delete, !result.isEmpty { continue }
+            if fix.purpose == .delete, result.contains(where: { $0.clears.contains("not translated") }) { continue }
             // Timing stays over the words: never starting after the first or ending before the last.
             if fix.purpose.changesTimingOfCue, let spoken, fix.start > spoken.start || fix.end < spoken.end { continue }
             var names: [String] = []
@@ -650,6 +666,7 @@ extension EditorState {
             case .splitAt: "splitAtPause"
             case .copySource: "copySource"
             case .useMemory: "useMemory"
+            case .replaceTerm: "replaceTerm"
             case .fix(let fix): "\(fix.purpose)"
             }
             result[position].key = "\(kind)#\(counts[kind, default: 0])"
@@ -846,6 +863,12 @@ extension EditorState {
 }
 
 extension QCIssue.Kind {
+    /// A glossary term the translation does not use: reviewed under its own filter.
+    var isGlossaryIssue: Bool {
+        if case .glossaryTermNotUsed = self { return true }
+        return false
+    }
+
     /// Counted in frames: close to a shot change, or too short a gap before the next cue.
     var isFrameIssue: Bool {
         switch self {
