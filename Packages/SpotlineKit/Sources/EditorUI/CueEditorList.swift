@@ -357,47 +357,38 @@ private struct CueRow: View, Equatable {
         .accessibilityIdentifier(AccessibilityID.CueList.row(cue.id))
     }
 
-    /// The cue's text: an editor in the selected row, a plain line that looks the same in the others.
-    /// A text editor is an AppKit text view; one in every row made the list slow to lay out, scroll and jump in.
-    @ViewBuilder private var text: some View {
-        if isSelected {
-            textEditor
-                // The text cell automation finds (by its ID, with the text as its value) is an element
-                // behind the editor, of the same kind as the plain line's in the other rows. The editor's
-                // own element is the AppKit text view, which is not listed in the rows' order when it
-                // is made after its row, and a container's value is not reported.
-                .background {
-                    Color.clear
-                        .accessibilityElement()
-                        .accessibilityLabel("Text")
-                        .accessibilityValue(cue.text)
-                        .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
-                }
-                .overlay(alignment: .topTrailing) { aiMark }
-        } else {
-            // The text as it is typed, markup and all, as the editor shows it.
-            Text(cue.text)
-                .font(SpotlineStyle.cueFont)
-                .foregroundStyle(cue.isAIGenerated == true ? AnyShapeStyle(Color.aiTint) : AnyShapeStyle(.primary))
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                // Where the editor's text is: its own padding, and the text view's inside it.
-                .padding(.horizontal, 11)
-                .padding(.vertical, 4)
-                .frame(minHeight: 58, alignment: .topLeading)
-                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-                .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(.separator))
-                .environment(\.layoutDirection, directions.target.layoutDirection)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: editText)
-                // An element of its own, so a cue with no text has its cell too.
-                .accessibilityElement(children: .ignore)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel("Text")
-                .accessibilityValue(cue.text)
-                .accessibilityAction(.default, editText)
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
-                .overlay(alignment: .topTrailing) { aiMark }
-        }
+    /// The cue's text: a plain line in every row, with an editor over it in the selected row.
+    ///
+    /// A text editor is an AppKit text view; one in every row made the list slow to lay out, scroll
+    /// and jump in. The line stays under the editor (unseen), so the cell is the same size and the
+    /// same accessibility element (its ID, the text as its value) whether the row is selected or not.
+    private var text: some View {
+        // The text as it is typed, markup and all, as the editor shows it. A line just begun with
+        // Return has no character yet: a space holds its place.
+        Text(cue.text.hasSuffix("\n") ? cue.text + " " : cue.text)
+            .font(SpotlineStyle.cueFont)
+            .foregroundStyle(isSelected ? AnyShapeStyle(Color.clear) : cue.isAIGenerated == true ? AnyShapeStyle(Color.aiTint) : AnyShapeStyle(.primary))
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // Where the editor's text is: its own padding, and the text view's inside it.
+            .padding(.horizontal, 11)
+            .padding(.vertical, 4)
+            .frame(minHeight: 58, alignment: .topLeading)
+            .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(.separator))
+            .environment(\.layoutDirection, directions.target.layoutDirection)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: editText)
+            // An element of its own, so a cue with no text has its cell too.
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Text")
+            .accessibilityValue(cue.text)
+            .accessibilityAction(.default, editText)
+            .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
+            .overlay {
+                if isSelected { textEditor }
+            }
+            .overlay(alignment: .topTrailing) { aiMark }
     }
 
     /// Sparkles in the corner of text an AI tool wrote, until someone edits it.
@@ -437,8 +428,7 @@ private struct CueRow: View, Equatable {
                 .frame(minHeight: 58)
                 // Text an AI tool wrote is in the AI tint until someone edits it.
                 .foregroundStyle(cue.isAIGenerated == true ? AnyShapeStyle(Color.aiTint) : AnyShapeStyle(.primary))
-                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-                .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(.separator))
+                // (Its box and border are the plain line's, under it.)
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
                     focusedText.wrappedValue = nil
