@@ -93,6 +93,8 @@ public enum AccessibilityID {
             case inPoint = "in"
             case outPoint = "out"
             case readingSpeed = "cps"
+            /// Who says the line, when known; the value is the names.
+            case speaker
             /// The button that shows the cue at the top or bottom; its value is "top" or "bottom".
             case position
             /// Review warnings; the value lists them.

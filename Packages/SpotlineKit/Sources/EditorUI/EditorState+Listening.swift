@@ -80,6 +80,26 @@ extension EditorState {
         if !reviewItems(in: .all).isEmpty { wantsReviewSidebar = true }
     }
 
+    /// Who says a cue, for its row: its speaker, else each of its voices (the source
+    /// cue's when translating) by the name the cast has for it, or "Voice 3" until
+    /// the episode brief names it. Empty when nothing tells.
+    public func speakerNames(of cue: Cue) -> [String] {
+        let spoken = sourceCues[cue.id] ?? cue
+        if let speaker = spoken.speaker, !speaker.isEmpty { return [speaker] }
+        var names: [String] = []
+        for voice in spoken.voices ?? [] {
+            let name = track.cast.first { $0.voices.contains(voice) }?.name ?? Self.voiceName(voice)
+            if !names.contains(name) { names.append(name) }
+        }
+        return names
+    }
+
+    /// "speaker_2" as people count: "Voice 3".
+    static func voiceName(_ label: String) -> String {
+        guard let number = label.split(separator: "_").last.flatMap({ Int($0) }) else { return label }
+        return "Voice \(number + 1)"
+    }
+
     // MARK: Sync
 
     /// AI › Sync Subtitles to Audio…: works the timing out again and asks, or says why not.

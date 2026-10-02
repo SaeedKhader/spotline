@@ -68,6 +68,11 @@ struct ListeningStateTests {
         #expect(editor.track.cues.allSatisfy { $0.isAIGenerated == nil })
         #expect(editor.track.cues.prefix(3).map(\.voices) == [["speaker_0"], ["speaker_1"], ["speaker_0"]])
         #expect(editor.aiSummary?.fullText == "Heard 20 of 20 cues in the audio")
+        // Each row says who speaks: by voice until the cast names it.
+        #expect(editor.speakerNames(of: editor.track.cues[1]) == ["Voice 2"])
+        editor.edit("Cast") { $0.cast = [CastMember(name: "Egg", voices: ["speaker_1"])] }
+        #expect(editor.speakerNames(of: editor.track.cues[1]) == ["Egg"])
+        editor.perform(.undo)
         #expect(editor.subtitleSync == nil)
         #expect(editor.storedTranscripts.count == 1)
         // One undo takes the voices off again.

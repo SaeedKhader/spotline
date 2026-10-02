@@ -228,6 +228,7 @@ private struct CueRow: View {
                 TimeField(editor: editor, cue: cue, edge: .start, showsFrame: isHovered || isSelected)
                 TimeField(editor: editor, cue: cue, edge: .end, showsFrame: isHovered || isSelected)
                 speedAndIssues
+                speakers
             }
             VStack(alignment: .trailing, spacing: 6) {
                 if editor.isTranslating {
@@ -318,6 +319,24 @@ private struct CueRow: View {
             } else {
                 Color.clear
             }
+        }
+    }
+
+    /// Who says the line, when the cue has a speaker or the audio told its voices.
+    @ViewBuilder private var speakers: some View {
+        let names = editor.speakerNames(of: cue)
+        if !names.isEmpty {
+            let text = names.joined(separator: ", ")
+            Label(text, systemImage: names.count > 1 ? "person.2" : "person")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.leading, 4)
+                .help("Says the line: \(text)")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Speaker")
+                .accessibilityValue(text)
+                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .speaker))
         }
     }
 
