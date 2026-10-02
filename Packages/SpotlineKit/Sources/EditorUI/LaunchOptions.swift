@@ -20,10 +20,16 @@ public struct LaunchOptions: Sendable {
     public var enablesAgentAccess: Bool
     /// Builds a scripted episode brief after transcribing in UI test mode, from `-UITestEpisodeBrief`.
     public var buildsEpisodeBrief: Bool
+    /// Where a performance run writes what it measured, from `-PerfReport <path>` (`PerformanceRun`,
+    /// `scripts/perf.sh`). The run plays without sound.
+    public var performanceReportURL: URL?
+    /// Quits once the performance run is done, from `-PerfQuit`.
+    public var quitsAfterPerformanceRun: Bool
 
     public init(
         isUITestMode: Bool = false, mediaURL: URL? = nil, subtitlesURL: URL? = nil, sourceSubtitlesURL: URL? = nil,
-        projectURL: URL? = nil, usesAnalysisCache: Bool? = nil, enablesAgentAccess: Bool = false, buildsEpisodeBrief: Bool = false
+        projectURL: URL? = nil, usesAnalysisCache: Bool? = nil, enablesAgentAccess: Bool = false, buildsEpisodeBrief: Bool = false,
+        performanceReportURL: URL? = nil, quitsAfterPerformanceRun: Bool = false
     ) {
         self.isUITestMode = isUITestMode
         self.mediaURL = mediaURL
@@ -33,6 +39,8 @@ public struct LaunchOptions: Sendable {
         self.usesAnalysisCache = usesAnalysisCache ?? !isUITestMode
         self.enablesAgentAccess = enablesAgentAccess
         self.buildsEpisodeBrief = buildsEpisodeBrief
+        self.performanceReportURL = performanceReportURL
+        self.quitsAfterPerformanceRun = quitsAfterPerformanceRun
     }
 
     /// The same switches without the files to open, for every window after the first.
@@ -59,7 +67,9 @@ public struct LaunchOptions: Sendable {
             projectURL: path(after: "-OpenProject"),
             usesAnalysisCache: arguments.contains("-UITestMode") || arguments.contains("-NoAnalysisCache") ? false : true,
             enablesAgentAccess: arguments.contains("-EnableAgentAccess"),
-            buildsEpisodeBrief: arguments.contains("-UITestEpisodeBrief")
+            buildsEpisodeBrief: arguments.contains("-UITestEpisodeBrief"),
+            performanceReportURL: path(after: "-PerfReport"),
+            quitsAfterPerformanceRun: arguments.contains("-PerfQuit")
         )
     }
 }

@@ -142,7 +142,8 @@ public struct ProjectFile: Equatable, Sendable {
             Self.subtitlesName: FileWrapper(regularFileWithContents: try Self.encoder.encode(track)),
         ]
         if let sourceTrack {
-            files[Self.sourceName] = FileWrapper(regularFileWithContents: try Self.encoder.encode(sourceTrack))
+            let data = try cache?.sourceData(for: sourceTrack) ?? Self.encoder.encode(sourceTrack)
+            files[Self.sourceName] = FileWrapper(regularFileWithContents: data)
         }
         let analysisFiles = try cache?.analysisFiles(for: analysis) ?? analysis.files()
         if !analysisFiles.isEmpty {
@@ -159,12 +160,20 @@ public struct ProjectFile: Equatable, Sendable {
         try Dictionary(transcripts.map { ($0.fileName, try encoder.encode($0)) }, uniquingKeysWith: { _, last in last })
     }
 
-    /// Keeps the last encoded analysis and transcripts; they change rarely, and are large.
+    /// Keeps the last encoded analysis, transcripts and source subtitles; they change rarely, and are large.
     public final class EncodingCache: @unchecked Sendable {
         private var analysis: (StoredAnalysis, [String: Data])?
         private var transcripts: ([StoredTranscript], [String: Data])?
+        private var source: (SubtitleTrack, Data)?
 
         public init() {}
+
+        func sourceData(for value: SubtitleTrack) throws -> Data {
+            if let (cached, data) = source, cached == value { return data }
+            let data = try ProjectFile.encoder.encode(value)
+            source = (value, data)
+            return data
+        }
 
         func analysisFiles(for value: StoredAnalysis) throws -> [String: Data] {
             if let (cached, files) = analysis, cached == value { return files }

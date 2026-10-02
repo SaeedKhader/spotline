@@ -14,7 +14,7 @@ extension EditorState {
     /// of those with text were not written by AI. The episode brief is told so, and the
     /// AI script review (which looks for misheard words) is not run by itself.
     var textIsFromSubtitles: Bool {
-        let spoken = briefSourceTrack.cues.filter { !SubtitleText.visibleLines(of: $0.text).joined().allSatisfy(\.isWhitespace) }
+        let spoken = briefSourceTrack.cues.filter { !SubtitleText.isBlank($0.text) }
         guard !spoken.isEmpty else { return false }
         return spoken.count(where: { $0.isAIGenerated != true }) * 5 >= spoken.count * 4
     }
@@ -30,7 +30,7 @@ extension EditorState {
 
     /// The cues with text that AI did not write: what a transcript is matched to.
     var cuesOfTheirOwn: [Cue] {
-        track.cues.filter { $0.isAIGenerated != true && !SubtitleText.visibleLines(of: $0.text).joined().allSatisfy(\.isWhitespace) }
+        track.cues.filter { $0.isAIGenerated != true && !SubtitleText.isBlank($0.text) }
     }
 
     /// The transcript the project keeps that tells speakers apart, else the last one.
@@ -95,11 +95,15 @@ extension EditorState {
     /// cue's when translating) by the name the cast has for it, or "Voice 3" until
     /// the episode brief names it. Empty when nothing tells.
     public func speakerNames(of cue: Cue) -> [String] {
-        let spoken = sourceCues[cue.id] ?? cue
+        Self.speakerNames(of: sourceCues[cue.id] ?? cue, cast: track.cast)
+    }
+
+    /// The same for the cue that is spoken (the source cue when translating) and the cast in hand.
+    static func speakerNames(of spoken: Cue, cast: [CastMember]) -> [String] {
         if let speaker = spoken.speaker, !speaker.isEmpty { return [speaker] }
         var names: [String] = []
         for voice in spoken.voices ?? [] {
-            let name = track.cast.first { $0.voices.contains(voice) }?.name ?? Self.voiceName(voice)
+            let name = cast.first { $0.voices.contains(voice) }?.name ?? Self.voiceName(voice)
             if !names.contains(name) { names.append(name) }
         }
         return names
@@ -107,8 +111,11 @@ extension EditorState {
 
     /// Whether listening to the audio told who says the cue (the source cue when translating).
     public func isMatchedToAudio(_ cue: Cue) -> Bool {
-        let spoken = sourceCues[cue.id] ?? cue
-        return spoken.isAIGenerated != true && spoken.voices?.isEmpty == false
+        Self.isMatchedToAudio(sourceCues[cue.id] ?? cue)
+    }
+
+    static func isMatchedToAudio(_ spoken: Cue) -> Bool {
+        spoken.isAIGenerated != true && spoken.voices?.isEmpty == false
     }
 
     /// "speaker_2" as people count: "Voice 3".

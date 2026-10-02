@@ -75,8 +75,9 @@ extension EditorState {
         guard pairs != sourceCues else { return }
         let joined = track.cues.contains { $0.joinedSourceCueIDs != nil }
         sourceCues = pairs
-        // A joined cue reads its source cues as one, with glossary terms from all of them.
-        if joined { updateGlossaryHits() }
+        // A joined cue reads its source cues as one, with glossary terms from all of them;
+        // once it is no longer joined (split, or the join undone), its source cue has its own again.
+        if joined || glossaryHitsCoverJoinedCues { updateGlossaryHits() }
     }
 
     // MARK: Languages
@@ -134,23 +135,33 @@ extension EditorState {
 
     /// Glossary terms in the cue's source text, and whether the cue uses their translations.
     public func glossaryMatches(for cueID: Cue.ID) -> [Glossary.Match] {
+        cue(withID: cueID).map(glossaryMatches(for:)) ?? []
+    }
+
+    /// The same for a cue in hand: a row showing it then redraws for its own cue, the pairing
+    /// and the glossary, not for every edit to the track.
+    public func glossaryMatches(for cue: Cue) -> [Glossary.Match] {
         // Read so views showing matches redraw when the glossary changes.
         _ = glossary
-        guard let source = sourceCues[cueID], let entries = glossaryHits[source.id], !entries.isEmpty,
-              let cue = cue(withID: cueID)
-        else { return [] }
+        guard let source = sourceCues[cue.id], let entries = glossaryHits[source.id], !entries.isEmpty else { return [] }
+        return glossaryMatches(for: cue, terms: entries)
+    }
+
+    private func glossaryMatches(for cue: Cue, terms: [Glossary.Entry]) -> [Glossary.Match] {
         let target = MatchText.normalize(cue.text)
-        return entries.map { Glossary.Match(entry: $0, isUsed: glossaryIndex.isUsed($0, inNormalizedTarget: target)) }
+        return terms.map { Glossary.Match(entry: $0, isUsed: glossaryIndex.isUsed($0, inNormalizedTarget: target)) }
     }
 
     func updateGlossaryHits() {
         guard let source = sourceTrack, !glossaryIndex.isEmpty else {
             glossaryHits = [:]
+            glossaryHitsCoverJoinedCues = false
             return
         }
         var hits: [Cue.ID: [Glossary.Entry]] = [:]
         // Joined target cues read their source cues as one (with the first's ID), so those come last.
         let joined = sourceCues.values.filter { cue in !source.cues.contains { $0.id == cue.id && $0.text == cue.text } }
+        glossaryHitsCoverJoinedCues = !joined.isEmpty
         for cue in source.cues + joined {
             let entries = glossaryIndex.entries(inSource: cue.text)
             if !entries.isEmpty { hits[cue.id] = entries }
@@ -234,7 +245,7 @@ extension EditorState {
     /// Fills every empty cue whose source has an exact memory match. Returns false when none has.
     func fillExactMatches() -> Bool {
         var fills: [Int: String] = [:]
-        for (index, cue) in track.cues.enumerated() where SubtitleText.visibleLines(of: cue.text).joined().allSatisfy(\.isWhitespace) {
+        for (index, cue) in track.cues.enumerated() where SubtitleText.isBlank(cue.text) {
             if let source = sourceCues[cue.id], let match = memory.exactMatch(for: source.text) {
                 fills[index] = match.target
             }
@@ -249,7 +260,11 @@ extension EditorState {
     /// Stores a cue's translation with its source text, when both have text.
     func recordTranslation(of cueID: Cue.ID) {
         guard let cue = cue(withID: cueID), let source = sourceCues[cueID] else { return }
-        if memory.record(source: source.text, target: cue.text) { saveMemory() }
+        // On a copy: a pair the memory already has leaves it, and the suggestions worked out from it, as they are.
+        var updated = memory
+        guard updated.record(source: source.text, target: cue.text) else { return }
+        memory = updated
+        saveMemory()
     }
 
     func addTranslationsToMemory() {
@@ -261,6 +276,8 @@ extension EditorState {
     }
 
     private func saveMemory() {
+        // A performance run changes nothing of the person's.
+        guard launchOptions.performanceReportURL == nil else { return }
         try? translationStore?.save(memory, pair: translationPair)
     }
 
@@ -269,23 +286,18 @@ extension EditorState {
     /// Untranslated cues and glossary terms not used. (Lines that read more than
     /// one way have their own review: AI › Review Translation Choices; words the
     /// transcriber was unsure of too: AI › Review Words to Check.)
-    func addTranslationIssues(to issues: inout [Cue.ID: [QCIssue]]) {
-        for cue in track.cues {
-            var found: [QCIssue] = []
-            if let source = sourceCues[cue.id] {
-                let sourceHasText = !SubtitleText.visibleLines(of: source.text).joined().allSatisfy(\.isWhitespace)
-                if sourceHasText, let index = issues[cue.id]?.firstIndex(where: { $0.kind == .empty }) {
-                    issues[cue.id]?[index] = QCIssue(kind: .notTranslated, message: "Not translated")
-                } else {
-                    for match in glossaryMatches(for: cue.id) where !match.isUsed {
-                        found.append(QCIssue(
-                            kind: .glossaryTermNotUsed(source: match.entry.source, target: match.entry.target),
-                            message: "Glossary: “\(match.entry.source)” is “\(match.entry.target)”"
-                        ))
-                    }
-                }
+    func addTranslationIssues(to issues: inout [QCIssue], of cue: Cue, source: Cue?, terms: [Glossary.Entry]) {
+        guard let source else { return }
+        let sourceHasText = !SubtitleText.isBlank(source.text)
+        if sourceHasText, let index = issues.firstIndex(where: { $0.kind == .empty }) {
+            issues[index] = QCIssue(kind: .notTranslated, message: "Not translated")
+        } else if !terms.isEmpty {
+            for match in glossaryMatches(for: cue, terms: terms) where !match.isUsed {
+                issues.append(QCIssue(
+                    kind: .glossaryTermNotUsed(source: match.entry.source, target: match.entry.target),
+                    message: "Glossary: “\(match.entry.source)” is “\(match.entry.target)”"
+                ))
             }
-            if !found.isEmpty { issues[cue.id, default: []] += found }
         }
     }
 }
@@ -342,9 +354,17 @@ extension EditorState {
     /// Each cue's words, normalized: worked out once for the cues as they are (`cueWordSets`).
     func wordSets() -> [Cue.ID: Set<String>] {
         if let cueWordSets { return cueWordSets }
-        let sets = Dictionary(track.cues.map { cue in
-            (cue.id, Set(Self.wordRanges(in: cue.text).map { MatchText.normalize(String(cue.text[$0])) }))
-        }, uniquingKeysWith: { first, _ in first })
+        var byText: [Cue.ID: (text: String, words: Set<String>)] = [:]
+        byText.reserveCapacity(track.cues.count)
+        for cue in track.cues where byText[cue.id] == nil {
+            if let last = wordSetsByText[cue.id], last.text == cue.text {
+                byText[cue.id] = last
+            } else {
+                byText[cue.id] = (cue.text, Set(Self.wordRanges(in: cue.text).map { MatchText.normalize(String(cue.text[$0])) }))
+            }
+        }
+        wordSetsByText = byText
+        let sets = byText.mapValues(\.words)
         cueWordSets = sets
         return sets
     }
@@ -352,11 +372,20 @@ extension EditorState {
     /// The line with the word it used for a glossary term swapped for the agreed one: what the
     /// card's Replace button puts in. Nil when nothing points to a word.
     public func glossaryReplacement(forCue id: Cue.ID) -> (title: String, text: String)? {
-        guard let cue = cue(withID: id) else { return nil }
-        for option in glossaryReplacements(for: cue, issues: issues[id] ?? []) {
-            if case .replaceTerm(let text) = option.action { return (option.title, text) }
+        // Read even when the answer is at hand, so cards showing it redraw when the cues or issues change.
+        _ = (track, issues)
+        if let known = reviewDerived.glossaryReplacements[id] { return known }
+        var replacement: (title: String, text: String)?
+        if let cue = cue(withID: id) {
+            for option in glossaryReplacements(for: cue, issues: issues[id] ?? []) {
+                if case .replaceTerm(let text) = option.action {
+                    replacement = (option.title, text)
+                    break
+                }
+            }
         }
-        return nil
+        reviewDerived.glossaryReplacements[id] = .some(replacement)
+        return replacement
     }
 
     /// Where each word of a line is, without the punctuation around it.

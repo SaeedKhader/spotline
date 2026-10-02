@@ -651,8 +651,8 @@ extension EditorState {
     /// Target cues with no text whose source has some.
     var untranslatedCues: [Cue] {
         track.cues.filter { cue in
-            SubtitleText.visibleLines(of: cue.text).joined().allSatisfy(\.isWhitespace)
-                && sourceCues[cue.id].map { !SubtitleText.visibleLines(of: $0.text).joined().allSatisfy(\.isWhitespace) } == true
+            SubtitleText.isBlank(cue.text)
+                && sourceCues[cue.id].map { !SubtitleText.isBlank($0.text) } == true
         }
     }
 

@@ -84,6 +84,8 @@ extension EditorState {
         )
         aiTaskGeneration += 1
         let generation = aiTaskGeneration
+        // The scenes are described right after the brief: their frames are read meanwhile, on this Mac.
+        if aiSettings.sendsVideoFrames, canPickSceneFrames, sceneFrames == nil, sceneFramesJob == nil { pickSceneFrames() }
         aiTaskHandle = Task { [weak self] in
             do {
                 var brief = try await builder.buildBrief(request)

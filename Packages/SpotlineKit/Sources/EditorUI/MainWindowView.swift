@@ -316,12 +316,21 @@ struct AnalysisStatusView: View {
 extension EditorState {
     /// Cues with something for the user to check: QC issues and words the transcriber was unsure of.
     var attentionCueIDs: Set<Cue.ID> {
-        Set(issues.keys).union(track.cues.lazy.filter { $0.unsureWords?.isEmpty == false }.map(\.id))
+        // Read even when the set is at hand, so views showing it redraw when one of them changes.
+        _ = (track, issues)
+        if let cached = reviewDerived.attentionCueIDs { return cached }
+        let ids = Set(issues.keys).union(track.cues.lazy.filter { $0.unsureWords?.isEmpty == false }.map(\.id))
+        reviewDerived.attentionCueIDs = ids
+        return ids
     }
 
     /// Cues with an AI suggestion to decide: a proposed change or a translation choice.
     var suggestionCueIDs: Set<Cue.ID> {
-        Set(pendingReview?.changes.map(\.cueID) ?? []).union(track.cues.lazy.filter { $0.flag?.isResolved == false }.map(\.id))
+        _ = (track, pendingReview)
+        if let cached = reviewDerived.suggestionCueIDs { return cached }
+        let ids = Set(pendingReview?.changes.map(\.cueID) ?? []).union(track.cues.lazy.filter { $0.flag?.isResolved == false }.map(\.id))
+        reviewDerived.suggestionCueIDs = ids
+        return ids
     }
 
     var timelineContent: TimelineContent {

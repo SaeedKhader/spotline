@@ -160,17 +160,22 @@ struct EpisodeBriefSheet: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("In the Video").font(.subheadline.weight(.semibold))
                 Spacer()
-                Button(EditorCommand.describeScenes.title) {
-                    if let draft { editor.describeScenes(keeping: draft) }
+                // With Send video frames off nothing was sent: the button turns it on first.
+                Button(editor.aiSettings.sendsVideoFrames ? EditorCommand.describeScenes.title : "Turn On Video Frames and Describe Scenes") {
+                    if let draft { editor.describeScenes(keeping: draft, allowingFrames: true) }
                 }
                 .controlSize(.small)
                 .disabled(!editor.canPerform(.describeScenes))
                 .help("Sends a few frames of each scene to GPT-6 Luna. A few cents an episode.")
                 .accessibilityIdentifier(AccessibilityID.command(EditorCommand.describeScenes.id))
             }
-            Text("Who is in view in each scene, from a few frames of it. The translator uses this to tell how many people a line is spoken to, and who they are.")
+            Text(editor.aiSettings.sendsVideoFrames
+                ? "Who is in view in each scene, from a few frames of it. The translator uses this to tell how many people a line is spoken to, and who they are."
+                : "Send video frames is off (Settings › AI), so the scenes were not described from the video. Turning it on sends a few small frames of each scene to GPT-6 Luna, which says who is in view.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(AccessibilityID.Brief.seenHint)
             TextEditor(text: Binding(get: { draft?.seen ?? "" }, set: { draft?.seen = $0 }))
                 .font(.body)
                 .frame(height: 140)

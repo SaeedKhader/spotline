@@ -27,8 +27,10 @@ extension EditorState {
     }
 
     /// From the brief's dialog: keeps what was edited there (unconfirmed still), then describes the scenes.
-    public func describeScenes(keeping draft: EpisodeBrief) {
+    /// `allowingFrames` turns on Send video frames first: the dialog offers that when it is off.
+    public func describeScenes(keeping draft: EpisodeBrief, allowingFrames: Bool = false) {
         guard canPerform(.describeScenes) else { return }
+        if allowingFrames { aiSettings.sendsVideoFrames = true }
         if draft != track.brief { edit("Edit Episode Brief") { track in track.brief = draft } }
         isBriefSheetShown = false
         describeScenes(automatically: false)
@@ -54,10 +56,14 @@ extension EditorState {
         aiTaskGeneration += 1
         let generation = aiTaskGeneration
         let picked = sceneFrames
+        // Frames being picked already (started with the brief): wait for those instead of reading the video twice.
+        let picking = sceneFramesJob != nil ? sceneFramesTask : nil
+        if picking != nil { aiTask?.fraction = nil }
         aiTaskHandle = Task { [weak self] in
             do {
                 let scenes: [SceneFramePicker.Scene]
-                if let picked {
+                await picking?.value
+                if let picked = self?.sceneFrames ?? picked {
                     scenes = picked
                 } else {
                     guard let loaded = try await self?.loadSceneFrames(from: url, report: { progress in
