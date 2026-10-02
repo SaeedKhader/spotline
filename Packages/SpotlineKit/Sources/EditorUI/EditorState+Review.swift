@@ -20,6 +20,16 @@ public enum ReviewScope: String, CaseIterable, Sendable {
     case changes
 }
 
+extension ReviewScope {
+    /// Filters of one kind of card that says how sure it is: listed least sure first.
+    var listsLeastSureFirst: Bool {
+        switch self {
+        case .choices, .script, .words: true
+        case .all, .issues, .frames, .changes: false
+        }
+    }
+}
+
 /// One thing to decide in the review sidebar: a cue's QC issues, one word to
 /// check, a line to choose, or a proposed change. The sidebar shows one card each.
 public struct ReviewItem: Identifiable, Hashable, Sendable {
@@ -221,7 +231,25 @@ extension EditorState {
         if scope == .all || scope == .changes {
             items += proposedInserts.map { ReviewItem(cueID: $0.cueID, kind: .change, start: $0.cue.start) }
         }
-        return items.sorted { $0.precedes($1) }
+        return ordered(items, in: scope)
+    }
+
+    /// Cards in the order a filter lists them. Under Choices, AI Review or Words, the least
+    /// sure first (what most needs a look), then by time; everything else, and All, by time.
+    func ordered(_ items: [ReviewItem], in scope: ReviewScope) -> [ReviewItem] {
+        guard scope.listsLeastSureFirst else { return items.sorted { $0.precedes($1) } }
+        let cues = Dictionary(track.cues.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func sureness(_ item: ReviewItem) -> Double {
+            guard let cue = cues[item.cueID] else { return 1 }
+            switch item.kind {
+            case .choice: return cue.flag?.confidence ?? 1
+            case .script: return cue.scriptFinding?.confidence ?? 1
+            case .word(let index): return cue.unsureWords?[safe: index]?.confidence ?? 0.5
+            case .change, .issues, .frames: return 1
+            }
+        }
+        let keyed = items.map { (item: $0, sureness: sureness($0)) }
+        return keyed.sorted { $0.sureness != $1.sureness ? $0.sureness < $1.sureness : $0.item.precedes($1.item) }.map(\.item)
     }
 
     /// What the sidebar lists under its filter.
@@ -291,6 +319,8 @@ extension EditorState {
 
     /// Settles a card as asked, as one undoable edit, and moves on to the next card.
     public func decide(_ item: ReviewItem, _ decision: ReviewDecision) {
+        // Where the card is in a list not in time order, to move on to the card that takes its place.
+        let position = reviewScope.listsLeastSureFirst ? reviewCards.firstIndex(of: item) : nil
         let history = historySerial
         let trial = reviewTrials[item.id]
         let outcome: String
@@ -366,7 +396,9 @@ extension EditorState {
         lastSettledReview = settledReviews.last
         // The next card: the first at or after the settled one (a cue's next word takes its place).
         let cards = reviewCards
-        if let next = cards.first(where: { $0.isAtOrAfter(item) }) ?? cards.first {
+        if let position, !cards.contains(where: { $0.id == item.id }), !cards.isEmpty {
+            selectReviewItem(cards[min(position, cards.count - 1)])
+        } else if let next = cards.first(where: { $0.isAtOrAfter(item) }) ?? cards.first {
             selectReviewItem(next)
         }
     }
@@ -379,7 +411,7 @@ extension EditorState {
         for item in pinned where (reviewScope == .all || item.kind.scope == reviewScope) && !cards.contains(where: { $0.id == item.id }) {
             cards.append(item)
         }
-        return cards.sorted { $0.precedes($1) }
+        return ordered(cards, in: reviewScope)
     }
 
     /// Whether the card offers Ignore: the cue reads too fast and no option fixes that.
