@@ -205,6 +205,7 @@ public enum PerformanceRun {
     private static func run(_ editor: EditorState, window: NSWindow?, into report: inout PerformanceReport) async {
         let cues = editor.track.cues
         let middle = cues.count / 2
+        var visible: [Bool] = []
 
         // Idle.
         editor.perform(.pause)
@@ -213,12 +214,14 @@ public enum PerformanceRun {
 
         // Playback, from a cue in the middle.
         editor.select(cues[middle].id)
-        try? await Task.sleep(for: .seconds(1))
+        await rest()
+        visible.append(window?.occlusionState.contains(.visible) ?? false)
         editor.perform(.togglePlay)
         try? await Task.sleep(for: .milliseconds(500))
         report.playback = await watch(for: .seconds(8))
         editor.perform(.pause)
-        try? await Task.sleep(for: .seconds(1))
+        await rest()
+        visible.append(window?.occlusionState.contains(.visible) ?? false)
 
         // The next cue, 30 times.
         var steps: [(model: Double, load: MainThreadLoad)] = []
@@ -228,7 +231,7 @@ public enum PerformanceRun {
         // A cue far away, there and back.
         steps = []
         for index in [cues.count / 8, cues.count * 7 / 8, cues.count / 8, middle] {
-            steps.append(await measure(settling: .milliseconds(1200)) { editor.select(cues[index].id) })
+            steps.append(await measure { editor.select(cues[index].id) })
         }
         report.jumpToFarCue = ActionCost(steps)
 
@@ -251,23 +254,26 @@ public enum PerformanceRun {
         // The review sidebar: the next card, 25 times; then each filter.
         if !editor.reviewItems(in: .all).isEmpty {
             if !editor.isReviewSidebarVisible { editor.perform(.toggleReviewSidebar) }
-            try? await Task.sleep(for: .seconds(1))
             steps = []
             for _ in 0..<25 { steps.append(await measure { editor.perform(.nextIssue) }) }
             report.nextReviewCard = ActionCost(steps)
             steps = []
             let filters: [EditorCommand] = [.toggleIssuesPanel, .reviewFrames, .reviewGlossary, .reviewChoices, .reviewWords, .reviewScriptFindings]
             for command in filters where editor.canPerform(command) {
-                steps.append(await measure(settling: .milliseconds(600)) { editor.perform(command) })
+                steps.append(await measure { editor.perform(command) })
             }
-            if editor.reviewScope != .all { steps.append(await measure(settling: .milliseconds(600)) { editor.perform(.showAllCues) }) }
+            if editor.reviewScope != .all { steps.append(await measure { editor.perform(.showAllCues) }) }
             if !steps.isEmpty { report.switchReviewFilter = ActionCost(steps) }
         }
 
+        visible.append(window?.occlusionState.contains(.visible) ?? false)
         // Scrolling: the cue list is the leftmost long scroll view, the review sidebar the rightmost.
         let scrollViews = longScrollViews(in: window)
         if let list = scrollViews.first { report.scrollCueList = await scroll(list) }
         if scrollViews.count > 1, let sidebar = scrollViews.last { report.scrollReview = await scroll(sidebar) }
+
+        visible.append(window?.occlusionState.contains(.visible) ?? false)
+        report.windowWasVisible = report.windowWasVisible && visible.allSatisfy(\.self)
 
         // Single calls.
         report.calls["reviewItems(all)"] = time { _ = editor.reviewItems(in: .all) }
@@ -287,14 +293,23 @@ public enum PerformanceRun {
     }
 
     /// Does `action`, then waits for the app to be at rest: the action's own time, and all the work it caused.
-    private static func measure(
-        settling: Duration = .milliseconds(300), _ action: () -> Void
-    ) async -> (model: Double, load: MainThreadLoad) {
+    private static func measure(_ action: () -> Void) async -> (model: Double, load: MainThreadLoad) {
+        await rest()
         let start = MainThreadMonitor.now
         action()
         let model = (MainThreadMonitor.now - start) * 1000
-        try? await Task.sleep(for: settling)
+        await rest()
         return (model, monitor.load(since: start))
+    }
+
+    /// Waits until the main thread has had nothing to do for a tenth of a second (ten seconds at most).
+    private static func rest() async {
+        let start = MainThreadMonitor.now
+        while MainThreadMonitor.now - start < 10 {
+            let from = MainThreadMonitor.now
+            try? await Task.sleep(for: .milliseconds(100))
+            if monitor.load(since: from).busyMs < 3 { return }
+        }
     }
 
     private static func time(repeats: Int = 20, _ work: () -> Void) -> Double {
@@ -311,7 +326,7 @@ public enum PerformanceRun {
         var direction = 1.0
         clip.scroll(to: NSPoint(x: 0, y: 0))
         scrollView.reflectScrolledClipView(clip)
-        try? await Task.sleep(for: .milliseconds(500))
+        await rest()
         let start = MainThreadMonitor.now
         var count = 0
         while MainThreadMonitor.now - start < 4 {
