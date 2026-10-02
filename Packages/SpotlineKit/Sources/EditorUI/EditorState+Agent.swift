@@ -17,7 +17,7 @@ extension EditorState {
         EditorCommand.openMedia.id, EditorCommand.importSubtitles.id, EditorCommand.importEmbeddedSubtitles.id,
         EditorCommand.exportSubtitles.id, EditorCommand.openSourceSubtitles.id, EditorCommand.importGlossary.id,
         EditorCommand.acceptChange.id, EditorCommand.rejectChange.id, EditorCommand.acceptAllChanges.id,
-        EditorCommand.rejectAllChanges.id, EditorCommand.exportSceneFrames.id,
+        EditorCommand.rejectAllChanges.id, EditorCommand.applySubtitleSync.id, EditorCommand.exportSceneFrames.id,
     ]
 
     /// Runs one tool call from an agent. Throws `AgentToolError` with a message for the agent.

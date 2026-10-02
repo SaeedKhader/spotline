@@ -105,7 +105,7 @@ struct ReviewSidebar: View {
         guard let item = editor.currentReviewItem else { return .ignored }
         switch press.key {
         case .return:
-            if item.kind == .issues || item.kind == .frames, editor.reviewSuggestions(for: item).isEmpty {
+            if item.kind == .glossary ? editor.glossaryReplacement(forCue: item.cueID) == nil : item.kind.isIssueCard && editor.reviewSuggestions(for: item).isEmpty {
                 editor.editReviewItem(item)
             } else {
                 editor.decide(item, .primary)
@@ -245,6 +245,8 @@ private struct ReviewHeader: View {
                 .accessibilityValue(editor.qcPreset.name)
                 .accessibilityIdentifier(AccessibilityID.Issues.preset)
             if editor.canPerform(.fixOverlaps) { CommandButton(command: .fixOverlaps, editor: editor) }
+        case .glossary:
+            CommandButton(command: .showGlossary, editor: editor)
         case .words:
             CommandButton(command: .confirmRemainingWords, editor: editor)
         case .choices:
@@ -339,6 +341,7 @@ private struct ScopeButton: View {
         case .all: .showAllCues
         case .issues: .toggleIssuesPanel
         case .frames: .reviewFrames
+        case .glossary: .reviewGlossary
         case .words: .reviewWords
         case .choices: .reviewChoices
         case .script: .reviewScriptFindings
@@ -351,6 +354,7 @@ private struct ScopeButton: View {
         case .all: "All"
         case .issues: "Issues"
         case .frames: "Frames"
+        case .glossary: "Glossary"
         case .words: "Words"
         case .choices: "Choices"
         case .script: "AI Review"
@@ -362,7 +366,7 @@ private struct ScopeButton: View {
     private var tint: Color {
         switch scope {
         case .all: .secondary
-        case .issues, .frames, .words: .attentionTint
+        case .issues, .frames, .glossary, .words: .attentionTint
         case .choices, .changes, .script: .aiTint
         }
     }
@@ -372,9 +376,10 @@ private struct ScopeButton: View {
         case .all: "Everything to review"
         case .issues: "Cues that break the \(editor.qcPreset.name) rules"
         case .frames: "Cues too close to a shot change or the next cue"
+        case .glossary: "Lines that do not use a glossary term's agreed translation"
         case .words: "Words the transcription wasn't sure of"
         case .choices: "Lines the translation could word more than one way"
-        case .script: "Lines the AI script review thinks were misheard or make no sense"
+        case .script: "Lines the AI script review thinks were misheard or make no sense, or where the audio says something else"
         case .changes: "Changes \(editor.pendingReview?.title ?? "an AI tool") proposes"
         }
     }
@@ -384,6 +389,7 @@ private struct ScopeButton: View {
         case .all: "\(count) to review"
         case .issues: count == 0 ? "No cues need review" : count == 1 ? "1 cue needs review" : "\(count) cues need review"
         case .frames: count == 1 ? "1 cue with frame issues" : "\(count) cues with frame issues"
+        case .glossary: count == 1 ? "1 line misses a glossary term" : "\(count) lines miss a glossary term"
         case .words: count == 1 ? "1 word to check" : "\(count) words to check"
         case .choices: count == 1 ? "1 line to choose" : "\(count) lines to choose"
         case .script: count == 1 ? "1 line to check" : "\(count) lines to check"
@@ -396,6 +402,7 @@ private struct ScopeButton: View {
         case .all: AccessibilityID.CueList.allScope
         case .issues: AccessibilityID.CueList.reviewSummary
         case .frames: AccessibilityID.CueList.framesSummary
+        case .glossary: AccessibilityID.CueList.glossarySummary
         case .words: AccessibilityID.CueList.wordsSummary
         case .choices: AccessibilityID.CueList.choicesSummary
         case .script: AccessibilityID.CueList.scriptSummary
@@ -467,7 +474,7 @@ private struct ReviewCard: View {
 
     /// Fixing right in the card: the cue's text (and its timing, for issues) with Done.
     @ViewBuilder private var editingContent: some View {
-        if item.kind == .issues || item.kind == .frames, let cue = editor.cue(withID: item.cueID) {
+        if item.kind.isIssueCard, let cue = editor.cue(withID: item.cueID) {
             let issues = editor.cardIssues(item)
             ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -505,6 +512,7 @@ private struct ReviewCard: View {
         case .script: scriptContent
         case .word(let index): wordContent(index)
         case .issues, .frames: issuesContent
+        case .glossary: glossaryContent
         }
     }
 
@@ -518,13 +526,14 @@ private struct ReviewCard: View {
         case .word: "Unsure word"
         case .issues: "Issue"
         case .frames: "Frames"
+        case .glossary: "Glossary"
         }
     }
 
     private var kindTint: Color {
         switch item.kind {
         case .change, .choice, .script: .aiTint
-        case .word, .issues, .frames: .attentionTint
+        case .word, .issues, .frames, .glossary: .attentionTint
         }
     }
 
@@ -724,6 +733,50 @@ private struct ReviewCard: View {
         }
     }
 
+    /// A glossary term the line does not use: the line as Replace would make it (the word it
+    /// used struck out, the agreed one in), and Replace as the card's button. With no word to
+    /// replace, the line as it is and Edit.
+    @ViewBuilder private var glossaryContent: some View {
+        let issues = editor.cardIssues(item)
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.attentionTint)
+                    Text(issue.message)
+                }
+                .font(.callout)
+            }
+        }
+        let replacement = editor.glossaryReplacement(forCue: item.cueID)
+        if let cue, !cue.text.isEmpty {
+            Group {
+                if let replacement {
+                    DiffText(old: SubtitleText.visibleLines(of: cue.text).joined(separator: "\n"), new: SubtitleText.visibleLines(of: replacement.text).joined(separator: "\n"))
+                } else {
+                    Text(SubtitleText.visibleLines(of: cue.text).joined(separator: "\n")).foregroundStyle(.secondary)
+                }
+            }
+            .font(SpotlineStyle.cueFont)
+            .lineLimit(3)
+            .environment(\.layoutDirection, direction.layoutDirection)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        buttons {
+            CardButton(editor: editor, item: item, action: .play, title: "Play", key: "P") { editor.playReviewItem(item) }
+                .disabled(!editor.hasMedia || cue == nil)
+            CardButton(editor: editor, item: item, action: .edit, title: "Edit", key: replacement == nil ? "Return or E" : "E", isPrimary: replacement == nil) {
+                editor.editReviewItem(item)
+            }
+            .disabled(cue == nil)
+            if let replacement {
+                CardButton(editor: editor, item: item, action: .confirm, title: "Replace", key: "Return", isPrimary: true) {
+                    editor.decide(item, .primary)
+                }
+                .help("\(replacement.title) (Return)")
+            }
+        }
+    }
+
     private func buttons<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         HStack(spacing: 6) {
             Spacer(minLength: 0)
@@ -756,7 +809,7 @@ private struct ReviewCard: View {
         case .choice: return cue.text
         case .script: return cue.scriptFinding?.reason ?? ""
         case .word(let index): return cue.unsureWords?[safe: index]?.text ?? ""
-        case .issues, .frames: return editor.cardIssues(item).map(\.message).joined(separator: "\n")
+        case .issues, .frames, .glossary: return editor.cardIssues(item).map(\.message).joined(separator: "\n")
         }
     }
 }

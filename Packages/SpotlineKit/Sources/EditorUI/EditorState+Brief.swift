@@ -53,7 +53,9 @@ extension EditorState {
             return BriefRequest.Line(start: cue.start, voices: voices, text: text, unsureWords: cue.unsureWords?.map(\.text) ?? [])
         }
         let spellings = isTranslating ? glossary.entries.map { BriefRequest.Spelling(source: $0.source, target: $0.target) } : []
-        return BriefRequest(lines: lines, sourceLanguage: source, targetLanguage: target, work: workTitle, cast: track.cast, spellings: spellings)
+        var request = BriefRequest(lines: lines, sourceLanguage: source, targetLanguage: target, work: workTitle, cast: track.cast, spellings: spellings)
+        request.isFromSubtitles = textIsFromSubtitles
+        return request
     }
 
     /// Builds the brief in the background, holding the review meanwhile, and opens it
@@ -138,7 +140,8 @@ extension EditorState {
             }
         }
         isBriefSheetShown = false
-        if startsReview { reviewScript(automatically: true) }
+        // A subtitle file's words were not misheard: its review is the lines where the audio differs.
+        if startsReview, !textIsFromSubtitles { reviewScript(automatically: true) }
         if !reviewItems(in: .all).isEmpty { wantsReviewSidebar = true }
     }
 

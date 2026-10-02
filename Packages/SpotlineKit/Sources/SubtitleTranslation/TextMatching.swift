@@ -30,6 +30,42 @@ public enum MatchText {
         !ranges(of: term, in: text, limit: 1).isEmpty
     }
 
+    /// What Arabic writes onto the front of a word: "the" (ال), and "and", "so", "in", "to", "like"
+    /// before it, alone or with the article (والـ, بالـ, للـ).
+    static let arabicPrefixes: Set<String> = {
+        var prefixes: Set<String> = []
+        for conjunction in ["", "و", "ف"] {
+            for preposition in ["", "ب", "ل", "ك"] {
+                prefixes.insert(conjunction + preposition)
+                prefixes.insert(conjunction + preposition + "ال")
+            }
+            // "to the": the article's alif drops after ل.
+            prefixes.insert(conjunction + "لل")
+        }
+        return prefixes
+    }()
+
+    /// Whether `text` uses the translation `term`, as whole words. In Arabic the word may
+    /// take the article or a particle on its front, or leave the term's own article off:
+    /// "البطولة", "للبطولة" and "وبطولة" all use "بطولة". Both are normalized.
+    public static func usesTranslation(_ text: String, of term: String) -> Bool {
+        if contains(text, term: term) { return true }
+        guard term.unicodeScalars.contains(where: { (0x0600...0x06FF).contains($0.value) }) else { return false }
+        let bare = term.hasPrefix("ال") && term.count > 3 ? String(term.dropFirst(2)) : term
+        var searchRange = text.startIndex..<text.endIndex
+        while let range = text.range(of: bare, range: searchRange) {
+            let after = range.upperBound == text.endIndex ? nil : text[range.upperBound]
+            if !(after.map(isWordCharacter) ?? false) {
+                // The letters of the same word before it.
+                var start = range.lowerBound
+                while start > text.startIndex, isWordCharacter(text[text.index(before: start)]) { start = text.index(before: start) }
+                if arabicPrefixes.contains(String(text[start..<range.lowerBound])) { return true }
+            }
+            searchRange = text.index(after: range.lowerBound)..<text.endIndex
+        }
+        return false
+    }
+
     /// Where `term` occurs in `text` as whole words, in order. Both are normalized.
     static func ranges(of term: String, in text: String, limit: Int = .max) -> [Range<String.Index>] {
         guard !term.isEmpty else { return [] }

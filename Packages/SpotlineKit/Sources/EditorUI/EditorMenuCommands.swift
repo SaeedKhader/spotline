@@ -57,7 +57,7 @@ public struct EditorMenuCommands: Commands {
                 .disabled(!editor.isTranslating)
         }
         CommandMenu("AI") {
-            buttons(for: .ai, only: [.transcribe, .showEpisodeBrief, .rebuildEpisodeBrief, .showSceneFrames, .describeScenes, .translateWithAI])
+            buttons(for: .ai, only: [.transcribe, .syncSubtitlesToAudio, .showEpisodeBrief, .rebuildEpisodeBrief, .showSceneFrames, .describeScenes, .translateWithAI])
             Divider()
             buttons(for: .ai, only: [.clearTranslation, .clearTranscript])
             Divider()
@@ -89,9 +89,9 @@ public struct EditorMenuCommands: Commands {
         ForEach(EditorCommand.all.filter { $0.category == category && (only?.contains($0) ?? true) }) { command in
             Group {
                 if let isOn = editor.isOn(command) {
-                    Toggle(command.title, isOn: Binding(get: { isOn }, set: { _ in editor.perform(command) }))
+                    Toggle(editor.title(of: command), isOn: Binding(get: { isOn }, set: { _ in editor.perform(command) }))
                 } else {
-                    Button(command.title) { editor.perform(command) }
+                    Button(editor.title(of: command)) { editor.perform(command) }
                 }
             }
             .keyboardShortcut(command.defaultShortcut?.keyboardShortcut)

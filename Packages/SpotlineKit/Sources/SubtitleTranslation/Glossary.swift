@@ -25,7 +25,8 @@ public struct Glossary: Hashable, Sendable, Codable {
     /// A glossary term found in a source cue, and whether the target uses its translation.
     public struct Match: Hashable, Sendable {
         public var entry: Entry
-        /// True when the target text contains the agreed translation (or it has none).
+        /// True when the target text contains the agreed translation (or it has none); in
+        /// Arabic, with or without the article or a particle on its front (`MatchText.usesTranslation`).
         public var isUsed: Bool
 
         public init(entry: Entry, isUsed: Bool) {
@@ -138,6 +139,6 @@ public struct GlossaryIndex: Sendable {
     /// Whether normalized target text (see `MatchText.normalize`) uses the entry's translation.
     public func isUsed(_ entry: Glossary.Entry, inNormalizedTarget target: String) -> Bool {
         let translation = terms.first { $0.entry.id == entry.id }?.translation ?? MatchText.normalize(entry.target)
-        return translation.isEmpty || MatchText.contains(target, term: translation)
+        return translation.isEmpty || MatchText.usesTranslation(target, of: translation)
     }
 }

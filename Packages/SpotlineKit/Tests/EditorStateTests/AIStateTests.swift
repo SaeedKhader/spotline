@@ -181,19 +181,23 @@ struct AIStateTests {
         #expect(editor.isOn(.reviewChoices) == false)
         #expect(editor.perform(.reviewChoices))
         #expect(editor.isOn(.reviewChoices) == true)
-        #expect(editor.reviewItems.map(\.cueID) == cues.map(\.id), "Open choices, in time order")
-        #expect(editor.selectedCueID == cues[0].id)
-        // A pick goes in; confirming it moves on to the next open choice.
+        #expect(editor.reviewItems.map(\.cueID) == [cues[1].id, cues[0].id, cues[2].id], "Open choices, least sure first")
+        #expect(editor.selectedCueID == cues[1].id)
+        // A pick goes in; confirming it moves on to the next open choice (Beth's other line is settled by it).
         editor.decide(editor.currentReviewItem!, .variant(0))
         editor.decide(editor.currentReviewItem!, .primary)
-        #expect(editor.selectedCueID == cues[1].id)
+        #expect(editor.selectedCueID == cues[2].id)
+        // With no filter, everything is in time order.
+        editor.perform(.undo)
+        #expect(editor.reviewItems(in: .all).filter { $0.kind == .choice }.map(\.cueID) == cues.map(\.id))
+        editor.perform(.redo)
         #expect(editor.perform(.acceptRemainingChoices))
         #expect(editor.reviewScope == .all)
         #expect(editor.cuesToChoose.isEmpty)
         #expect(editor.track.cues[2].text == "اجلس.", "Accepting keeps the translator's picks")
         #expect(!editor.canPerform(.reviewChoices))
         editor.perform(.undo)
-        #expect(editor.cuesToChoose.count == 2)
+        #expect(editor.cuesToChoose.count == 1)
     }
 
     @Test func typingSettlesTheChoice() {
@@ -231,7 +235,7 @@ struct AIStateTests {
         #expect(editor.perform(.reviewWords))
         #expect(editor.isOn(.reviewWords) == true)
         #expect(editor.cuesToCheck.map(\.id) == [other.id, line.id])
-        #expect(editor.reviewItems.map(\.kind) == [.word(0), .word(1), .word(0)], "A card per word, in time order")
+        #expect(editor.reviewItems.map(\.word) == ["Egg", "Duncan", "Tall"], "A card per word, least sure first")
         editor.select(other.id)
         // Confirming the last word of a cue moves to the next card.
         editor.decide(editor.currentReviewItem!, .primary)

@@ -81,6 +81,8 @@ targets:
         buildPhase: resources
       - path: Fixtures/embedded-subs.mkv
         buildPhase: resources
+      - path: Fixtures/spoken-23.976.srt
+        buildPhase: resources
     dependencies:
       - target: Spotline
       - package: SpotlineKit

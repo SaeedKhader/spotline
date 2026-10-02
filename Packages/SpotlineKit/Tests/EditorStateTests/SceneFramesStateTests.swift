@@ -42,8 +42,10 @@ struct SceneFramesStateTests {
         return editor
     }
 
+    /// Waits for work off the main actor; a loaded machine takes a while.
     func settle(_ condition: () -> Bool) async {
         for _ in 0..<500 where !condition() { await Task.yield() }
+        for _ in 0..<500 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
     @Test func needsMediaAndLines() async {
@@ -60,7 +62,7 @@ struct SceneFramesStateTests {
         #expect(!empty.canPerform(.showSceneFrames), "No lines to pick frames for")
     }
 
-    @Test func picksTheFramesOnceAndShowsThem() async {
+    @Test func picksTheFramesOnceAndShowsThem() async throws {
         let editor = makeEditor()
         editor.open(media)
         await settle { editor.hasMedia }
@@ -70,7 +72,7 @@ struct SceneFramesStateTests {
         #expect(!editor.canPerform(.pickSceneFramesAgain), "Already picking")
         await settle { editor.sceneFrames != nil }
 
-        let scenes = try! #require(editor.sceneFrames)
+        let scenes = try #require(editor.sceneFrames)
         #expect(editor.sceneFramesJob == nil)
         #expect(scenes.count == 1)
         #expect(scenes[0].lines == 0...3)
@@ -93,13 +95,13 @@ struct SceneFramesStateTests {
         #expect(editor.sceneFrames?.first?.frameCount == 2)
     }
 
-    @Test func aFrameShowsInTheVideo() async {
+    @Test func aFrameShowsInTheVideo() async throws {
         let editor = makeEditor()
         editor.open(media)
         await settle { editor.hasMedia }
         editor.perform(.showSceneFrames)
         await settle { editor.sceneFrames != nil }
-        let pick = try! #require(editor.sceneFrames?.first?.picks.last)
+        let pick = try #require(editor.sceneFrames?.first?.picks.last)
         editor.showSceneFrame(at: pick.frame.time)
         #expect(!editor.isSceneFramesSheetShown)
         await settle { editor.currentFrame == pick.frame.time.nearestFrame(at: rate) }

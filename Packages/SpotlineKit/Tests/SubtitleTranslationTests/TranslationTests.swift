@@ -38,6 +38,20 @@ struct GlossaryTests {
         .init(source: "cat", target: "قطة"),
     ])
 
+    @Test func arabicArticleAndParticlesOnATermStillUseIt() {
+        let terms = Glossary(entries: [.init(source: "tourney", target: "بطولة"), .init(source: "the Seven", target: "السبعة")])
+        func uses(_ target: String, _ source: String = "Half the town went to the tourney.") -> Bool {
+            terms.matches(source: source, target: target).allSatisfy(\.isUsed)
+        }
+        #expect(uses("ذهب نصف البلدة إلى البطولة"))
+        #expect(uses("ذهبوا للبطولة") && uses("وبطولة كبيرة") && uses("في بطولة") && uses("بالبطولة"))
+        // Another word that only ends the same, or a different word, does not.
+        #expect(!uses("ذهبوا إلى المبارزة"))
+        #expect(!uses("كلمة مبطولة"))
+        // A term agreed with its article is used without it too.
+        #expect(uses("بحق سبعة آلهة", "By the Seven."))
+    }
+
     @Test func findsTermsInSourceOrderAndChecksTheTarget() {
         let matches = glossary.matches(source: "Welcome to <i>Winterfell</i>, Mr. Smith.", target: "أهلاً بك في وينترفيل")
         #expect(matches.map(\.entry.source) == ["Winterfell", "Mr. Smith"])

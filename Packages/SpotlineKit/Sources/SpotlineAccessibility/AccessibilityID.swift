@@ -81,6 +81,8 @@ public enum AccessibilityID {
         public static func proposedCell(_ cueID: UUID, _ column: Column) -> String { "\(proposedRow(cueID)).\(column.rawValue)" }
         /// The review sidebar's Frames filter chip: how many cues are too close to a shot change or the next cue.
         public static let framesSummary = "cueList.frames"
+        /// The review sidebar's Glossary filter chip: how many lines do not use a glossary term.
+        public static let glossarySummary = "cueList.glossary"
         /// The review sidebar's Choices filter chip: how many lines still read more than one way.
         public static let choicesSummary = "cueList.choices"
         /// The AI Review chip: lines the AI script review flagged.
@@ -93,6 +95,8 @@ public enum AccessibilityID {
             case inPoint = "in"
             case outPoint = "out"
             case readingSpeed = "cps"
+            /// Who says the line, when known; the value is the names.
+            case speaker
             /// The button that shows the cue at the top or bottom; its value is "top" or "bottom".
             case position
             /// Review warnings; the value lists them.
@@ -199,6 +203,12 @@ public enum AccessibilityID {
     }
 
     /// The sheet offering the subtitle tracks muxed into the media for import.
+    /// The question whether to move a subtitle file's cues onto the audio (AI › Fix Subtitle Timing…).
+    public enum Sync {
+        public static let apply = "sync.apply"
+        public static let leave = "sync.leave"
+    }
+
     /// The episode brief dialog (AI › Episode Brief…).
     public enum Brief {
         public static let sheet = "brief"
