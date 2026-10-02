@@ -17,8 +17,12 @@ final class MainThreadMonitor {
     private var stretches: [Stretch] = []
     private var busySince: Double?
     private var observers: [CFRunLoopObserver] = []
+    /// How long the main thread took to answer each ping from another thread: what a click or key would have waited.
+    private var waits: [Stretch] = []
+    private var pinger: DispatchSourceTimer?
+    private let pingSent = PingTime()
 
-    static var now: Double { ProcessInfo.processInfo.systemUptime }
+    nonisolated static var now: Double { ProcessInfo.processInfo.systemUptime }
 
     func start() {
         guard observers.isEmpty else { return }
@@ -34,6 +38,20 @@ final class MainThreadMonitor {
             CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
             observers.append(observer)
         }
+        // A ping every 10 ms, one at a time: the main thread answers it when it gets to it.
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInteractive))
+        timer.schedule(deadline: .now(), repeating: .milliseconds(10))
+        timer.setEventHandler { @Sendable [weak self, pingSent] in
+            let sent = Self.now
+            guard pingSent.take(sent) else { return }
+            DispatchQueue.main.async {
+                let now = Self.now
+                pingSent.clear()
+                MainActor.assumeIsolated { self?.waits.append(Stretch(end: now, duration: now - sent)) }
+            }
+        }
+        timer.resume()
+        pinger = timer
     }
 
     private func endStretch() {
@@ -46,14 +64,44 @@ final class MainThreadMonitor {
     /// The work done since `start` (a time from `now`), the stretch under way included.
     func load(since start: Double) -> MainThreadLoad {
         let now = Self.now
-        var durations = stretches.filter { $0.end >= start }.map(\.duration)
-        if let since = busySince { durations.append(now - since) }
-        let milliseconds = durations.map { $0 * 1000 }
+        // Both lists are in time order: only their ends are read.
+        func since(_ list: [Stretch]) -> [Double] {
+            var found: [Double] = []
+            for stretch in list.reversed() {
+                guard stretch.end >= start else { break }
+                found.append(stretch.duration)
+            }
+            return found
+        }
+        var durations = since(stretches)
+        if let busy = busySince { durations.append(now - busy) }
+        // A ping still unanswered has waited since it was sent.
+        var answers = since(waits).map { $0 * 1000 }
+        if let sent = pingSent.value { answers.append((now - sent) * 1000) }
         return MainThreadLoad(
-            seconds: now - start, busyMs: milliseconds.reduce(0, +), longestMs: milliseconds.max() ?? 0,
-            over16: milliseconds.count { $0 > 1000.0 / 60 }, over50: milliseconds.count { $0 > 50 }, over100: milliseconds.count { $0 > 100 }
+            seconds: now - start, busyMs: durations.reduce(0, +) * 1000, longestMs: answers.max() ?? 0,
+            over16: answers.count { $0 > 1000.0 / 60 }, over50: answers.count { $0 > 50 }, over100: answers.count { $0 > 100 }
         )
     }
+}
+
+/// When the ping the main thread has yet to answer was sent; nil when it has answered.
+private final class PingTime: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sent: Double?
+
+    var value: Double? { lock.withLock { sent } }
+
+    /// Notes a ping as sent, unless one is still waiting.
+    func take(_ time: Double) -> Bool {
+        lock.withLock {
+            guard sent == nil else { return false }
+            sent = time
+            return true
+        }
+    }
+
+    func clear() { lock.withLock { sent = nil } }
 }
 
 /// What the main thread did over a stretch of time.
@@ -62,9 +110,9 @@ struct MainThreadLoad: Codable {
     var seconds: Double
     /// Main-thread work in that time.
     var busyMs: Double
-    /// The longest single stretch of work: how long the app did not answer, at worst.
+    /// The longest the main thread took to answer: how long a click or key waited, at worst.
     var longestMs: Double
-    /// Stretches longer than a 60 Hz frame, than 50 ms and than 100 ms.
+    /// Times it took longer than a 60 Hz frame, than 50 ms and than 100 ms to answer.
     var over16: Int
     var over50: Int
     var over100: Int
@@ -163,7 +211,7 @@ public enum PerformanceRun {
             }
             guard let editor = workspace.activeEditor, !editor.track.cues.isEmpty else {
                 try? Data("No project with cues opened.".utf8).write(to: reportURL)
-                if quitsWhenDone { NSApp.terminate(nil) }
+                if quitsWhenDone { exit(0) }
                 return
             }
             let window = NSApp.windows.first { $0.identifier?.rawValue == "main" }
@@ -182,7 +230,8 @@ public enum PerformanceRun {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try? encoder.encode(report).write(to: reportURL)
-            if quitsWhenDone { NSApp.terminate(nil) }
+            // The project is a throwaway copy: leave at once, without the document saving on the way out.
+            if quitsWhenDone { exit(0) }
         }
     }
 
@@ -308,7 +357,7 @@ public enum PerformanceRun {
         while MainThreadMonitor.now - start < 10 {
             let from = MainThreadMonitor.now
             try? await Task.sleep(for: .milliseconds(100))
-            if monitor.load(since: from).busyMs < 3 { return }
+            if monitor.load(since: from).busyMs < 5 { return }
         }
     }
 

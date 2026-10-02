@@ -40,8 +40,12 @@ public final class EditorState {
         didSet {
             if track.languageCode != oldValue.languageCode { translationPairDidChange() }
             guard track.cues != oldValue.cues else { return }
-            updateSourceCues()
-            updateIssues()
+            cueIndexes = nil
+            cueWordSets = nil
+            reviewDerived = ReviewDerived()
+            // An edit to a cue's words leaves every cue with the source cue it had.
+            if sourceTrack == nil || Self.pairingDiffers(track.cues, oldValue.cues) { updateSourceCues() }
+            updateIssues(keepingChecks: true)
             updateCurrentCue()
             // A filter with nothing left in it goes back to everything.
             if reviewScope != .all, reviewItems.isEmpty { reviewScope = .all }
@@ -71,7 +75,7 @@ public final class EditorState {
             glossaryIndex = GlossaryIndex(glossary)
             updateGlossaryHits()
             updateIssues()
-            if !isLoadingTranslationResources { try? translationStore?.save(glossary, pair: translationPair) }
+            if !isLoadingTranslationResources, launchOptions.performanceReportURL == nil { try? translationStore?.save(glossary, pair: translationPair) }
         }
     }
     /// Translations already made for the language pair, suggested for similar lines.
@@ -83,6 +87,8 @@ public final class EditorState {
     @ObservationIgnored var glossaryIndex = GlossaryIndex(Glossary())
     /// Glossary entries found in each source cue, by source cue ID.
     @ObservationIgnored var glossaryHits: [Cue.ID: [Glossary.Entry]] = [:]
+    /// True while `glossaryHits` has the terms of source cues read as one (a joined target cue).
+    @ObservationIgnored var glossaryHitsCoverJoinedCues = false
     /// Memory suggestions by source cue ID, until the memory changes.
     @ObservationIgnored var memoryMatchCache: [Cue.ID: [TranslationMemory.Match]] = [:]
     /// The pair the glossary and memory belong to, e.g. "en-ar".
@@ -99,7 +105,10 @@ public final class EditorState {
 
     /// What the last AI tool proposed, shown as a diff in the cue list until each change is accepted or rejected.
     public internal(set) var pendingReview: ProposedChangeSet? {
-        didSet { if pendingReview == nil, reviewScope == .changes { reviewScope = .all } }
+        didSet {
+            reviewDerived = ReviewDerived()
+            if pendingReview == nil, reviewScope == .changes { reviewScope = .all }
+        }
     }
     /// The AI tool running now, with its progress; nil when none.
     public internal(set) var aiTask: AITaskStatus? {
@@ -151,7 +160,17 @@ public final class EditorState {
     public private(set) var currentCueID: Cue.ID?
     /// Cues that break the QC preset's rules, with why. Kept in step with the
     /// cues, the preset, the frame rate and the shot changes.
-    public private(set) var issues: [Cue.ID: [QCIssue]] = [:]
+    public private(set) var issues: [Cue.ID: [QCIssue]] = [:] {
+        didSet { reviewDerived = ReviewDerived() }
+    }
+    /// Each cue's issues with what they were worked out from, so an edit rechecks only the cues it changes.
+    @ObservationIgnored private var checkedCues: [Cue.ID: CheckedCue] = [:]
+    /// Where each cue is in `track.cues`, until the cues change.
+    @ObservationIgnored private var cueIndexes: [Cue.ID: Int]?
+    /// What is worked out from the cues, their issues and the proposed changes, kept until one of them changes.
+    @ObservationIgnored var reviewDerived = ReviewDerived()
+    /// `shotChangeFrames` as last worked out, with what it was worked out from.
+    @ObservationIgnored private var shotChangeFramesCache: (changes: [MediaTime], rate: FrameRate, frames: [Int64])?
     /// The rules cues are checked against.
     public private(set) var qcPreset: QCPreset {
         didSet {
@@ -311,6 +330,8 @@ public final class EditorState {
     public internal(set) var subtitleSync: SubtitleSync?
     /// Each cue's words (normalized), kept until the cues change: review cards ask for them on every redraw.
     @ObservationIgnored var cueWordSets: [Cue.ID: Set<String>]?
+    /// The words of each cue's text as last worked out, so an edit works out only the cue it changes.
+    @ObservationIgnored var wordSetsByText: [Cue.ID: (text: String, words: Set<String>)] = [:]
     /// The episode brief is built once the sync question is answered.
     @ObservationIgnored var briefAwaitsSync = false
     @ObservationIgnored private var embeddedSubtitlesTask: Task<Void, Never>?
@@ -451,10 +472,29 @@ public final class EditorState {
     public var timecode: Timecode { Timecode(frameNumber: max(currentFrame, 0), rate: frameRate) }
 
     public var selectedCue: Cue? { selectedCueID.flatMap(cue(withID:)) }
-    public var selectedCueIndex: Int? { selectedCueID.flatMap { id in track.cues.firstIndex { $0.id == id } } }
+    public var selectedCueIndex: Int? { selectedCueID.flatMap(index(ofCue:)) }
 
     public func cue(withID id: Cue.ID) -> Cue? {
-        track.cues.first { $0.id == id }
+        index(ofCue: id).map { track.cues[$0] }
+    }
+
+    /// Where a cue is in `track.cues` (the first with that ID), looked up rather than searched for.
+    func index(ofCue id: Cue.ID) -> Int? {
+        let cues = track.cues
+        if cueIndexes == nil {
+            cueIndexes = Dictionary(cues.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+        }
+        guard let index = cueIndexes?[id], index < cues.count, cues[index].id == id else { return nil }
+        return index
+    }
+
+    /// Whether any cue has another source cue than before: cues were added, removed or moved in time, or relinked.
+    static func pairingDiffers(_ cues: [Cue], _ old: [Cue]) -> Bool {
+        guard cues.count == old.count else { return true }
+        return zip(cues, old).contains { cue, before in
+            cue.id != before.id || cue.start != before.start || cue.end != before.end
+                || cue.sourceCueID != before.sourceCueID || cue.joinedSourceCueIDs != before.joinedSourceCueIDs
+        }
     }
 
     /// The cue shown on the frame under the playhead.
@@ -906,13 +946,46 @@ public final class EditorState {
         }
     }
 
+    /// A cue's issues, and everything they depend on.
+    private struct CheckedCue {
+        var cue: Cue
+        /// When the next cue in the same position starts.
+        var nextStart: MediaTime?
+        var source: Cue?
+        /// The glossary terms in the source cue.
+        var terms: [Glossary.Entry]
+        var issues: [QCIssue]
+    }
+
     /// Recomputes `issues`; it changes (and redraws its observers) only when the result differs.
-    private func updateIssues() {
-        // Made from the cues' text, which may have changed.
-        cueWordSets = nil
+    /// With `keepingChecks` (the cues changed, nothing else), cues that are as they were when
+    /// last checked keep their issues, so typing in one cue checks that cue alone.
+    private func updateIssues(keepingChecks: Bool = false) {
+        if !keepingChecks { checkedCues = [:] }
         let context = QualityControl.Context(frameRate: frameRate, shotChanges: shotChangeFrames)
-        var found = QualityControl.check(track.cues, preset: qcPreset, context: context)
-        addTranslationIssues(to: &found)
+        let cues = track.cues
+        var found: [Cue.ID: [QCIssue]] = [:]
+        var checked: [Cue.ID: CheckedCue] = [:]
+        checked.reserveCapacity(cues.count)
+        // From the last cue back, so each knows when the next one in its position starts.
+        var nextStarts: [CuePosition: MediaTime] = [:]
+        for cue in cues.reversed() {
+            let nextStart = nextStarts[cue.position]
+            nextStarts[cue.position] = cue.start
+            let source = sourceCues[cue.id]
+            let terms = source.flatMap { glossaryHits[$0.id] } ?? []
+            var entry: CheckedCue
+            if let last = checkedCues[cue.id], last.nextStart == nextStart, last.cue == cue, last.source == source, last.terms == terms {
+                entry = last
+            } else {
+                var issues = QualityControl.issues(of: cue, nextStart: nextStart, preset: qcPreset, context: context)
+                addTranslationIssues(to: &issues, of: cue, source: source, terms: terms)
+                entry = CheckedCue(cue: cue, nextStart: nextStart, source: source, terms: terms, issues: issues)
+            }
+            checked[cue.id] = entry
+            if !entry.issues.isEmpty { found[cue.id] = entry.issues }
+        }
+        checkedCues = checked
         if found != issues { issues = found }
     }
 
@@ -982,7 +1055,12 @@ public final class EditorState {
 
     /// Shot changes as frame numbers at the current rate.
     public var shotChangeFrames: [Int64] {
-        (shotChanges ?? []).map { $0.nearestFrame(at: frameRate) }
+        let changes = shotChanges ?? []
+        let rate = frameRate
+        if let cached = shotChangeFramesCache, cached.rate == rate, cached.changes == changes { return cached.frames }
+        let frames = changes.map { $0.nearestFrame(at: rate) }
+        shotChangeFramesCache = (changes, rate, frames)
+        return frames
     }
 
     private func shotChangeFrame(before frame: Int64) -> Int64? {
@@ -1016,7 +1094,7 @@ public final class EditorState {
     /// position, keeping the minimum gap: from the previous one's end to the
     /// next one's start. A top cue may overlap bottom cues and the other way round.
     public func room(for id: Cue.ID) -> (earliestStart: MediaTime, latestEnd: MediaTime?) {
-        guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return (.zero, nil) }
+        guard let index = index(ofCue: id) else { return (.zero, nil) }
         let cue = track.cues[index]
         let previous = track.cues[..<index].last { $0.position == cue.position }
         let next = track.cues[(index + 1)...].first { $0.position == cue.position }
@@ -1031,7 +1109,7 @@ public final class EditorState {
         let room = room(for: id)
         let start = max(start, room.earliestStart, .zero)
         let end = room.latestEnd.map { min(end, $0) } ?? end
-        guard start < end, let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
+        guard start < end, let index = index(ofCue: id) else { return }
         edit(actionName) { track in
             track.cues[index].start = start
             track.cues[index].end = end
@@ -1041,7 +1119,7 @@ public final class EditorState {
     /// Changes the text of a cue. Consecutive changes to the same cue while
     /// typing undo as one step.
     public func setText(_ text: String, forCue id: Cue.ID) {
-        guard let index = track.cues.firstIndex(where: { $0.id == id }), track.cues[index].text != text else { return }
+        guard let index = index(ofCue: id), track.cues[index].text != text else { return }
         edit("Typing", coalescing: textEditCueID == id) { track in
             track.cues[index].text = text
             // Edited by hand: no longer the AI's text, and the choice between its variants is made.

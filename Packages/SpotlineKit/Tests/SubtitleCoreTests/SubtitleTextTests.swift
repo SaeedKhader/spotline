@@ -30,3 +30,10 @@ struct FirstFrameTests {
         #expect(MediaTime.zero.firstFrame(at: rate) == 0)
     }
 }
+
+struct BlankTextTests {
+    @Test(arguments: ["", " ", "\n", " \n\t ", "Hi", " a ", "<i></i>", "<i> </i>", "<i>Hi</i>", "{\\an8}", "{\\an8}Up", "&nbsp;", "&amp;", "a & b", "{", "<"])
+    func blankIsWhatHasNoVisibleCharacters(text: String) {
+        #expect(SubtitleText.isBlank(text) == SubtitleText.visibleLines(of: text).joined().allSatisfy(\.isWhitespace))
+    }
+}

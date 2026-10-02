@@ -212,41 +212,63 @@ public struct ReviewSuggestion: Hashable, Sendable {
     }
 }
 
+/// What views ask for on every redraw, worked out once for the cues, issues and proposed changes as they are.
+struct ReviewDerived {
+    /// What each review filter lists.
+    var items: [ReviewScope: [ReviewItem]] = [:]
+    var attentionCueIDs: Set<Cue.ID>?
+    var suggestionCueIDs: Set<Cue.ID>?
+    /// What a glossary card's Replace button puts in, by cue; an entry without a value is a cue with nothing to replace.
+    var glossaryReplacements: [Cue.ID: (title: String, text: String)?] = [:]
+}
+
 extension EditorState {
     /// Everything to review, or one kind of it, in time order.
     public func reviewItems(in scope: ReviewScope) -> [ReviewItem] {
         // Nothing shows until the episode brief is confirmed, so it is all reviewed with the brief in place.
         guard !isReviewHeld else { return [] }
+        // Read even when the list is at hand, so views showing it redraw when one of them changes.
+        _ = (track, issues, pendingReview)
+        if let cached = reviewDerived.items[scope] { return cached }
+        // One pass over the cues lists everything; each filter is the cards of its kind.
+        let all = reviewDerived.items[.all] ?? allReviewItems()
+        reviewDerived.items[.all] = all
+        guard scope != .all else { return all }
+        let items = ordered(all.filter { $0.kind.scope == scope }, in: scope)
+        reviewDerived.items[scope] = items
+        return items
+    }
+
+    private func allReviewItems() -> [ReviewItem] {
         var items: [ReviewItem] = []
+        let review = pendingReview
         for cue in track.cues {
-            if scope == .all || scope == .changes, pendingReview?.change(forCue: cue.id) != nil {
+            if review?.change(forCue: cue.id) != nil {
                 items.append(ReviewItem(cueID: cue.id, kind: .change, start: cue.start))
             }
-            if scope == .all || scope == .choices, cue.flag?.isResolved == false {
+            if cue.flag?.isResolved == false {
                 items.append(ReviewItem(cueID: cue.id, kind: .choice, start: cue.start))
             }
-            if scope == .all || scope == .script, cue.scriptFinding != nil {
+            if cue.scriptFinding != nil {
                 items.append(ReviewItem(cueID: cue.id, kind: .script, start: cue.start))
             }
-            if scope == .all || scope == .words, let words = cue.unsureWords {
+            if let words = cue.unsureWords {
                 items += words.enumerated().map { ReviewItem(cueID: cue.id, kind: .word($0.offset), start: cue.start, word: $0.element.text) }
             }
-            let cueIssues = issues[cue.id] ?? []
-            if scope == .all || scope == .glossary, cueIssues.contains(where: \.kind.isGlossaryIssue) {
+            guard let cueIssues = issues[cue.id] else { continue }
+            if cueIssues.contains(where: \.kind.isGlossaryIssue) {
                 items.append(ReviewItem(cueID: cue.id, kind: .glossary, start: cue.start))
             }
-            if scope == .all || scope == .issues, cueIssues.contains(where: { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue }) {
+            if cueIssues.contains(where: { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue }) {
                 items.append(ReviewItem(cueID: cue.id, kind: .issues, start: cue.start))
             }
-            if scope == .all || scope == .frames, cueIssues.contains(where: \.kind.isFrameIssue) {
+            if cueIssues.contains(where: \.kind.isFrameIssue) {
                 items.append(ReviewItem(cueID: cue.id, kind: .frames, start: cue.start))
             }
         }
         // Cues a tool proposes to add are not in the track yet.
-        if scope == .all || scope == .changes {
-            items += proposedInserts.map { ReviewItem(cueID: $0.cueID, kind: .change, start: $0.cue.start) }
-        }
-        return ordered(items, in: scope)
+        items += proposedInserts.map { ReviewItem(cueID: $0.cueID, kind: .change, start: $0.cue.start) }
+        return ordered(items, in: .all)
     }
 
     /// Cards in the order a filter lists them. Under Choices, AI Review or Words, the least

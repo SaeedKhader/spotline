@@ -25,8 +25,8 @@ struct CueEditorList: View {
     let editor: EditorState
     @FocusState private var focusedText: Cue.ID?
     @FocusState private var isListFocused: Bool
-    /// The rows' height, so the space under them can fill the rest of the list.
-    @State private var rowsHeight: CGFloat = 0
+    /// Which rows are whole on screen, so selecting one of them scrolls nothing.
+    @State private var rowsOnScreen = RowsOnScreen()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,29 +49,38 @@ struct CueEditorList: View {
         .accessibilityIdentifier(AccessibilityID.CueList.root)
     }
 
+    /// What changes from one moment to the next (the selection, the cue at the playhead, the
+    /// issues, the proposed changes) is read here and handed to each row as its own part of it,
+    /// so a row redraws only when something of its own cue changes, not with every edit and selection.
     private var rows: some View {
+        let isTranslating = editor.isTranslating
         let directions = TextDirections(
-            source: editor.isTranslating ? editor.sourceDirection : .leftToRight, target: editor.targetDirection
+            source: isTranslating ? editor.sourceDirection : .leftToRight, target: editor.targetDirection
         )
+        let selected = editor.selectedCueID
+        let current = editor.currentCueID
+        let issues = editor.issues
+        let sources = editor.sourceCues
+        let review = editor.pendingReview
+        let cast = editor.track.cast
+        let lastID = editor.track.cues.last?.id
+        let maxSpeed = editor.qcPreset.maxCharactersPerSecond
         return GeometryReader { geometry in ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 0) {
                 LazyVStack(spacing: 0) {
                     ForEach(listItems) { item in
                         Group {
                             switch item {
                             case .cue(let cue, let number):
                                 CueRow(
-                                    editor: editor, cue: cue, number: number, directions: directions, focusedText: $focusedText,
-                                    leaveText: { isListFocused = true }
+                                    editor: editor, cue: cue, number: number, directions: directions,
+                                    isSelected: cue.id == selected, isCurrent: cue.id == current, isLast: cue.id == lastID,
+                                    issues: issues[cue.id] ?? [], source: sources[cue.id], isTranslating: isTranslating,
+                                    change: review?.change(forCue: cue.id), cast: cast, maxSpeed: maxSpeed,
+                                    focusedText: $focusedText, leaveText: { isListFocused = true }
                                 )
-                                    .overlay {
-                                        if editor.aiTask?.inFlight.contains(cue.id) == true {
-                                            InFlightShimmer()
-                                                .allowsHitTesting(false)
-                                                .accessibilityIdentifier(AccessibilityID.CueList.inFlight(cue.id))
-                                        }
-                                    }
+                                .equatable()
+                                .overlay { InFlightOverlay(editor: editor, cueID: cue.id) }
                             case .proposed(let change):
                                 ProposedCueRow(editor: editor, change: change, direction: directions.target)
                             }
@@ -82,19 +91,32 @@ struct CueEditorList: View {
                             editor.select(item.id)
                             isListFocused = true
                         }
+                        .onScrollVisibilityChange(threshold: 0.98) { isWhole in
+                            if isWhole {
+                                rowsOnScreen.whole.insert(item.id)
+                            } else {
+                                rowsOnScreen.whole.remove(item.id)
+                                // Selecting a row makes it taller (its actions, its suggestions): if it no longer fits, show all of it.
+                                if item.id == editor.selectedCueID, Date().timeIntervalSince(rowsOnScreen.selectedAt) < 0.5 {
+                                    proxy.scrollTo(item.id)
+                                }
+                            }
+                        }
                         Divider()
                     }
                 }
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
-                // The space under the last row: a click there leaves the text and deselects.
-                Color.clear
-                    .frame(height: max(geometry.size.height - rowsHeight, 80))
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        editor.perform(.deselectCue)
-                        isListFocused = true
-                    }
-                    .accessibilityHidden(true)
+                // The space under the last row (to the bottom of the list, 80 points at least):
+                // a click there leaves the text and deselects.
+                .padding(.bottom, 80)
+                .frame(minHeight: geometry.size.height, alignment: .top)
+                .background {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            editor.perform(.deselectCue)
+                            isListFocused = true
+                        }
+                        .accessibilityHidden(true)
                 }
             }
             .focusable()
@@ -117,9 +139,16 @@ struct CueEditorList: View {
                 }
                 return editor.perform(.deselectCue) ? .handled : .ignored
             }
-            .onChange(of: editor.selectedCueID) { _, id in
+            .onChange(of: selected) { old, id in
                 guard let id else { return }
-                withAnimation(editor.launchOptions.isUITestMode ? nil : .default) { proxy.scrollTo(id) }
+                rowsOnScreen.selectedAt = Date()
+                // A row that is whole on screen needs no scrolling (finding where a row is takes the list a walk from its top).
+                guard !rowsOnScreen.whole.contains(id) else { return }
+                // To a cue nearby the list slides; to one far away it jumps, or every row on the way would be built to slide past.
+                let isNear = old.flatMap(editor.index(ofCue:)).flatMap { from in
+                    editor.index(ofCue: id).map { abs($0 - from) <= 12 }
+                } ?? false
+                withAnimation(isNear && !editor.launchOptions.isUITestMode ? .default : nil) { proxy.scrollTo(id) }
             }
         } }
     }
@@ -142,6 +171,13 @@ struct CueEditorList: View {
         items += inserts[next...].map { .proposed($0) }
         return items
     }
+}
+
+/// The rows whole on screen, and when the selection last changed. Not observed: no view redraws for it.
+@MainActor
+private final class RowsOnScreen {
+    var whole: Set<Cue.ID> = []
+    var selectedAt = Date.distantPast
 }
 
 /// A row of the cue list: a cue, or a cue an AI tool proposes to add.
@@ -173,28 +209,62 @@ extension TextDirection {
     var layoutDirection: LayoutDirection { self == .rightToLeft ? .rightToLeft : .leftToRight }
 }
 
+/// The shimmer over a row whose line a translator is working on now, in a view of its own so
+/// the tool's progress reports redraw it and not the row.
+private struct InFlightOverlay: View {
+    let editor: EditorState
+    let cueID: Cue.ID
+
+    var body: some View {
+        if editor.aiTask?.inFlight.contains(cueID) == true {
+            InFlightShimmer()
+                .allowsHitTesting(false)
+                .accessibilityIdentifier(AccessibilityID.CueList.inFlight(cueID))
+        }
+    }
+}
+
 /// One cue: its number (with a dot when there is something to review), start and end, reading speed, text and actions.
-private struct CueRow: View {
+///
+/// Everything it shows comes from what the list hands it (compared by `==`), so it is drawn
+/// again only when that changes.
+private struct CueRow: View, Equatable {
     let editor: EditorState
     let cue: Cue
     let number: Int
     let directions: TextDirections
+    let isSelected: Bool
+    /// On screen at the playhead.
+    let isCurrent: Bool
+    let isLast: Bool
+    let issues: [QCIssue]
+    /// The source cue it translates, in translation mode.
+    let source: Cue?
+    let isTranslating: Bool
+    /// What an AI tool proposes for the cue, while that is under review.
+    let change: ProposedChange?
+    let cast: [CastMember]
+    /// The QC preset's reading speed limit.
+    let maxSpeed: Double?
     var focusedText: FocusState<Cue.ID?>.Binding
     /// Gives the list the keyboard focus, as Esc leaves the text.
     let leaveText: () -> Void
     @State private var isHovered = false
 
-    private var isSelected: Bool { editor.selectedCueID == cue.id }
-    private var isCurrent: Bool { editor.currentCueID == cue.id }
+    nonisolated static func == (lhs: CueRow, rhs: CueRow) -> Bool {
+        lhs.isSelected == rhs.isSelected && lhs.isCurrent == rhs.isCurrent && lhs.isLast == rhs.isLast && lhs.number == rhs.number
+            && lhs.isTranslating == rhs.isTranslating && lhs.maxSpeed == rhs.maxSpeed && lhs.directions == rhs.directions
+            && lhs.cue == rhs.cue && lhs.source == rhs.source && lhs.issues == rhs.issues && lhs.change == rhs.change && lhs.cast == rhs.cast
+    }
 
     /// What there is to review on the cue, for its dots: orange for a check
     /// (issues, words), purple for an AI suggestion (a choice, a change).
     private var reviewKinds: [String] {
         [
-            editor.issues[cue.id] != nil ? "issues" : nil,
+            !issues.isEmpty ? "issues" : nil,
             cue.unsureWords?.isEmpty == false ? "words" : nil,
             cue.flag?.isResolved == false ? "choice" : nil,
-            editor.proposedChange(forCue: cue.id) != nil ? "change" : nil,
+            change != nil ? "change" : nil,
         ].compactMap { $0 }
     }
 
@@ -231,9 +301,9 @@ private struct CueRow: View {
                 speakers
             }
             VStack(alignment: .trailing, spacing: 6) {
-                if editor.isTranslating {
+                if isTranslating {
                     HStack(alignment: .top, spacing: 8) {
-                        SourceText(editor: editor, cueID: cue.id, source: editor.sourceCues[cue.id], direction: directions.source)
+                        SourceText(editor: editor, cue: cue, source: source, direction: directions.source)
                             .frame(maxWidth: .infinity)
                         textEditor
                             .frame(maxWidth: .infinity)
@@ -252,7 +322,7 @@ private struct CueRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         // An Arabic or Hebrew track reads from the right: number and times go there too.
-        .environment(\.layoutDirection, directions.rowLayout(isTranslating: editor.isTranslating))
+        .environment(\.layoutDirection, directions.rowLayout(isTranslating: isTranslating))
         .background(rowBackground)
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .contain)
@@ -310,7 +380,7 @@ private struct CueRow: View {
 
     private var rowBackground: some View {
         Group {
-            if case .delete = editor.proposedChange(forCue: cue.id)?.kind {
+            if case .delete = change?.kind {
                 Color.errorTint.opacity(isSelected ? 0.2 : 0.1)
             } else if isSelected {
                 Color.accentColor.opacity(0.16)
@@ -324,11 +394,12 @@ private struct CueRow: View {
 
     /// Who says the line, when the cue has a speaker or the audio told its voices.
     @ViewBuilder private var speakers: some View {
-        let names = editor.speakerNames(of: cue)
+        let spoken = source ?? cue
+        let names = EditorState.speakerNames(of: spoken, cast: cast)
         if !names.isEmpty {
             let text = names.joined(separator: ", ")
             // A waveform marks a cue matched to the audio: its speakers were heard, not typed.
-            let heard = editor.isMatchedToAudio(cue)
+            let heard = EditorState.isMatchedToAudio(spoken)
             HStack(spacing: 4) {
                 Image(systemName: heard ? "waveform" : names.count > 1 ? "person.2" : "person")
                     .foregroundStyle(heard ? AnyShapeStyle(Color.aiTint) : AnyShapeStyle(.secondary))
@@ -347,9 +418,9 @@ private struct CueRow: View {
     }
 
     private var speedAndIssues: some View {
-        let speed = Int(cue.readingSpeed.rounded())
-        let tooFast = editor.qcPreset.maxCharactersPerSecond.map { cue.readingSpeed > $0 } ?? false
-        let issues = editor.issues[cue.id] ?? []
+        let readingSpeed = cue.readingSpeed
+        let speed = Int(readingSpeed.rounded())
+        let tooFast = maxSpeed.map { readingSpeed > $0 } ?? false
         return HStack(spacing: 6) {
             Text("\(speed)c/s")
                 .font(.caption.monospacedDigit())
@@ -411,14 +482,14 @@ private struct CueRow: View {
             editor.select(cue.id)
             editor.perform(command)
         }
-        .disabled(command == .mergeWithNext && editor.track.cues.last?.id == cue.id)
+        .disabled(command == .mergeWithNext && isLast)
     }
 }
 
 /// The source cue's text, read-only and selectable, with the glossary terms it uses.
 private struct SourceText: View {
     let editor: EditorState
-    let cueID: Cue.ID
+    let cue: Cue
     let source: Cue?
     let direction: TextDirection
 
@@ -436,13 +507,13 @@ private struct SourceText: View {
                 .help("Source")
                 .accessibilityLabel("Source")
                 .accessibilityValue(text)
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cueID, .source))
-            let matches = editor.glossaryMatches(for: cueID)
+                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .source))
+            let matches = editor.glossaryMatches(for: cue)
             if !matches.isEmpty {
                 HStack(spacing: 4) {
                     ForEach(Array(matches.enumerated()), id: \.offset) { index, match in
                         GlossaryChip(match: match)
-                            .accessibilityIdentifier(AccessibilityID.CueList.glossaryTerm(cueID, index))
+                            .accessibilityIdentifier(AccessibilityID.CueList.glossaryTerm(cue.id, index))
                     }
                 }
             }
