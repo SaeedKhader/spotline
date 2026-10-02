@@ -17,7 +17,7 @@ extension EditorState {
         EditorCommand.openMedia.id, EditorCommand.importSubtitles.id, EditorCommand.importEmbeddedSubtitles.id,
         EditorCommand.exportSubtitles.id, EditorCommand.openSourceSubtitles.id, EditorCommand.importGlossary.id,
         EditorCommand.acceptChange.id, EditorCommand.rejectChange.id, EditorCommand.acceptAllChanges.id,
-        EditorCommand.rejectAllChanges.id,
+        EditorCommand.rejectAllChanges.id, EditorCommand.exportSceneFrames.id,
     ]
 
     /// Runs one tool call from an agent. Throws `AgentToolError` with a message for the agent.
@@ -186,7 +186,9 @@ extension EditorState {
             }
             guard !Self.commandsAgentsCannotRun.contains(id) else {
                 throw AgentToolError(
-                    command.category == .ai
+                    id == EditorCommand.exportSceneFrames.id
+                        ? "“\(command.title)” opens a dialog, and has no tool taking a path yet."
+                        : command.category == .ai
                         ? "Accepting and rejecting AI proposals is left to the person, in Spotline."
                         : "“\(command.title)” opens a dialog. Use open_media, import_subtitles, open_source_subtitles or export_subtitles with a path."
                 )

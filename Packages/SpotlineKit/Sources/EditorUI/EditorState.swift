@@ -287,6 +287,25 @@ public final class EditorState {
     public internal(set) var isBriefSheetShown = false
     /// True while the AI script review runs after the brief is confirmed; the review waits for it.
     public internal(set) var isReviewingScript = false
+    /// The frames picked for each scene (AI › Scene Frames…), nil until picked. Kept while the media is open.
+    public internal(set) var sceneFrames: [SceneFramePicker.Scene]?
+    /// How far reading the frames has got, nil when not reading.
+    public internal(set) var sceneFramesJob: AnalysisJob?
+    public internal(set) var isSceneFramesSheetShown = false
+    @ObservationIgnored var sceneFramesTask: Task<Void, Never>?
+    /// Reads frames from the media off the main actor. Tests replace it.
+    @ObservationIgnored public var grabFrames:
+        @Sendable (URL, [MediaTime], @escaping @Sendable (MediaAnalyzer.Progress<Int>) -> Void) async throws -> [GrabbedFrame] =
+        { url, times, progress in
+            try await EditorState.runDetached {
+                try MediaAnalyzer.frames(in: url, at: times) { report in
+                    progress(report)
+                    return !Task.isCancelled
+                }
+            }
+        }
+    /// Asks for the folder to export the scene frames to. Tests replace it.
+    @ObservationIgnored public var chooseSceneFramesFolder: @MainActor () -> URL? = EditorPanels.chooseSceneFramesFolder
     @ObservationIgnored private var embeddedSubtitlesTask: Task<Void, Never>?
     /// Lists and reads the media's subtitle tracks off the main actor. Tests replace them.
     @ObservationIgnored public var listEmbeddedSubtitles: @Sendable (URL) async throws -> [EmbeddedSubtitleTrack] = { url in
@@ -506,6 +525,8 @@ public final class EditorState {
              EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id,
              EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id:
             canPerformAI(command)
+        case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id:
+            canPerformSceneFrames(command)
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
         // anything, so their menu items do not redraw on every frame.
@@ -655,6 +676,8 @@ public final class EditorState {
              EditorCommand.showEpisodeBrief.id, EditorCommand.rebuildEpisodeBrief.id,
              EditorCommand.reviewScriptWithAI.id, EditorCommand.reviewScriptFindings.id:
             return performAI(command)
+        case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id:
+            return performSceneFrames(command)
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
         case EditorCommand.shuttleBackward.id:
@@ -768,6 +791,7 @@ public final class EditorState {
         isBuildingBrief = false
         isBriefSheetShown = false
         isReviewingScript = false
+        resetSceneFrames()
         scrollTimeline(toCenter: 0)
     }
 

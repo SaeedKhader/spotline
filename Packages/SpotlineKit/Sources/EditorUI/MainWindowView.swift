@@ -60,6 +60,12 @@ public struct MainWindowView: View {
         )) {
             EpisodeBriefSheet(editor: editor)
         }
+        .sheet(isPresented: Binding(
+            get: { editor.isSceneFramesSheetShown },
+            set: { if !$0 { editor.dismissSceneFrames() } }
+        )) {
+            SceneFramesSheet(editor: editor)
+        }
         .transaction { transaction in
             if editor.launchOptions.isUITestMode { transaction.disablesAnimations = true }
         }
