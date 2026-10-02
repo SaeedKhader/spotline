@@ -307,7 +307,7 @@ struct GlossaryEnforcer: Sendable {
         let normalizedSource = MatchText.normalize(source)
         for term in terms where MatchText.contains(normalizedSource, term: MatchText.normalize(term.source)) {
             let rendered = term.rendered.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
-            guard !rendered.isEmpty, !MatchText.contains(MatchText.normalize(text), term: MatchText.normalize(term.target)),
+            guard !rendered.isEmpty, !MatchText.usesTranslation(MatchText.normalize(text), of: MatchText.normalize(term.target)),
                   let range = text.range(of: rendered)
             else { continue }
             text.replaceSubrange(range, with: term.target)
