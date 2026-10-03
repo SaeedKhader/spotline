@@ -193,3 +193,37 @@ struct KeptResultsTests {
         #expect(saved.sourceTrack == source)
     }
 }
+
+@MainActor
+struct CuesAtPlayheadTests {
+    let rate = FrameRate.fps25
+    func f(_ n: Int64) -> MediaTime { MediaTime(frame: n, rate: rate) }
+
+    @Test func theCuesOnScreenAreFoundAmongOverlappingAndLongCues() {
+        var sign = Cue(start: f(0), end: f(500), text: "A long sign", position: .top)
+        sign.style = nil
+        let cues = [
+            sign, Cue(start: f(10), end: f(40), text: "One"), Cue(start: f(50), end: f(90), text: "Two"),
+            Cue(start: f(80), end: f(120), text: "Overlaps two"), Cue(start: f(300), end: f(320), text: "Late"),
+        ]
+        let playback = SimulatedPlaybackEngine(frameRate: rate, frameCount: 1_000)
+        let editor = EditorState(
+            launchOptions: LaunchOptions(isUITestMode: true), playback: playback, frameRate: rate, track: SubtitleTrack(cues: cues)
+        )
+        playback.load(URL(fileURLWithPath: "/tmp/clip.mov"))
+        for frame: Int64 in [0, 5, 10, 39, 40, 45, 50, 85, 89, 90, 119, 120, 200, 300, 319, 320, 499, 500, 600] {
+            editor.seek(toFrame: frame)
+            let time = f(frame)
+            // What looking at every cue gives.
+            let showing = cues.filter { $0.start <= time && time < $0.end }
+            #expect(editor.cueAtPlayhead?.id == showing.last?.id, "frame \(frame)")
+            #expect(editor.currentCueID == showing.last?.id, "frame \(frame)")
+            let expected = CuePosition.allCases.compactMap { position in showing.last { $0.position == position } }
+            #expect(editor.cuesAtPlayhead == expected, "frame \(frame)")
+        }
+        // Editing the cue on screen shows at once.
+        editor.seek(toFrame: 60)
+        editor.setText("Two!", forCue: cues[2].id)
+        #expect(editor.cuesAtPlayhead.map(\.text) == ["Two!", "A long sign"])
+    }
+}

@@ -77,7 +77,8 @@ struct CueEditorList: View {
                                     isSelected: cue.id == selected, isCurrent: cue.id == current, isLast: cue.id == lastID,
                                     issues: issues[cue.id] ?? [], source: sources[cue.id], isTranslating: isTranslating,
                                     change: review?.change(forCue: cue.id), cast: cast, maxSpeed: maxSpeed,
-                                    focusedText: $focusedText, leaveText: { isListFocused = true }
+                                    focusedText: $focusedText, leaveText: { isListFocused = true },
+                                    editText: { editText(of: cue.id) }
                                 )
                                 .equatable()
                                 .overlay { InFlightOverlay(editor: editor, cueID: cue.id) }
@@ -151,6 +152,31 @@ struct CueEditorList: View {
                 withAnimation(isNear && !editor.launchOptions.isUITestMode ? .default : nil) { proxy.scrollTo(id) }
             }
         } }
+    }
+
+    /// A click on the text of a cue that is not selected: selects it and puts the cursor where
+    /// the click was. Only the selected row has a text editor (the others show their text as a
+    /// plain line, which costs the list far less to lay out), so the editor is there one update later.
+    private func editText(of id: Cue.ID) {
+        let click = NSApp.currentEvent.flatMap { $0.type == .leftMouseUp || $0.type == .leftMouseDown ? $0.locationInWindow : nil }
+        editor.select(id)
+        DispatchQueue.main.async {
+            focusedText = id
+            placeCursor(at: click, tries: 5)
+        }
+    }
+
+    /// Once the row's editor has the focus: the cursor at the click, or at the end of the text.
+    private func placeCursor(at click: NSPoint?, tries: Int) {
+        DispatchQueue.main.async {
+            guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else {
+                if tries > 1 { placeCursor(at: click, tries: tries - 1) }
+                return
+            }
+            let end = (textView.string as NSString).length
+            let index = click.map { textView.characterIndexForInsertion(at: textView.convert($0, from: nil)) } ?? end
+            textView.setSelectedRange(NSRange(location: min(index, end), length: 0))
+        }
     }
 
     /// The cues, with the new cues an AI tool proposes in their places.
@@ -249,6 +275,8 @@ private struct CueRow: View, Equatable {
     var focusedText: FocusState<Cue.ID?>.Binding
     /// Gives the list the keyboard focus, as Esc leaves the text.
     let leaveText: () -> Void
+    /// Selects the cue and starts typing in its text (a click on the text of a row that is not selected).
+    let editText: () -> Void
     @State private var isHovered = false
 
     nonisolated static func == (lhs: CueRow, rhs: CueRow) -> Bool {
@@ -295,24 +323,24 @@ private struct CueRow: View, Equatable {
                     }
                 }
             VStack(alignment: .leading, spacing: 6) {
-                TimeField(editor: editor, cue: cue, edge: .start, showsFrame: isHovered || isSelected)
-                TimeField(editor: editor, cue: cue, edge: .end, showsFrame: isHovered || isSelected)
+                TimeField(editor: editor, cue: cue, edge: .start, showsFrame: isHovered || isSelected, isEditable: isSelected) { editor.select(cue.id) }
+                TimeField(editor: editor, cue: cue, edge: .end, showsFrame: isHovered || isSelected, isEditable: isSelected) { editor.select(cue.id) }
                 speedAndIssues
                 speakers
             }
             VStack(alignment: .trailing, spacing: 6) {
                 if isTranslating {
                     HStack(alignment: .top, spacing: 8) {
-                        SourceText(editor: editor, cue: cue, source: source, direction: directions.source)
+                        SourceText(editor: editor, cue: cue, source: source, direction: directions.source, isSelectable: isSelected)
                             .frame(maxWidth: .infinity)
-                        textEditor
+                        text
                             .frame(maxWidth: .infinity)
                     }
                     if isSelected {
                         MemorySuggestions(editor: editor, cueID: cue.id, direction: directions.target)
                     }
                 } else {
-                    textEditor
+                    text
                 }
                 if isHovered || isSelected {
                     actions
@@ -327,6 +355,52 @@ private struct CueRow: View, Equatable {
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.CueList.row(cue.id))
+    }
+
+    /// The cue's text: a plain line in every row, with an editor over it in the selected row.
+    ///
+    /// A text editor is an AppKit text view; one in every row made the list slow to lay out, scroll
+    /// and jump in. The line stays under the editor (unseen), so the cell is the same size and the
+    /// same accessibility element (its ID, the text as its value) whether the row is selected or not.
+    private var text: some View {
+        // The text as it is typed, markup and all, as the editor shows it. A line just begun with
+        // Return has no character yet: a space holds its place.
+        Text(cue.text.hasSuffix("\n") ? cue.text + " " : cue.text)
+            .font(SpotlineStyle.cueFont)
+            .foregroundStyle(isSelected ? AnyShapeStyle(Color.clear) : cue.isAIGenerated == true ? AnyShapeStyle(Color.aiTint) : AnyShapeStyle(.primary))
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // Where the editor's text is: its own padding, and the text view's inside it.
+            .padding(.horizontal, 11)
+            .padding(.vertical, 4)
+            .frame(minHeight: 58, alignment: .topLeading)
+            .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(.separator))
+            .environment(\.layoutDirection, directions.target.layoutDirection)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: editText)
+            // An element of its own, so a cue with no text has its cell too.
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Text")
+            .accessibilityValue(cue.text)
+            .accessibilityAction(.default, editText)
+            .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
+            .overlay {
+                if isSelected { textEditor }
+            }
+            .overlay(alignment: .topTrailing) { aiMark }
+    }
+
+    /// Sparkles in the corner of text an AI tool wrote, until someone edits it.
+    @ViewBuilder private var aiMark: some View {
+        if cue.isAIGenerated == true {
+            Image(systemName: "sparkles")
+                .font(.caption2)
+                .foregroundStyle(Color.aiTint)
+                .padding(5)
+                .help("Written by \(editor.aiToolName(for: cue)); edit it to make it yours")
+                .accessibilityHidden(true)
+        }
     }
 
     /// The cue's text (the target, in translation mode), typed in its language's direction.
@@ -354,8 +428,7 @@ private struct CueRow: View, Equatable {
                 .frame(minHeight: 58)
                 // Text an AI tool wrote is in the AI tint until someone edits it.
                 .foregroundStyle(cue.isAIGenerated == true ? AnyShapeStyle(Color.aiTint) : AnyShapeStyle(.primary))
-                .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius))
-                .overlay(RoundedRectangle(cornerRadius: SpotlineStyle.cornerRadius).strokeBorder(.separator))
+                // (Its box and border are the plain line's, under it.)
                 .focused(focusedText, equals: cue.id)
                 .onKeyPress(.escape) {
                     focusedText.wrappedValue = nil
@@ -364,18 +437,6 @@ private struct CueRow: View, Equatable {
                     return .handled
                 }
                 .environment(\.layoutDirection, directions.target.layoutDirection)
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, .text))
-                // After the identifier, so the text cell stays the text view itself (its value is the text).
-                .overlay(alignment: .topTrailing) {
-                    if cue.isAIGenerated == true {
-                        Image(systemName: "sparkles")
-                            .font(.caption2)
-                            .foregroundStyle(Color.aiTint)
-                            .padding(5)
-                            .help("Written by \(editor.aiToolName(for: cue)); edit it to make it yours")
-                            .accessibilityHidden(true)
-                    }
-                }
     }
 
     private var rowBackground: some View {
@@ -492,14 +553,13 @@ private struct SourceText: View {
     let cue: Cue
     let source: Cue?
     let direction: TextDirection
+    /// Its text can be selected (to copy) in the selected row; selectable text costs more to lay out.
+    var isSelectable = true
 
     var body: some View {
         let text = source.map { SubtitleText.visibleLines(of: $0.text).joined(separator: "\n") } ?? ""
         VStack(alignment: .leading, spacing: 4) {
-            Text(text.isEmpty ? "No source cue" : text)
-                .font(SpotlineStyle.cueFont)
-                .foregroundStyle(text.isEmpty ? .tertiary : .secondary)
-                .textSelection(.enabled)
+            sourceLine(text)
                 .frame(maxWidth: .infinity, minHeight: 50, alignment: .topLeading)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -519,6 +579,15 @@ private struct SourceText: View {
             }
         }
         .environment(\.layoutDirection, direction.layoutDirection)
+    }
+}
+
+extension SourceText {
+    @ViewBuilder fileprivate func sourceLine(_ text: String) -> some View {
+        let line = Text(text.isEmpty ? "No source cue" : text)
+            .font(SpotlineStyle.cueFont)
+            .foregroundStyle(text.isEmpty ? .tertiary : .secondary)
+        if isSelectable { line.textSelection(.enabled) } else { line }
     }
 }
 
@@ -610,7 +679,14 @@ struct TimeField: View {
     let edge: Edge
     /// The field's box shows only on the hovered or selected row, or while typing.
     let showsFrame: Bool
+    /// False in a cue list row that is not selected: the time shows as plain text (a text field is
+    /// an AppKit view, and two in every row made the list slow), and a click selects the row and types here.
+    var isEditable = true
+    /// Selects the row, for a click on the time while it is plain text.
+    var activate: () -> Void = {}
     @State private var draft = ""
+    /// A click on the plain text asked to type here, once the field is there.
+    @State private var wantsFocus = false
     @FocusState private var isFocused: Bool
 
     private var time: MediaTime { edge == .start ? cue.start : cue.end }
@@ -623,20 +699,40 @@ struct TimeField: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
             Divider().frame(height: 18).opacity(showsFrame || isFocused ? 1 : 0)
-            TextField(edge == .start ? "Start" : "End", text: $draft)
-                .textFieldStyle(.plain)
-                .font(.system(.callout, design: .monospaced))
-                .frame(width: 104)
-                .padding(.horizontal, 6)
-                .focused($isFocused)
-                .onSubmit(commit)
-                .onChange(of: isFocused) { _, focused in
-                    editor.isEditingText = focused
-                    if !focused { commit() }
-                }
-                // Removed while focused (an issue card's edit finished): typing is over.
-                .onDisappear { if isFocused { editor.isEditingText = false } }
-                .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, edge == .start ? .inPoint : .outPoint))
+            if isEditable {
+                TextField(edge == .start ? "Start" : "End", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(width: 104)
+                    .padding(.horizontal, 6)
+                    .focused($isFocused)
+                    .onSubmit(commit)
+                    .onChange(of: isFocused) { _, focused in
+                        editor.isEditingText = focused
+                        if !focused { commit() }
+                    }
+                    .onAppear {
+                        guard wantsFocus else { return }
+                        wantsFocus = false
+                        DispatchQueue.main.async { isFocused = true }
+                    }
+                    // Removed while focused (an issue card's edit finished, another row selected): typing is over.
+                    .onDisappear { if isFocused { editor.isEditingText = false } }
+                    .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, edge == .start ? .inPoint : .outPoint))
+            } else {
+                Text(label)
+                    .font(.system(.callout, design: .monospaced))
+                    .lineLimit(1)
+                    .frame(width: 104, alignment: .leading)
+                    .padding(.horizontal, 6)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        wantsFocus = true
+                        activate()
+                    }
+                    .accessibilityValue(label)
+                    .accessibilityIdentifier(AccessibilityID.CueList.cell(cue.id, edge == .start ? .inPoint : .outPoint))
+            }
         }
         .padding(.vertical, 4)
         .background(.background.opacity(showsFrame || isFocused ? 0.6 : 0), in: RoundedRectangle(cornerRadius: 6))
