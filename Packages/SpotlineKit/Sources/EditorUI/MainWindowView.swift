@@ -18,34 +18,20 @@ public struct MainWindowView: View {
     }
 
     public var body: some View {
-        VSplitView {
-            HSplitView {
-                // Translation mode shows source and target side by side.
-                CueEditorList(editor: editor)
-                    .frame(minWidth: editor.isTranslating ? 520 : 380, idealWidth: editor.isTranslating ? 820 : 560)
-                VStack(spacing: 0) {
-                    VideoSurfaceView(editor: editor)
-                    Divider()
-                    TransportBar(editor: editor)
-                }
-                .frame(minWidth: 320, minHeight: 240)
-                if editor.isReviewSidebarVisible {
-                    ReviewSidebar(editor: editor)
-                        .frame(minWidth: 280, idealWidth: 330, maxWidth: 480)
-                        .clipped()
+        VStack(spacing: 0) {
+            // The editor stays in place under the Translate page, so the video keeps playing where it was.
+            ZStack {
+                editorPage
+                    .opacity(editor.page == .edit ? 1 : 0)
+                    .allowsHitTesting(editor.page == .edit)
+                    .accessibilityHidden(editor.page != .edit)
+                if editor.page == .translate {
+                    TranslatePage(editor: editor)
+                        .background(Color(nsColor: .windowBackgroundColor))
                 }
             }
-            .frame(minHeight: 280)
-            VStack(spacing: 0) {
-                ActionsBar(editor: editor)
-                Divider()
-                MiniMapView(editor: editor)
-                    .frame(height: 30)
-                Divider()
-                TimelineHost(editor: editor)
-                    .frame(minHeight: 90)
-            }
-            .frame(minHeight: 170, idealHeight: 220)
+            Divider()
+            PageSwitcher(editor: editor)
         }
         .frame(minWidth: 960, minHeight: 600)
         .sheet(isPresented: Binding(
@@ -59,12 +45,6 @@ public struct MainWindowView: View {
             set: { if !$0 { editor.dismissEpisodeBrief() } }
         )) {
             EpisodeBriefSheet(editor: editor)
-        }
-        .sheet(isPresented: Binding(
-            get: { editor.isAIPlanShown },
-            set: { if !$0 { editor.dismissAIPlan() } }
-        )) {
-            AIPlanSheet(editor: editor)
         }
         .sheet(isPresented: Binding(
             get: { editor.isSceneFramesSheetShown },
@@ -85,6 +65,39 @@ public struct MainWindowView: View {
         .transaction { transaction in
             if editor.launchOptions.isUITestMode { transaction.disablesAnimations = true }
         }
+    }
+
+    /// The subtitle editor: the cue list, the video and the review on top; the actions, the mini-map and the timeline below.
+    private var editorPage: some View {
+            VSplitView {
+                HSplitView {
+                    // Translation mode shows source and target side by side.
+                    CueEditorList(editor: editor)
+                        .frame(minWidth: editor.isTranslating ? 520 : 380, idealWidth: editor.isTranslating ? 820 : 560)
+                    VStack(spacing: 0) {
+                        VideoSurfaceView(editor: editor)
+                        Divider()
+                        TransportBar(editor: editor)
+                    }
+                    .frame(minWidth: 320, minHeight: 240)
+                    if editor.isReviewSidebarVisible {
+                        ReviewSidebar(editor: editor)
+                            .frame(minWidth: 280, idealWidth: 330, maxWidth: 480)
+                            .clipped()
+                    }
+                }
+                .frame(minHeight: 280)
+                VStack(spacing: 0) {
+                    ActionsBar(editor: editor)
+                    Divider()
+                    MiniMapView(editor: editor)
+                        .frame(height: 30)
+                    Divider()
+                    TimelineHost(editor: editor)
+                        .frame(minHeight: 90)
+                }
+                .frame(minHeight: 170, idealHeight: 220)
+            }
     }
 }
 

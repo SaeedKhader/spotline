@@ -25,6 +25,8 @@ struct AIFlowStateTests {
         editor.grabFrames = { _, times, _ in SceneFramesStateTests.grabbed(times) }
         editor.aiSettings.allowsCloud = true
         editor.wantsReviewSidebar = false
+        // Never a dialog in tests: a project's video that is not there is simply not found.
+        editor.locateMissingMedia = { _ in nil }
         return editor
     }
 
@@ -41,8 +43,9 @@ struct AIFlowStateTests {
         let editor = makeEditor()
         editor.aiSettings.joinsLinesAfterTranslating = true
         #expect(editor.canPerform(.planAIFlow))
+        #expect(editor.page == .edit)
         #expect(editor.perform(.planAIFlow))
-        #expect(editor.isAIPlanShown)
+        #expect(editor.page == .translate, "Translate with AI shows the Translate page")
         #expect(editor.defaultAIPlanTicks == [.listen, .brief, .scriptReview, .translate, .join], "Frames are only sent when allowed")
         editor.aiSettings.sendsVideoFrames = true
         #expect(editor.defaultAIPlanTicks.contains(.scenes))
@@ -106,10 +109,11 @@ struct AIFlowStateTests {
 
     @Test func runsEveryStepStoppingForTheBriefAndTheLinesToCheck() async throws {
         let editor = makeEditor()
-        editor.startAIFlow(editor.defaultAIPlanTicks)
-        #expect(!editor.isAIPlanShown)
+        #expect(editor.currentStage == .source)
+        #expect(editor.stageState(.source) == .toDo)
+        editor.startAIFlow(editor.planTicks)
         #expect(editor.aiFlow?.current == .listen)
-        #expect(!editor.canPerform(.planAIFlow), "Already running")
+        #expect(editor.stageState(.source) == .running)
         await settle(editor)
 
         // Transcribed, the brief built, and it waits for the brief.
@@ -118,6 +122,10 @@ struct AIFlowStateTests {
         #expect(editor.aiFlow?.stop == .confirmBrief)
         #expect(editor.isBriefSheetShown)
         #expect(editor.aiFlowStopText == "Confirm the episode brief to go on")
+        #expect(editor.stageState(.source) == .done)
+        #expect(editor.stageState(.brief) == .waiting)
+        #expect(editor.currentStage == .brief)
+        #expect(editor.stageSummary(.brief) == "Waiting for you to confirm")
         // Not Now leaves it waiting; its button shows the brief again.
         editor.dismissEpisodeBrief()
         #expect(editor.aiFlow?.stop == .confirmBrief)
@@ -131,6 +139,9 @@ struct AIFlowStateTests {
         // The review flagged a line: it waits before translating it.
         #expect(editor.aiFlow?.stop == .checkLines(1))
         #expect(editor.aiFlowStopText == "1 line to check before translating")
+        #expect(editor.stageState(.brief) == .done)
+        #expect(editor.stageState(.check) == .waiting)
+        #expect(editor.stageSummary(.check) == "1 line to check")
         #expect(editor.wantsReviewSidebar)
         #expect(!editor.isTranslating)
 
@@ -142,6 +153,11 @@ struct AIFlowStateTests {
         #expect(editor.untranslatedCues.isEmpty)
         #expect(editor.track.cues.allSatisfy { $0.text.hasPrefix("[ar]") })
 
+        // "How are you?" reads two ways in Arabic: one choice is left to confirm.
+        #expect(editor.cuesToChoose.count == 1)
+        #expect(TranslateStage.allCases.map(editor.stageState) == [.done, .done, .done, .done, .toDo])
+        #expect(editor.currentStage == .choices)
+        #expect(editor.stageSummary(.choices) == "1 to confirm")
         // Opening the plan again: everything is done, and nothing is ticked.
         let rows = editor.aiPlanRows(ticked: [])
         #expect(rows.filter(\.isDone).map(\.step) == [.listen, .brief, .translate])
@@ -231,5 +247,41 @@ struct AIFlowStateTests {
         #expect(EditorCommand.planAIFlow.title == "Translate with AI…")
         #expect(EditorCommand.planAIFlow.defaultShortcut == KeyShortcut(.character("t"), modifiers: [.command, .control]))
         #expect(EditorState.commandsAgentsCannotRun.contains(EditorCommand.planAIFlow.id), "Agents never open dialogs")
+    }
+
+    // MARK: Pages
+
+    @Test func thePageIsSavedWithTheProject() {
+        let editor = makeEditor(cues: [tests.cue("Hello there.", at: 0)])
+        var changes = 0
+        editor.projectDidChange = { _ in changes += 1 }
+        #expect(editor.perform(.showTranslatePage))
+        #expect(editor.page == .translate)
+        #expect(editor.isOn(.showTranslatePage) == true && editor.isOn(.showEditPage) == false)
+        #expect(changes == 1, "Switching pages is saved")
+        let project = editor.projectFile(savingTo: nil)
+        #expect(project.page == "translate")
+
+        let reopened = makeEditor()
+        reopened.loadProject(project, from: nil)
+        #expect(reopened.page == .translate)
+        var older = project
+        older.page = nil
+        reopened.loadProject(older, from: nil)
+        #expect(reopened.page == .edit, "Projects from before pages open on the editor")
+    }
+
+    @Test func theTicksOnThePageFollowTheProjectUntilChosen() {
+        let editor = makeEditor()
+        editor.aiSettings.joinsLinesAfterTranslating = true
+        #expect(editor.planTicks == [.listen, .brief, .scriptReview, .translate, .join])
+        editor.setPlanTick(.brief, false)
+        #expect(editor.planTicks == [.listen, .translate, .join], "No brief: no review either")
+        editor.setPlanTick(.translate, false)
+        #expect(editor.planTicks == [.listen])
+        editor.setPlanTick(.translate, true)
+        #expect(editor.planTicks == [.listen, .translate, .join], "Joining comes back with translating")
+        #expect(editor.stageState(.brief) == .off)
+        #expect(editor.stageSummary(.brief) == "Not ticked")
     }
 }

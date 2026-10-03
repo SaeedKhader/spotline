@@ -16,6 +16,81 @@ public enum AIFlowStep: String, CaseIterable, Identifiable, Sendable {
     case join
 
     public var id: String { rawValue }
+
+    /// "Episode brief": the step in a few words.
+    public var title: String {
+        switch self {
+        case .listen: "Listen to the audio"
+        case .brief: "Episode brief"
+        case .scenes: "Describe the scenes"
+        case .scriptReview: "Review the script"
+        case .translate: "Translate"
+        case .join: "Join short lines"
+        }
+    }
+}
+
+/// Which page the window shows.
+public enum EditorPage: String, Sendable, CaseIterable {
+    /// Translate with AI, stage by stage.
+    case translate
+    /// The subtitle editor.
+    case edit
+}
+
+/// A stage of the Translate page: one or more steps, and the point where the user has
+/// something to look at. Choices has no step of its own: it is the translation's review.
+public enum TranslateStage: String, CaseIterable, Identifiable, Sendable {
+    case source
+    case brief
+    case check
+    case translate
+    case choices
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .source: "Source"
+        case .brief: "Brief"
+        case .check: "Check Lines"
+        case .translate: "Translate"
+        case .choices: "Choices"
+        }
+    }
+
+    /// What happens at this stage, in a sentence.
+    public var explanation: String {
+        switch self {
+        case .source: "Spotline listens to the audio to learn who says each line and whether the subtitle is on time. A subtitle's own words are not rewritten."
+        case .brief: "Who is who, how names are spelled, and what happens in each scene, from the lines, a web lookup and, if you allow it, a few frames of each scene. You confirm it before anything reads it."
+        case .check: "Lines to look at before they are translated: words the transcriber was unsure of, and lines where the audio says something else."
+        case .translate: "The lines are translated with the brief, the glossary and what the video shows. It runs by itself."
+        case .choices: "Lines the target language can say more than one way (who is spoken to, their gender and number), least sure first."
+        }
+    }
+
+    /// The plan's steps run at this stage.
+    public var steps: [AIFlowStep] {
+        switch self {
+        case .source: [.listen]
+        case .brief: [.brief, .scenes]
+        case .check: [.scriptReview]
+        case .translate: [.translate, .join]
+        case .choices: []
+        }
+    }
+}
+
+/// Where a stage stands.
+public enum StageState: Equatable, Sendable {
+    case done
+    case running
+    /// It waits for the user.
+    case waiting
+    case toDo
+    /// Nothing ticked here, and nothing done.
+    case off
 }
 
 /// A run of Translate with AI: the steps ticked in its plan, how far it has got, and
@@ -180,19 +255,102 @@ extension EditorState {
 
     // MARK: Running it
 
-    func showAIPlan() {
-        isAIPlanShown = true
+    /// The steps ticked on the Translate page: those chosen there, else the defaults for the project as it stands.
+    public var planTicks: Set<AIFlowStep> {
+        _ = planTicksVersion
+        return availableAIPlanTicks(chosenPlanTicks ?? defaultAIPlanTicks)
     }
 
-    public func dismissAIPlan() {
-        isAIPlanShown = false
+    /// Ticks or unticks a step on the Translate page. Joining goes with translating, and
+    /// unticking a step unticks what needs it.
+    public func setPlanTick(_ step: AIFlowStep, _ on: Bool) {
+        var ticked = planTicks
+        if on {
+            ticked.insert(step)
+            if step == .translate, aiSettings.joinsLinesAfterTranslating { ticked.insert(.join) }
+        } else {
+            ticked.remove(step)
+        }
+        chosenPlanTicks = availableAIPlanTicks(ticked)
+        planTicksVersion += 1
+    }
+
+    // MARK: Stages
+
+    /// Where a stage of the Translate page stands, from the run and the project.
+    public func stageState(_ stage: TranslateStage) -> StageState {
+        if let run = aiFlow {
+            if let current = run.current, stage.steps.contains(current) { return .running }
+            switch (run.stop, stage) {
+            case (.syncQuestion, .source), (.confirmBrief, .brief), (.checkLines, .check): return .waiting
+            default: break
+            }
+        }
+        if isStageDone(stage) { return .done }
+        let ticked = planTicks
+        return stage == .choices ? .toDo : stage.steps.contains(where: ticked.contains) ? .toDo : .off
+    }
+
+    private func isStageDone(_ stage: TranslateStage) -> Bool {
+        let translated = isTranslating && untranslatedCues.isEmpty && track.cues.contains { !$0.text.isEmpty }
+        switch stage {
+        case .source: return !storedTranscripts.isEmpty
+        case .brief: return track.brief?.isConfirmed == true
+        case .check: return translated || (track.brief?.isConfirmed == true && linesToCheckBeforeTranslating == 0 && aiFlow?.current != .scriptReview)
+        case .translate: return translated
+        case .choices: return translated && cuesToChoose.isEmpty
+        }
+    }
+
+    /// The stage's line in the list: where it stands, in a few words.
+    public func stageSummary(_ stage: TranslateStage) -> String {
+        let state = stageState(stage)
+        if state == .running, let task = aiTask { return task.detail }
+        switch stage {
+        case .source:
+            if state == .waiting { return "Decide on the timing" }
+            if state == .done { return !isTranslating && !cuesOfTheirOwn.isEmpty ? "Matched to the audio" : "Listened to the audio" }
+            return state == .off ? "Not ticked" : hasMedia ? "To do" : "Needs the video"
+        case .brief:
+            if state == .waiting || track.brief?.isConfirmed == false { return "Waiting for you to confirm" }
+            if state == .done { return track.brief?.seen.isEmpty == false ? "Confirmed, with the video's scenes" : "Confirmed" }
+            return state == .off ? "Not ticked" : "To do"
+        case .check:
+            let count = linesToCheckBeforeTranslating
+            if count > 0 { return count == 1 ? "1 line to check" : "\(count) lines to check" }
+            if state == .done { return "Nothing to check" }
+            return state == .off ? "Not ticked" : "After the brief"
+        case .translate:
+            if state == .done { return track.cues.count == 1 ? "1 line translated" : "\(track.cues.count) lines translated" }
+            let cost = aiPlanRows(ticked: planTicks).first { $0.step == .translate }?.cost
+            return state == .off ? "Not ticked" : AITaskStatus.shortName(aiSettings.translation.title) + (cost.map { " · \($0)" } ?? "")
+        case .choices:
+            let open = cuesToChoose.count
+            if open > 0 { return open == 1 ? "1 to confirm" : "\(open) to confirm" }
+            return state == .done ? "All settled" : "After translating"
+        }
+    }
+
+    /// The lines to check before translating, on the Edit page with the review beside them.
+    public func showLinesToCheck() {
+        page = .edit
+        wantsReviewSidebar = true
+    }
+
+    /// The stage the page shows by itself: the one running or waiting, else the first not done.
+    public var currentStage: TranslateStage {
+        let stages = TranslateStage.allCases
+        if let busy = stages.first(where: { [.running, .waiting].contains(stageState($0)) }) { return busy }
+        return stages.first { ![.done, .off].contains(stageState($0)) } ?? .choices
     }
 
     /// Starts the ticked steps (the plan's Start). The ticks are remembered as the settings the single commands follow too.
     public func startAIFlow(_ ticked: Set<AIFlowStep>) {
         let ticked = availableAIPlanTicks(ticked)
-        isAIPlanShown = false
         guard !ticked.isEmpty, aiTask == nil else { return }
+        // The ticks are kept as settings; next time the page ticks what is left to do.
+        chosenPlanTicks = nil
+        planTicksVersion += 1
         let rows = aiPlanRows(ticked: ticked)
         func isOffByChoice(_ step: AIFlowStep) -> Bool {
             !ticked.contains(step) && rows.first { $0.step == step }.map { $0.isAvailable && !$0.isDone } == true
@@ -311,7 +469,7 @@ extension EditorState {
 
     func canPerformAIFlow(_ command: EditorCommand) -> Bool {
         switch command.id {
-        case EditorCommand.planAIFlow.id: aiTask == nil && pendingReview == nil && aiFlow == nil && (hasMedia || !track.cues.isEmpty)
+        case EditorCommand.planAIFlow.id: true
         case EditorCommand.continueAIFlow.id: aiTask == nil && aiFlowStopText != nil
         default: false
         }
@@ -320,7 +478,7 @@ extension EditorState {
     func performAIFlow(_ command: EditorCommand) -> Bool {
         guard canPerformAIFlow(command) else { return false }
         switch command.id {
-        case EditorCommand.planAIFlow.id: showAIPlan()
+        case EditorCommand.planAIFlow.id: page = .translate
         case EditorCommand.continueAIFlow.id: continueAIFlow()
         default: return false
         }

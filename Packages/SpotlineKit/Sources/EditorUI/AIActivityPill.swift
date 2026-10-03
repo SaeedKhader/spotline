@@ -78,7 +78,7 @@ private struct AITaskSteps: View {
                     HStack(spacing: 8) {
                         Image(systemName: isDone ? "checkmark.circle.fill" : isCurrent ? "circle.dotted" : "circle")
                             .foregroundStyle(isDone || isCurrent ? Color.aiTint : Color.secondary)
-                        Text(AIPlanSheet.shortTitle(step))
+                        Text(step.title)
                             .fontWeight(isCurrent ? .semibold : .regular)
                             .foregroundStyle(isDone || isCurrent ? .primary : .secondary)
                     }

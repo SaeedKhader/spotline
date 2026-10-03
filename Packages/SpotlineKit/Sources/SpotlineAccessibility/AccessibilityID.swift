@@ -245,19 +245,28 @@ public enum AccessibilityID {
         public static let waiting = "review.briefWaiting"
     }
 
-    /// The Translate with AI plan (AI › Translate with AI…).
+    /// The Translate page: the AI flow stage by stage.
+    public enum TranslatePage {
+        public static let root = "translatePage"
+        /// One stage in the list, by `TranslateStage` raw value; its value says where it stands.
+        public static func stage(_ stage: String) -> String { "translatePage.stage.\(stage)" }
+        /// The chosen stage's screen.
+        public static func screen(_ stage: String) -> String { "translatePage.screen.\(stage)" }
+        public static let startButton = "translatePage.start"
+        /// What the stage waits for, when it does.
+        public static let waiting = "translatePage.waiting"
+        /// The Translate / Edit switch under the window.
+        public static let switcher = "pageSwitcher"
+    }
+
+    /// The plan's steps, on the Translate page.
     public enum AIPlan {
-        public static let sheet = "aiPlan"
         /// One step's row, by `AIFlowStep` raw value; its value says whether it is done.
         public static func row(_ step: String) -> String { "aiPlan.step.\(step)" }
         /// The step's checkbox.
         public static func tick(_ step: String) -> String { "\(row(step)).tick" }
         public static func model(_ step: String) -> String { "\(row(step)).model" }
         public static func effort(_ step: String) -> String { "\(row(step)).effort" }
-        /// The rough total, and what leaves the Mac.
-        public static let total = "aiPlan.total"
-        public static let startButton = "aiPlan.start"
-        public static let cancelButton = "aiPlan.cancel"
         /// In the AI bar while the flow waits for the user; its value says what for.
         public static let waiting = "aiPlan.waiting"
     }
