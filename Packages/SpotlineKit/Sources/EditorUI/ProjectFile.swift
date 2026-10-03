@@ -34,6 +34,8 @@ public struct ProjectFile: Equatable, Sendable {
     public var playhead: MediaTime?
     /// Cues whose text an agent wrote, for the AI tint's tooltip.
     public var agentWrittenCueIDs: [Cue.ID]
+    /// The page the project was on ("translate" or "edit"), nil for projects saved before there were pages.
+    public var page: String?
     public var analysis: StoredAnalysis
     public var transcripts: [StoredTranscript]
 
@@ -41,7 +43,8 @@ public struct ProjectFile: Equatable, Sendable {
         media: MediaReference? = nil, frameRate: FrameRate = .fps23_976, track: SubtitleTrack = SubtitleTrack(),
         sourceTrack: SubtitleTrack? = nil, subtitleFile: StoredFile? = nil, sourceFile: StoredFile? = nil,
         qcPresetID: String? = nil, selectedCueID: Cue.ID? = nil, playhead: MediaTime? = nil,
-        agentWrittenCueIDs: [Cue.ID] = [], analysis: StoredAnalysis = StoredAnalysis(), transcripts: [StoredTranscript] = []
+        agentWrittenCueIDs: [Cue.ID] = [], page: String? = nil, analysis: StoredAnalysis = StoredAnalysis(),
+        transcripts: [StoredTranscript] = []
     ) {
         self.media = media
         self.frameRate = frameRate
@@ -53,6 +56,7 @@ public struct ProjectFile: Equatable, Sendable {
         self.selectedCueID = selectedCueID
         self.playhead = playhead
         self.agentWrittenCueIDs = agentWrittenCueIDs
+        self.page = page
         self.analysis = analysis
         self.transcripts = transcripts
     }
@@ -103,6 +107,7 @@ public struct ProjectFile: Equatable, Sendable {
         var selectedCueID: Cue.ID?
         var playhead: MediaTime?
         var agentWrittenCueIDs: [Cue.ID]?
+        var page: String?
     }
 
     /// Reads a package, leniently: a missing or damaged cache file only means
@@ -121,7 +126,7 @@ public struct ProjectFile: Equatable, Sendable {
             sourceTrack: files[Self.sourceName]?.regularFileContents.flatMap { try? Self.decoder.decode(SubtitleTrack.self, from: $0) },
             subtitleFile: manifest.subtitleFile, sourceFile: manifest.sourceFile, qcPresetID: manifest.qcPresetID,
             selectedCueID: manifest.selectedCueID, playhead: manifest.playhead,
-            agentWrittenCueIDs: manifest.agentWrittenCueIDs ?? [],
+            agentWrittenCueIDs: manifest.agentWrittenCueIDs ?? [], page: manifest.page,
             analysis: files[Self.analysisName].map(StoredAnalysis.init(directory:)) ?? StoredAnalysis(),
             transcripts: files[Self.aiName]?.fileWrappers?.values.compactMap { file in
                 file.regularFileContents.flatMap { try? Self.decoder.decode(StoredTranscript.self, from: $0) }
@@ -135,7 +140,7 @@ public struct ProjectFile: Equatable, Sendable {
         let manifest = Manifest(
             formatVersion: Self.formatVersion, media: media, frameRate: frameRate, subtitleFile: subtitleFile,
             sourceFile: sourceFile, qcPresetID: qcPresetID, selectedCueID: selectedCueID, playhead: playhead,
-            agentWrittenCueIDs: agentWrittenCueIDs.isEmpty ? nil : agentWrittenCueIDs
+            agentWrittenCueIDs: agentWrittenCueIDs.isEmpty ? nil : agentWrittenCueIDs, page: page
         )
         var files: [String: FileWrapper] = [
             Self.manifestName: FileWrapper(regularFileWithContents: try Self.encoder.encode(manifest)),

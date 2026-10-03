@@ -318,6 +318,18 @@ public final class EditorState {
     public internal(set) var isBriefSheetShown = false
     /// True while the AI script review runs after the brief is confirmed; the review waits for it.
     public internal(set) var isReviewingScript = false
+    /// The run of Translate with AI in progress or waiting for the user, nil when none (`EditorState+AIFlow`).
+    public internal(set) var aiFlow: AIFlowRun?
+    /// Which page the window shows: the Translate page (the AI flow) or the Edit page (the subtitle editor).
+    public internal(set) var page: EditorPage = .edit {
+        didSet { if page != oldValue, !isLoadingProject { projectDidChange?(.other) } }
+    }
+    /// The steps ticked on the Translate page, nil until one is ticked or unticked: then they follow the project.
+    @ObservationIgnored var chosenPlanTicks: Set<AIFlowStep>?
+    /// Bumped when the ticks change, for the views showing them.
+    var planTicksVersion = 0
+    /// The Translate page's facts about the project, and what they were worked out from.
+    @ObservationIgnored var cachedPlanFacts: (key: PlanFactsKey, facts: PlanFacts)?
     /// The frames picked for each scene (AI › Scene Frames…), nil until picked. Kept while the media is open.
     public internal(set) var sceneFrames: [SceneFramePicker.Scene]?
     /// How far reading the frames has got, nil when not reading.
@@ -605,6 +617,10 @@ public final class EditorState {
         case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id,
              EditorCommand.describeScenes.id:
             canPerformSceneFrames(command)
+        case EditorCommand.planAIFlow.id, EditorCommand.continueAIFlow.id:
+            canPerformAIFlow(command)
+        case EditorCommand.showTranslatePage.id, EditorCommand.showEditPage.id:
+            true
         // Commands that depend on where the playhead is are enabled whenever they
         // could apply, and do nothing (returning false) when they would not change
         // anything, so their menu items do not redraw on every frame.
@@ -647,6 +663,8 @@ public final class EditorState {
     public func isOn(_ command: EditorCommand) -> Bool? {
         switch command.id {
         case EditorCommand.toggleSnapping.id: isSnappingEnabled
+        case EditorCommand.showTranslatePage.id: page == .translate
+        case EditorCommand.showEditPage.id: page == .edit
         case EditorCommand.toggleSpeechHighlight.id: isSpeechHighlighted
         case EditorCommand.toggleMilliseconds.id: showsMilliseconds
         case EditorCommand.toggleReviewSidebar.id: isReviewSidebarVisible
@@ -761,6 +779,12 @@ public final class EditorState {
         case EditorCommand.showSceneFrames.id, EditorCommand.pickSceneFramesAgain.id, EditorCommand.exportSceneFrames.id,
              EditorCommand.describeScenes.id:
             return performSceneFrames(command)
+        case EditorCommand.planAIFlow.id, EditorCommand.continueAIFlow.id:
+            return performAIFlow(command)
+        case EditorCommand.showTranslatePage.id:
+            page = .translate
+        case EditorCommand.showEditPage.id:
+            page = .edit
         case EditorCommand.shuttleForward.id:
             shuttle(forward: true)
         case EditorCommand.shuttleBackward.id:
@@ -877,6 +901,8 @@ public final class EditorState {
         isBriefSheetShown = false
         isReviewingScript = false
         resetSceneFrames()
+        aiFlow = nil
+        chosenPlanTicks = nil
         scrollTimeline(toCenter: 0)
     }
 

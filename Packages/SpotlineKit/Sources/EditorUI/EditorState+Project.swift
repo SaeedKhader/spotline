@@ -37,7 +37,7 @@ extension EditorState {
             media: media, frameRate: frameRate, track: track, sourceTrack: sourceTrack,
             subtitleFile: subtitleFile.map(ProjectFile.StoredFile.init), sourceFile: sourceFile.map(ProjectFile.StoredFile.init),
             qcPresetID: qcPreset.id, selectedCueID: selectedCueID, playhead: hasMedia ? currentTime : projectPlayhead,
-            agentWrittenCueIDs: track.cues.map(\.id).filter(agentWrittenCues.contains),
+            agentWrittenCueIDs: track.cues.map(\.id).filter(agentWrittenCues.contains), page: page.rawValue,
             analysis: storedAnalysis, transcripts: storedTranscripts
         )
     }
@@ -59,6 +59,7 @@ extension EditorState {
         subtitleFile = project.subtitleFile?.reference
         if let preset = project.qcPresetID.flatMap(QCPreset.named) { selectQCPreset(id: preset.id) }
         agentWrittenCues = Set(project.agentWrittenCueIDs)
+        page = project.page.flatMap(EditorPage.init) ?? .edit
         storedAnalysis = project.analysis
         storedTranscripts = project.transcripts
         mediaReference = project.media

@@ -62,7 +62,7 @@ extension EditorState {
     /// when it is ready. `automatically` (after transcription): only when there is
     /// none yet and a builder is set up, and quietly skipped otherwise.
     func buildEpisodeBrief(automatically: Bool) {
-        if automatically, track.brief != nil { return }
+        if automatically, track.brief != nil || !aiSettings.buildsBrief { return }
         let builder: (any EpisodeBriefBuilder)?
         do { builder = try aiProviders.briefBuilder(aiSettings) } catch {
             if !automatically { reportError("The episode brief could not start.", error) }
@@ -96,7 +96,10 @@ extension EditorState {
                 // What the video showed stays when the brief is built again; describing the scenes replaces it.
                 if brief.seen.isEmpty { brief.seen = self.track.brief?.seen ?? "" }
                 self.edit("Episode Brief") { track in track.brief = brief }
-                if self.aiSettings.sendsVideoFrames, self.hasMedia {
+                if self.aiFlow != nil {
+                    // The plan says what is next: the scenes, or the brief to confirm.
+                    self.aiFlowFinished(.brief)
+                } else if self.aiSettings.sendsVideoFrames, self.hasMedia {
                     // The brief opens once the scenes are described, or at once when they cannot be.
                     self.describeScenes(automatically: true)
                 } else {
@@ -109,6 +112,7 @@ extension EditorState {
                 guard let self else { return }
                 self.isBuildingBrief = false
                 if self.aiTaskGeneration == generation { self.aiTask = nil }
+                self.endAIFlow()
                 if !(error is CancellationError), !Task.isCancelled {
                     self.reportError("The episode brief stopped.", error)
                     self.onAITaskEnd?(AITaskEnd(title: "Episode brief stopped", message: error.localizedDescription, succeeded: false))
@@ -142,8 +146,13 @@ extension EditorState {
             }
         }
         isBriefSheetShown = false
-        // A subtitle file's words were not misheard: its review is the lines where the audio differs.
-        if startsReview, !textIsFromSubtitles { reviewScript(automatically: true) }
+        if aiFlow != nil {
+            // The plan says what is next: the script review if ticked, then translating.
+            advanceAIFlow()
+        } else if startsReview, !textIsFromSubtitles, aiSettings.reviewsScript {
+            // A subtitle file's words were not misheard: its review is the lines where the audio differs.
+            reviewScript(automatically: true)
+        }
         if !reviewItems(in: .all).isEmpty { wantsReviewSidebar = true }
     }
 

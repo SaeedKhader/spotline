@@ -64,6 +64,7 @@ extension EditorState {
                     title: "Script review finished", message: count == 1 ? "1 line to check" : "\(count) lines to check", succeeded: true
                 ))
                 if !self.reviewItems(in: .all).isEmpty { self.wantsReviewSidebar = true }
+                self.aiFlowFinished(.scriptReview)
             } catch {
                 guard let self else { return }
                 self.isReviewingScript = false
@@ -74,6 +75,7 @@ extension EditorState {
                 }
                 // Without it, the review shows what it has.
                 if !self.reviewItems(in: .all).isEmpty { self.wantsReviewSidebar = true }
+                if !(error is CancellationError), !Task.isCancelled { self.aiFlowFinished(.scriptReview) }
             }
         }
     }

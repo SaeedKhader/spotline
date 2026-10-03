@@ -18,6 +18,7 @@ extension EditorState {
         EditorCommand.exportSubtitles.id, EditorCommand.openSourceSubtitles.id, EditorCommand.importGlossary.id,
         EditorCommand.acceptChange.id, EditorCommand.rejectChange.id, EditorCommand.acceptAllChanges.id,
         EditorCommand.rejectAllChanges.id, EditorCommand.applySubtitleSync.id, EditorCommand.exportSceneFrames.id,
+        EditorCommand.planAIFlow.id,
     ]
 
     /// Runs one tool call from an agent. Throws `AgentToolError` with a message for the agent.
@@ -186,7 +187,9 @@ extension EditorState {
             }
             guard !Self.commandsAgentsCannotRun.contains(id) else {
                 throw AgentToolError(
-                    id == EditorCommand.exportSceneFrames.id
+                    id == EditorCommand.planAIFlow.id
+                        ? "“\(command.title)” opens a dialog for the person. Run the steps with start_ai_tool or their own commands."
+                        : id == EditorCommand.exportSceneFrames.id
                         ? "“\(command.title)” opens a dialog, and has no tool taking a path yet."
                         : command.category == .ai
                         ? "Accepting and rejecting AI proposals is left to the person, in Spotline."

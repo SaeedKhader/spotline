@@ -57,6 +57,9 @@ public struct EditorMenuCommands: Commands {
                 .disabled(!editor.isTranslating)
         }
         CommandMenu("AI") {
+            buttons(for: .ai, only: [.planAIFlow, .continueAIFlow])
+            Divider()
+            // Each step by itself, to do one again.
             buttons(for: .ai, only: [.transcribe, .syncSubtitlesToAudio, .showEpisodeBrief, .rebuildEpisodeBrief, .showSceneFrames, .describeScenes, .translateWithAI])
             Divider()
             buttons(for: .ai, only: [.clearTranslation, .clearTranscript])

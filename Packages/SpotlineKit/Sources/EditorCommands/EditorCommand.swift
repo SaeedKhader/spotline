@@ -299,8 +299,29 @@ extension EditorCommand {
     /// Fills the empty target cues with context, glossary and memory.
     /// Outside translation mode the current cues become the source first.
     public static let translateWithAI = EditorCommand(
-        id: "ai.translate", title: "Translate with AI", category: .ai,
+        id: "ai.translate", title: "Translate Lines", category: .ai
+    )
+    /// The one way in: shows the Translate page, with every step from the audio to the translated
+    /// lines (listen, episode brief, scenes, script review, translate, join), each to tick, with
+    /// its model and effort. Start runs them in order, stopping where the user checks something.
+    public static let planAIFlow = EditorCommand(
+        id: "ai.plan", title: "Translate with AI…", category: .ai,
         defaultShortcut: KeyShortcut(.character("t"), modifiers: [.command, .control])
+    )
+    /// The Translate page: the AI flow, stage by stage.
+    public static let showTranslatePage = EditorCommand(
+        id: "view.translatePage", title: "Translate Page", category: .view,
+        defaultShortcut: KeyShortcut(.character("1"), modifiers: .command)
+    )
+    /// The Edit page: the subtitle editor.
+    public static let showEditPage = EditorCommand(
+        id: "view.editPage", title: "Edit Page", category: .view,
+        defaultShortcut: KeyShortcut(.character("2"), modifiers: .command)
+    )
+    /// While Translate with AI waits for the user: goes on (translates with lines
+    /// still to check), or shows the brief to confirm again.
+    public static let continueAIFlow = EditorCommand(
+        id: "ai.continueFlow", title: "Continue Translate with AI", category: .ai
     )
     /// Empties every target cue: text, flagged choices and AI tint go; timing and
     /// source links stay, so Translate with AI can fill them again. One edit.
@@ -411,10 +432,10 @@ extension EditorCommand {
         showAllCues, toggleIssuesPanel, reviewFrames, reviewGlossary, previousIssue, nextIssue, fixOverlaps, joinShortLines,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
-        toggleMilliseconds, toggleReviewSidebar,
+        showTranslatePage, showEditPage, toggleMilliseconds, toggleReviewSidebar,
         openSourceSubtitles, closeSourceSubtitles, copySourceToTarget, useMemoryMatch, fillExactMatches,
         addTranslationsToMemory, addNamesToGlossary, showGlossary, importGlossary,
-        transcribe, syncSubtitlesToAudio, applySubtitleSync, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, showSceneFrames, pickSceneFramesAgain, exportSceneFrames, describeScenes, reviewScriptWithAI, reviewScriptFindings, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
+        planAIFlow, continueAIFlow, transcribe, syncSubtitlesToAudio, applySubtitleSync, translateWithAI, showEpisodeBrief, rebuildEpisodeBrief, showSceneFrames, pickSceneFramesAgain, exportSceneFrames, describeScenes, reviewScriptWithAI, reviewScriptFindings, clearTranslation, clearTranscript, reviewWords, confirmRemainingWords, reviewChoices, acceptRemainingChoices, maskProfanity, removeHearingImpaired, fixPunctuation, cancelAITask,
         reviewChanges, acceptChange, rejectChange, acceptAllChanges, rejectAllChanges,
     ]
 
