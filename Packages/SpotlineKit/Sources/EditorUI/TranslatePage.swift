@@ -15,22 +15,23 @@ struct TranslatePage: View {
     @State private var picked: TranslateStage?
 
     var body: some View {
-        let shown = picked ?? editor.currentStage
+        let overview = editor.translateOverview
+        let shown = picked ?? overview.current
         HStack(spacing: 0) {
-            StageList(editor: editor, shown: shown) { stage in
-                picked = stage == editor.currentStage ? nil : stage
+            StageList(editor: editor, overview: overview, shown: shown) { stage in
+                picked = stage == overview.current ? nil : stage
             }
             .frame(width: 280)
             Divider()
             ScrollView {
-                StageScreen(editor: editor, stage: shown)
+                StageScreen(editor: editor, overview: overview, stage: shown)
                     .padding(24)
                     .frame(maxWidth: 760, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         // A new stage running or waiting is shown, whatever was clicked before.
-        .onChange(of: editor.currentStage) { picked = nil }
+        .onChange(of: overview.current) { picked = nil }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.TranslatePage.root)
     }
@@ -39,6 +40,7 @@ struct TranslatePage: View {
 /// The stages down the left, the work above them and Start or Stop below.
 private struct StageList: View {
     let editor: EditorState
+    let overview: TranslateOverview
     let shown: TranslateStage
     let show: (TranslateStage) -> Void
 
@@ -54,7 +56,7 @@ private struct StageList: View {
                 Button { show(stage) } label: { row(stage) }
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .combine)
-                    .accessibilityValue(editor.stageSummary(stage))
+                    .accessibilityValue(overview.summaries[stage] ?? "")
                     .accessibilityIdentifier(AccessibilityID.TranslatePage.stage(stage.rawValue))
             }
             Spacer()
@@ -71,12 +73,12 @@ private struct StageList: View {
     }
 
     private func row(_ stage: TranslateStage) -> some View {
-        let state = editor.stageState(stage)
+        let state = overview.states[stage] ?? .toDo
         return HStack(alignment: .top, spacing: 10) {
             StageIcon(state: state).frame(width: 18).padding(.top, 1)
             VStack(alignment: .leading, spacing: 1) {
                 Text(stage.title).fontWeight(stage == shown ? .semibold : .regular)
-                Text(editor.stageSummary(stage))
+                Text(overview.summaries[stage] ?? "")
                     .font(.caption)
                     .foregroundStyle(state == .waiting ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
@@ -95,13 +97,13 @@ private struct StageList: View {
             if editor.aiFlow != nil {
                 CommandButton(command: .cancelAITask, editor: editor)
             } else {
-                Button { editor.startAIFlow(editor.planTicks) } label: {
+                Button { editor.startAIFlow(overview.ticks) } label: {
                     Text("Start").frame(maxWidth: .infinity)
                 }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(editor.planTicks.isEmpty || editor.aiTask != nil)
+                    .disabled(overview.ticks.isEmpty || editor.aiTask != nil)
                     .accessibilityIdentifier(AccessibilityID.TranslatePage.startButton)
                 Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
@@ -111,7 +113,7 @@ private struct StageList: View {
 
     /// What leaves the Mac with these ticks, and that the costs are rough.
     private var note: String {
-        let ticked = editor.planTicks, settings = editor.aiSettings
+        let ticked = overview.ticks, settings = editor.aiSettings
         var cloud: [String] = []
         if ticked.contains(.listen), settings.transcription.isCloud { cloud.append("the audio") }
         if !ticked.isDisjoint(with: [.brief, .scriptReview]) || (ticked.contains(.translate) && settings.translation.isCloud) { cloud.append("the lines") }
@@ -138,6 +140,7 @@ private struct StageIcon: View {
 /// One stage: what happens there, its steps, and where it stands.
 private struct StageScreen: View {
     let editor: EditorState
+    let overview: TranslateOverview
     let stage: TranslateStage
 
     var body: some View {
@@ -148,11 +151,11 @@ private struct StageScreen: View {
             }
             status
             if !stage.steps.isEmpty {
-                let rows = editor.aiPlanRows(ticked: editor.planTicks).filter { stage.steps.contains($0.step) }
+                let rows = overview.rows.filter { stage.steps.contains($0.step) }
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
                         Divider()
-                        PlanStepRow(editor: editor, row: row)
+                        PlanStepRow(editor: editor, row: row, isOn: overview.ticks.contains(row.step))
                     }
                     Divider()
                 }
@@ -165,7 +168,7 @@ private struct StageScreen: View {
 
     /// While the stage runs, the running tool's progress; while it waits, what for and the button to go on.
     @ViewBuilder private var status: some View {
-        switch editor.stageState(stage) {
+        switch overview.states[stage] ?? .toDo {
         case .running:
             if let task = editor.aiTask {
                 AITaskProgress(task: task)
@@ -177,14 +180,14 @@ private struct StageScreen: View {
             waiting
         default:
             if stage == .choices, !editor.cuesToChoose.isEmpty {
-                box("\(editor.stageSummary(.choices)). For now they are reviewed on the Edit page, beside the lines.") {
+                box("\((overview.summaries[.choices] ?? "")). For now they are reviewed on the Edit page, beside the lines.") {
                     Button("Review Choices") {
                         editor.perform(.showEditPage)
                         editor.perform(.reviewChoices)
                     }
                 }
             } else if stage == .check, editor.linesToCheckBeforeTranslating > 0, editor.aiFlow == nil {
-                box("\(editor.stageSummary(.check)). For now they are reviewed on the Edit page, beside the lines.") {
+                box("\((overview.summaries[.check] ?? "")). For now they are reviewed on the Edit page, beside the lines.") {
                     Button("Show Them") { editor.showLinesToCheck() }
                 }
             }
@@ -198,7 +201,7 @@ private struct StageScreen: View {
                 CommandButton(command: .showEpisodeBrief, editor: editor)
             }
         case .checkLines:
-            box("\(editor.stageSummary(.check)) before translating. Fix them on the Edit page, or translate them as they are.") {
+            box("\((overview.summaries[.check] ?? "")) before translating. Fix them on the Edit page, or translate them as they are.") {
                 Button("Show Them") { editor.showLinesToCheck() }
                 Button(editor.aiFlowContinueTitle) { editor.perform(.continueAIFlow) }
                     .accessibilityIdentifier(AccessibilityID.command(EditorCommand.continueAIFlow.id))
@@ -227,12 +230,12 @@ private struct StageScreen: View {
 struct PlanStepRow: View {
     let editor: EditorState
     let row: AIPlanRow
+    let isOn: Bool
 
     var body: some View {
         let step = row.step
-        let isOn = editor.planTicks.contains(step)
         HStack(alignment: .center, spacing: 10) {
-            Toggle(isOn: Binding(get: { editor.planTicks.contains(step) }, set: { editor.setPlanTick(step, $0) })) { EmptyView() }
+            Toggle(isOn: Binding(get: { isOn }, set: { editor.setPlanTick(step, $0) })) { EmptyView() }
                 .toggleStyle(.checkbox)
                 .labelsHidden()
                 .disabled(!row.isAvailable)

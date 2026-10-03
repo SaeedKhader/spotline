@@ -155,7 +155,7 @@ struct AIFlowStateTests {
 
         // "How are you?" reads two ways in Arabic: one choice is left to confirm.
         #expect(editor.cuesToChoose.count == 1)
-        #expect(TranslateStage.allCases.map(editor.stageState) == [.done, .done, .done, .done, .toDo])
+        #expect(TranslateStage.allCases.map { editor.stageState($0) } == [.done, .done, .done, .done, .toDo])
         #expect(editor.currentStage == .choices)
         #expect(editor.stageSummary(.choices) == "1 to confirm")
         // Opening the plan again: everything is done, and nothing is ticked.

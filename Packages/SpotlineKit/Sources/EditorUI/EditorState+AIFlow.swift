@@ -119,6 +119,16 @@ public struct AIFlowRun: Equatable, Sendable {
     }
 }
 
+/// What the Translate page shows, worked out once per redraw.
+public struct TranslateOverview: Equatable, Sendable {
+    public var ticks: Set<AIFlowStep>
+    public var rows: [AIPlanRow]
+    public var states: [TranslateStage: StageState]
+    public var summaries: [TranslateStage: String]
+    /// The stage running or waiting, else the first not done.
+    public var current: TranslateStage
+}
+
 /// A row of the plan: one step as the project stands.
 public struct AIPlanRow: Identifiable, Equatable, Sendable {
     public var step: AIFlowStep
@@ -143,61 +153,97 @@ public struct AIPlanRow: Identifiable, Equatable, Sendable {
 extension EditorState {
     // MARK: The plan
 
-    /// Whether there are lines to work on, or will be once the audio is transcribed.
-    private func hasLines(_ ticked: Set<AIFlowStep>) -> Bool {
-        !sceneFrameLines.isEmpty || (ticked.contains(.listen) && hasMedia)
+    /// What the plan's rows go by, worked out from the project in one pass. Kept until the
+    /// project or the settings change, so the Translate page redraws without going over every line.
+    struct PlanFacts: Equatable {
+        var lines = 0
+        var hasMedia = false
+        var isTranslating = false
+        /// A subtitle file's cues, to match to the audio rather than transcribe.
+        var matches = false
+        var textIsFromSubtitles = false
+        var listened = false
+        var translated = false
+        var hasBrief = false
+        var isBriefConfirmed = false
+        var described = false
+        var settings = AISettings()
+    }
+
+    /// What the facts depend on.
+    struct PlanFactsKey: Equatable {
+        var track: SubtitleTrack
+        var source: SubtitleTrack?
+        var transcripts: Int
+        var media: URL?
+        var settings: AISettings
+    }
+
+    var planFacts: PlanFacts {
+        let key = PlanFactsKey(track: track, source: sourceTrack, transcripts: storedTranscripts.count, media: status.mediaURL, settings: aiSettings)
+        if let cached = cachedPlanFacts, cached.key == key { return cached.facts }
+        let facts = PlanFacts(
+            lines: sceneFrameLines.count, hasMedia: hasMedia, isTranslating: isTranslating,
+            matches: !isTranslating && !cuesOfTheirOwn.isEmpty, textIsFromSubtitles: textIsFromSubtitles,
+            listened: !storedTranscripts.isEmpty,
+            translated: isTranslating && untranslatedCues.isEmpty && track.cues.contains { !$0.text.isEmpty },
+            hasBrief: track.brief != nil, isBriefConfirmed: track.brief?.isConfirmed == true, described: track.brief?.seen.isEmpty == false,
+            settings: aiSettings
+        )
+        cachedPlanFacts = (key, facts)
+        return facts
     }
 
     /// The plan's rows as the project stands, with `ticked` deciding what depends on what.
     public func aiPlanRows(ticked: Set<AIFlowStep>) -> [AIPlanRow] {
-        let lines = sceneFrameLines.count
-        let hasLines = hasLines(ticked)
-        let brief = track.brief
-        let hasBrief = brief != nil || ticked.contains(.brief)
-        let matches = !isTranslating && !cuesOfTheirOwn.isEmpty
-        let listened = !storedTranscripts.isEmpty
-        let translated = isTranslating && untranslatedCues.isEmpty && track.cues.contains { !$0.text.isEmpty }
-        let described = brief?.seen.isEmpty == false
+        Self.planRows(planFacts, ticked: ticked)
+    }
+
+    static func planRows(_ facts: PlanFacts, ticked: Set<AIFlowStep>) -> [AIPlanRow] {
+        let lines = facts.lines, hasMedia = facts.hasMedia, settings = facts.settings
+        let hasLines = lines > 0 || (ticked.contains(.listen) && hasMedia)
+        let hasBrief = facts.hasBrief || ticked.contains(.brief)
+        let matches = facts.matches
         let needsLines = hasMedia ? "Needs lines: tick the first step" : "Needs lines: open a video or import subtitles"
 
         return [
             AIPlanRow(
                 step: .listen, title: matches ? "Match the subtitles to the audio" : "Transcribe the audio",
                 detail: !hasMedia ? "Needs the video"
-                    : listened ? "Done: the transcript is saved, so running it again uploads nothing"
+                    : facts.listened ? "Done: the transcript is saved, so running it again uploads nothing"
                     : matches ? "Who says each line, and whether the timing is off" : "Writes the lines, with who says each",
-                isDone: listened, isAvailable: hasMedia, cost: nil
+                isDone: facts.listened, isAvailable: hasMedia, cost: nil
             ),
             AIPlanRow(
                 step: .brief, title: "Episode brief",
                 detail: !hasLines ? needsLines
-                    : brief?.isConfirmed == true ? "Done and confirmed" : brief != nil ? "Done, not confirmed yet"
+                    : facts.isBriefConfirmed ? "Done and confirmed" : facts.hasBrief ? "Done, not confirmed yet"
                     : "Who is who, names and terms, from the lines and a web lookup",
-                isDone: brief != nil, isAvailable: hasLines, cost: Self.cost(0.04 * aiSettings.brief.model.priceFactor)
+                isDone: facts.hasBrief, isAvailable: hasLines, cost: cost(0.04 * settings.brief.model.priceFactor)
             ),
             AIPlanRow(
                 step: .scenes, title: "Describe the scenes from the video",
                 detail: !hasMedia ? "Needs the video" : !hasLines ? needsLines : !hasBrief ? "Needs the episode brief"
-                    : described ? "Done: the brief says who is in view"
+                    : facts.described ? "Done: the brief says who is in view"
                     : "Sends a few small frames of each scene; says who is in view",
-                isDone: described, isAvailable: hasMedia && hasLines && hasBrief,
-                cost: lines == 0 ? nil : Self.cost(0.03 * Double(lines) / 500 * aiSettings.scenes.model.priceFactor)
+                isDone: facts.described, isAvailable: hasMedia && hasLines && hasBrief,
+                cost: lines == 0 ? nil : cost(0.03 * Double(lines) / 500 * settings.scenes.model.priceFactor)
             ),
             AIPlanRow(
                 step: .scriptReview, title: "Review the script",
-                detail: isTranslating ? "The source lines can't be changed while translating" : !hasLines ? needsLines
+                detail: facts.isTranslating ? "The source lines can't be changed while translating" : !hasLines ? needsLines
                     : !hasBrief ? "Needs the episode brief"
-                    : textIsFromSubtitles && !ticked.contains(.listen) || matches ? "Not needed for a subtitle file: its words were not misheard"
+                    : facts.textIsFromSubtitles && !ticked.contains(.listen) || matches ? "Not needed for a subtitle file: its words were not misheard"
                     : "Flags lines that look misheard, with fixes to try",
-                isDone: false, isAvailable: !isTranslating && hasLines && hasBrief,
-                cost: lines == 0 ? nil : Self.cost(0.03 * Double(lines) / 700 * aiSettings.scriptReview.model.priceFactor)
+                isDone: false, isAvailable: !facts.isTranslating && hasLines && hasBrief,
+                cost: lines == 0 ? nil : cost(0.03 * Double(lines) / 700 * settings.scriptReview.model.priceFactor)
             ),
             AIPlanRow(
                 step: .translate, title: "Translate",
-                detail: !hasLines ? needsLines : translated ? "Done: every line is translated"
+                detail: !hasLines ? needsLines : facts.translated ? "Done: every line is translated"
                     : "With the brief, the glossary and what the video shows",
-                isDone: translated, isAvailable: hasLines,
-                cost: lines == 0 ? nil : Self.cost(Double(lines) * Self.costPerLine(aiSettings.translation))
+                isDone: facts.translated, isAvailable: hasLines,
+                cost: lines == 0 ? nil : cost(Double(lines) * costPerLine(settings.translation))
             ),
             AIPlanRow(
                 step: .join, title: "Join short lines",
@@ -209,16 +255,21 @@ extension EditorState {
 
     /// The steps ticked when the plan opens: those not done yet, as the settings last had them.
     public var defaultAIPlanTicks: Set<AIFlowStep> {
+        Self.defaultTicks(planFacts)
+    }
+
+    static func defaultTicks(_ facts: PlanFacts) -> Set<AIFlowStep> {
+        let settings = facts.settings
         var ticked: Set<AIFlowStep> = []
         for step in AIFlowStep.allCases {
-            guard let row = aiPlanRows(ticked: ticked).first(where: { $0.step == step }), row.isAvailable, !row.isDone else { continue }
+            guard let row = planRows(facts, ticked: ticked).first(where: { $0.step == step }), row.isAvailable, !row.isDone else { continue }
             let wanted: Bool = switch step {
             case .listen, .translate: true
-            case .brief: aiSettings.buildsBrief
-            case .scenes: aiSettings.sendsVideoFrames && aiSettings.allowsCloud
+            case .brief: settings.buildsBrief
+            case .scenes: settings.sendsVideoFrames && settings.allowsCloud
             // A subtitle file's words were not misheard.
-            case .scriptReview: aiSettings.reviewsScript && !(textIsFromSubtitles || (!isTranslating && !cuesOfTheirOwn.isEmpty))
-            case .join: aiSettings.joinsLinesAfterTranslating
+            case .scriptReview: settings.reviewsScript && !(facts.textIsFromSubtitles || facts.matches)
+            case .join: settings.joinsLinesAfterTranslating
             }
             if wanted { ticked.insert(step) }
         }
@@ -227,10 +278,14 @@ extension EditorState {
 
     /// `ticked` without the steps that cannot run as it stands (their step before was unticked).
     public func availableAIPlanTicks(_ ticked: Set<AIFlowStep>) -> Set<AIFlowStep> {
+        Self.availableTicks(ticked, planFacts)
+    }
+
+    static func availableTicks(_ ticked: Set<AIFlowStep>, _ facts: PlanFacts) -> Set<AIFlowStep> {
         var kept = ticked
         // Unticking one step can take the next with it, and so on down.
         for _ in AIFlowStep.allCases {
-            let available = Set(aiPlanRows(ticked: kept).filter(\.isAvailable).map(\.step))
+            let available = Set(planRows(facts, ticked: kept).filter(\.isAvailable).map(\.step))
             kept.formIntersection(available)
         }
         return kept
@@ -258,7 +313,8 @@ extension EditorState {
     /// The steps ticked on the Translate page: those chosen there, else the defaults for the project as it stands.
     public var planTicks: Set<AIFlowStep> {
         _ = planTicksVersion
-        return availableAIPlanTicks(chosenPlanTicks ?? defaultAIPlanTicks)
+        let facts = planFacts
+        return Self.availableTicks(chosenPlanTicks ?? Self.defaultTicks(facts), facts)
     }
 
     /// Ticks or unticks a step on the Translate page. Joining goes with translating, and
@@ -278,7 +334,7 @@ extension EditorState {
     // MARK: Stages
 
     /// Where a stage of the Translate page stands, from the run and the project.
-    public func stageState(_ stage: TranslateStage) -> StageState {
+    public func stageState(_ stage: TranslateStage, ticks: Set<AIFlowStep>? = nil) -> StageState {
         if let run = aiFlow {
             if let current = run.current, stage.steps.contains(current) { return .running }
             switch (run.stop, stage) {
@@ -287,12 +343,12 @@ extension EditorState {
             }
         }
         if isStageDone(stage) { return .done }
-        let ticked = planTicks
+        let ticked = ticks ?? planTicks
         return stage == .choices ? .toDo : stage.steps.contains(where: ticked.contains) ? .toDo : .off
     }
 
     private func isStageDone(_ stage: TranslateStage) -> Bool {
-        let translated = isTranslating && untranslatedCues.isEmpty && track.cues.contains { !$0.text.isEmpty }
+        let translated = planFacts.translated
         switch stage {
         case .source: return !storedTranscripts.isEmpty
         case .brief: return track.brief?.isConfirmed == true
@@ -303,8 +359,9 @@ extension EditorState {
     }
 
     /// The stage's line in the list: where it stands, in a few words.
-    public func stageSummary(_ stage: TranslateStage) -> String {
-        let state = stageState(stage)
+    public func stageSummary(_ stage: TranslateStage, ticks: Set<AIFlowStep>? = nil, state known: StageState? = nil) -> String {
+        let ticks = ticks ?? planTicks
+        let state = known ?? stageState(stage, ticks: ticks)
         if state == .running, let task = aiTask { return task.detail }
         switch stage {
         case .source:
@@ -322,7 +379,7 @@ extension EditorState {
             return state == .off ? "Not ticked" : "After the brief"
         case .translate:
             if state == .done { return track.cues.count == 1 ? "1 line translated" : "\(track.cues.count) lines translated" }
-            let cost = aiPlanRows(ticked: planTicks).first { $0.step == .translate }?.cost
+            let cost = aiPlanRows(ticked: ticks).first { $0.step == .translate }?.cost
             return state == .off ? "Not ticked" : AITaskStatus.shortName(aiSettings.translation.title) + (cost.map { " · \($0)" } ?? "")
         case .choices:
             let open = cuesToChoose.count
@@ -339,9 +396,24 @@ extension EditorState {
 
     /// The stage the page shows by itself: the one running or waiting, else the first not done.
     public var currentStage: TranslateStage {
+        translateOverview.current
+    }
+
+    /// Everything the Translate page shows, worked out once: the ticks, the rows, and each stage's state and line.
+    public var translateOverview: TranslateOverview {
+        let ticks = planTicks
+        let rows = aiPlanRows(ticked: ticks)
+        var states: [TranslateStage: StageState] = [:]
+        var summaries: [TranslateStage: String] = [:]
+        for stage in TranslateStage.allCases {
+            let state = stageState(stage, ticks: ticks)
+            states[stage] = state
+            summaries[stage] = stageSummary(stage, ticks: ticks, state: state)
+        }
         let stages = TranslateStage.allCases
-        if let busy = stages.first(where: { [.running, .waiting].contains(stageState($0)) }) { return busy }
-        return stages.first { ![.done, .off].contains(stageState($0)) } ?? .choices
+        let current = stages.first { [.running, .waiting].contains(states[$0]) }
+            ?? stages.first { ![.done, .off].contains(states[$0]) } ?? .choices
+        return TranslateOverview(ticks: ticks, rows: rows, states: states, summaries: summaries, current: current)
     }
 
     /// Starts the ticked steps (the plan's Start). The ticks are remembered as the settings the single commands follow too.

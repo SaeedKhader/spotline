@@ -328,6 +328,8 @@ public final class EditorState {
     @ObservationIgnored var chosenPlanTicks: Set<AIFlowStep>?
     /// Bumped when the ticks change, for the views showing them.
     var planTicksVersion = 0
+    /// The Translate page's facts about the project, and what they were worked out from.
+    @ObservationIgnored var cachedPlanFacts: (key: PlanFactsKey, facts: PlanFacts)?
     /// The frames picked for each scene (AI › Scene Frames…), nil until picked. Kept while the media is open.
     public internal(set) var sceneFrames: [SceneFramePicker.Scene]?
     /// How far reading the frames has got, nil when not reading.
