@@ -186,6 +186,9 @@ struct PerformanceReport: Codable {
     var switchReviewFilter: ActionCost?
     var scrollCueList: Scroll?
     var scrollReview: Scroll?
+    /// Drawing the timeline for one video frame of playback, in milliseconds (an average over ten
+    /// seconds of video). Measured by drawing it, so it does not depend on the window being on screen.
+    var timelineFrameMs: Double?
     /// Single calls, in milliseconds (an average of several).
     var calls: [String: Double] = [:]
 }
@@ -200,6 +203,8 @@ public enum PerformanceRun {
 
     public static func start(workspace: EditorWorkspace, reportURL: URL, quitsWhenDone: Bool) {
         monitor.start()
+        // Behind other windows macOS would slow the app's timers down (App Nap), and the run with them.
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "Performance run")
         let launched = processStart ?? MainThreadMonitor.now
         Task { @MainActor in
             var report = PerformanceReport()
@@ -225,11 +230,13 @@ public enum PerformanceRun {
             report.windowWasVisible = window?.occlusionState.contains(.visible) ?? false
             report.project = facts(of: editor)
 
-            await run(editor, window: window, into: &report)
+            // A picture of the timeline goes next to the report, to see that it still draws as it should.
+            await run(editor, window: window, snapshotURL: reportURL.deletingPathExtension().appendingPathExtension("timeline.png"), into: &report)
 
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try? encoder.encode(report).write(to: reportURL)
+            ProcessInfo.processInfo.endActivity(activity)
             // The project is a throwaway copy: leave at once, without the document saving on the way out.
             if quitsWhenDone { exit(0) }
         }
@@ -251,7 +258,28 @@ public enum PerformanceRun {
         return project
     }
 
-    private static func run(_ editor: EditorState, window: NSWindow?, into report: inout PerformanceReport) async {
+    /// A view as its layers draw it, as a PNG.
+    private static func picture(of view: NSView) -> Data? {
+        guard let layer = view.layer, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds),
+              let context = NSGraphicsContext(bitmapImageRep: rep)?.cgContext
+        else { return nil }
+        // Layers render bottom up; the picture is wanted top down.
+        context.translateBy(x: 0, y: view.bounds.height)
+        context.scaleBy(x: 1, y: -1)
+        layer.render(in: context)
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    private static func timelineView(in view: NSView?) -> TimelineView? {
+        guard let view else { return nil }
+        if let timeline = view as? TimelineView { return timeline }
+        for subview in view.subviews {
+            if let timeline = timelineView(in: subview) { return timeline }
+        }
+        return nil
+    }
+
+    private static func run(_ editor: EditorState, window: NSWindow?, snapshotURL: URL, into report: inout PerformanceReport) async {
         let cues = editor.track.cues
         let middle = cues.count / 2
         var visible: [Bool] = []
@@ -323,6 +351,22 @@ public enum PerformanceRun {
 
         visible.append(window?.occlusionState.contains(.visible) ?? false)
         report.windowWasVisible = report.windowWasVisible && visible.allSatisfy(\.self)
+
+        // The timeline, drawn for each frame of ten seconds of playback.
+        if let timeline = timelineView(in: window?.contentView) {
+            let shown = timeline.content
+            var content = shown
+            let frames = Int((10 * content.frameRate.framesPerSecond).rounded())
+            let start = MainThreadMonitor.now
+            for _ in 0..<frames {
+                content.playhead = content.playhead + MediaTime(frame: 1, rate: content.frameRate)
+                timeline.content = content
+                timeline.drawNow()
+            }
+            report.timelineFrameMs = (MainThreadMonitor.now - start) * 1000 / Double(frames)
+            if let png = picture(of: timeline) { try? png.write(to: snapshotURL) }
+            timeline.content = shown
+        }
 
         // Single calls.
         report.calls["reviewItems(all)"] = time { _ = editor.reviewItems(in: .all) }
