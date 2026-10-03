@@ -30,8 +30,14 @@ public struct MainWindowView: View {
                         .background(Color(nsColor: .windowBackgroundColor))
                 }
             }
-            Divider()
-            PageSwitcher(editor: editor)
+            if editor.startPhase == nil {
+                Divider()
+                PageSwitcher(editor: editor)
+            }
+        }
+        // A new window starts by asking for the video and its subtitle.
+        .overlay {
+            if editor.startPhase != nil { StartScreen(editor: editor) }
         }
         .frame(minWidth: 960, minHeight: 600)
         .sheet(isPresented: Binding(
@@ -53,7 +59,7 @@ public struct MainWindowView: View {
             SceneFramesSheet(editor: editor)
         }
         // Each button settles the question itself: closing the alert decides nothing.
-        .alert("Move the subtitles onto the audio?", isPresented: Binding(get: { editor.subtitleSync != nil }, set: { _ in })) {
+        .alert("Move the subtitles onto the audio?", isPresented: Binding(get: { editor.subtitleSync != nil && !(editor.page == .translate && editor.aiFlow != nil) }, set: { _ in })) {
             Button(EditorCommand.applySubtitleSync.title) { editor.perform(.applySubtitleSync) }
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier(AccessibilityID.Sync.apply)

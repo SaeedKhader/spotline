@@ -245,6 +245,22 @@ public enum AccessibilityID {
         public static let waiting = "review.briefWaiting"
     }
 
+    /// A new project window's start screen.
+    public enum Start {
+        public static let root = "start"
+        public static let dropArea = "start.drop"
+        public static let openButton = "start.open"
+        /// A recent project, by its file name.
+        public static func recent(_ name: String) -> String { "start.recent.\(name)" }
+        /// A choice of the subtitle question.
+        public static func choice(_ name: String) -> String { "start.choice.\(name)" }
+        public static let chooseFileButton = "start.chooseFile"
+        public static let continueWithout = "start.continueWithout"
+        public static let targetLanguage = "start.target"
+        public static let translateButton = "start.translate"
+        public static let justEditButton = "start.justEdit"
+    }
+
     /// The Translate page: the AI flow stage by stage.
     public enum TranslatePage {
         public static let root = "translatePage"

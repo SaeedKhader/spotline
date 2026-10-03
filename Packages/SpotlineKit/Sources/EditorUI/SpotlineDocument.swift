@@ -27,6 +27,12 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
         editor.projectActions = self
         editor.projectDidChange = { [weak self] change in self?.editorDidChange(change) }
         editor.aiToolWillStart = { [weak self] in self?.saveNextToVideoIfUntitled() }
+        // A project picked on the start screen opens in its own window; this empty one goes.
+        editor.openProjectFromStart = { [weak self] url in
+            guard let self else { return }
+            self.workspace.openProject(at: url)
+            if self.fileURL == nil, !self.editor.hasMedia { self.close() }
+        }
         let window = ObjectIdentifier(self)
         editor.onAITaskChange = { task in AIActivity.shared.update(task, for: window) }
         if !editor.launchOptions.isUITestMode { editor.onAITaskEnd = { end in AIActivity.shared.ended(end) } }
