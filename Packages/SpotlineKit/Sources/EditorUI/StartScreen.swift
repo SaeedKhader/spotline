@@ -104,6 +104,28 @@ private struct SubtitleQuestion: View {
     private var hasSubtitle: Bool { editor.recommendedStartSubtitle != nil }
 
     var body: some View {
+        // A tall question (many files beside the video) scrolls; the buttons stay at the bottom.
+        VStack(spacing: 0) {
+            ScrollView {
+                question
+                    .padding(32)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
+            }
+            Divider()
+            buttons
+                .padding(.horizontal, 32)
+                .padding(.vertical, 14)
+                .frame(maxWidth: 784)
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            if let added = editor.dropOnStartScreen(urls) { picked = .file(added) }
+            return true
+        } isTargeted: { isTargeted = $0 }
+        .onAppear { target = editor.defaultTargetLanguage(avoiding: editor.briefSourceLanguage) }
+    }
+
+    private var question: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(editor.workTitle ?? editor.status.mediaURL?.deletingPathExtension().lastPathComponent ?? "Video")
@@ -113,7 +135,10 @@ private struct SubtitleQuestion: View {
                 }
             }
             if hasSubtitle { found } else { dropZone }
-            Divider()
+        }
+    }
+
+    private var buttons: some View {
             HStack {
                 Button("Just Edit") { editor.finishStart(with: choice == .transcribe ? nil : choice, translatingTo: nil) }
                     .accessibilityIdentifier(AccessibilityID.Start.justEditButton)
@@ -131,22 +156,16 @@ private struct SubtitleQuestion: View {
                     .disabled(choice == nil)
                     .accessibilityIdentifier(AccessibilityID.Start.translateButton)
             }
-        }
-        .padding(32)
-        .frame(maxWidth: 720)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .dropDestination(for: URL.self) { urls, _ in
-            if let added = editor.dropOnStartScreen(urls) { picked = .file(added) }
-            return true
-        } isTargeted: { isTargeted = $0 }
-        .onAppear { target = editor.defaultTargetLanguage(avoiding: editor.briefSourceLanguage) }
     }
 
     /// The video has a subtitle: use it (recommended), another, or transcribe.
     private var found: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(foundText).fixedSize(horizontal: false, vertical: true)
-            ForEach(editor.startSubtitleChoices) { option in
+            let others = editor.otherStartSubtitleChoices
+            // A track in another language picked from the menu shows with the others it was chosen over.
+            let shown = editor.startSubtitleChoices + others.filter { $0.subtitle == choice }
+            ForEach(shown) { option in
                 Button { picked = option.subtitle } label: {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: choice == option.subtitle ? "largecircle.fill.circle" : "circle")
@@ -165,9 +184,21 @@ private struct SubtitleQuestion: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier(AccessibilityID.Start.choice(String(describing: option.subtitle)))
             }
-            Button("Choose Another File…") { if let added = editor.chooseStartSubtitleFile() { picked = .file(added) } }
-                .buttonStyle(.link)
-                .accessibilityIdentifier(AccessibilityID.Start.chooseFileButton)
+            HStack(spacing: 16) {
+                if !others.isEmpty {
+                    Menu("Another Language in the Video (\(others.count))") {
+                        ForEach(others) { option in
+                            Button(option.title) { picked = option.subtitle }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityIdentifier(AccessibilityID.Start.otherLanguages)
+                }
+                Button("Choose Another File…") { if let added = editor.chooseStartSubtitleFile() { picked = .file(added) } }
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier(AccessibilityID.Start.chooseFileButton)
+            }
         }
     }
 

@@ -255,6 +255,8 @@ public enum AccessibilityID {
         /// A choice of the subtitle question.
         public static func choice(_ name: String) -> String { "start.choice.\(name)" }
         public static let chooseFileButton = "start.chooseFile"
+        /// The menu of tracks inside the video in other languages.
+        public static let otherLanguages = "start.otherLanguages"
         public static let continueWithout = "start.continueWithout"
         public static let targetLanguage = "start.target"
         public static let translateButton = "start.translate"

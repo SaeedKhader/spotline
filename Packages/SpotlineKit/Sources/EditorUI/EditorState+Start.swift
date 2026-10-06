@@ -65,10 +65,25 @@ extension EditorState {
         startSubtitleFiles = status.mediaURL.map { Self.subtitleFiles(beside: $0) } ?? []
     }
 
-    /// The subtitle question's choices: tracks inside the video, files beside it or added, then transcribing.
+    /// The language the video is spoken in, from its audio track (2 letters), when known.
+    var spokenLanguage: String? {
+        (selectedAudioTrack ?? audioTracks.first)?.language.flatMap { $0 == "und" ? nil : Languages.base($0) }
+    }
+
+    /// The language the subtitles to work from are in: the spoken one, else the first plain track's
+    /// (files list the original language first; the default flag is often set for another one).
+    var startSubtitleLanguage: String? {
+        if let spoken = spokenLanguage, embeddedSubtitles.contains(where: { $0.isText && $0.language.map(Languages.base) == spoken }) { return spoken }
+        return embeddedSubtitles.first { $0.isText && !$0.isForced && !$0.isHearingImpaired }?.language.map(Languages.base) ?? spokenLanguage
+    }
+
+    /// The subtitle question's choices: the tracks in the video's language, files beside it or added,
+    /// then transcribing. Tracks in other languages are `otherStartSubtitleChoices`, kept apart:
+    /// a video can carry thirty.
     public var startSubtitleChoices: [StartSubtitleChoice] {
+        let language = startSubtitleLanguage
         var choices: [StartSubtitleChoice] = []
-        for track in embeddedSubtitles where track.isText {
+        for track in embeddedSubtitles where track.isText && track.language.map(Languages.base) == language {
             choices.append(StartSubtitleChoice(
                 subtitle: .embedded(track.streamIndex), title: "\(track.displayName) subtitle in the video",
                 detail: track.isForced ? "Forced: only the lines in another language" : track.isHearingImpaired ? "With sound descriptions" : "Inside the video file"
@@ -83,12 +98,20 @@ extension EditorState {
         return choices
     }
 
+    /// The tracks inside the video in other languages, by name.
+    public var otherStartSubtitleChoices: [StartSubtitleChoice] {
+        let language = startSubtitleLanguage
+        return embeddedSubtitles.filter { $0.isText && $0.language.map(Languages.base) != language }
+            .map { StartSubtitleChoice(subtitle: .embedded($0.streamIndex), title: $0.displayName, detail: "Inside the video file") }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
     /// The subtitle to work from unless the user picks another: a plain track or file, in the
     /// audio's language when that is known; nil when the video has none.
     public var recommendedStartSubtitle: StartSubtitle? {
-        let spoken = selectedAudioTrack?.language.map(Languages.base)
+        let language = startSubtitleLanguage
         let plain = embeddedSubtitles.filter { $0.isText && !$0.isForced && !$0.isHearingImpaired }
-        if let track = plain.first(where: { $0.language.map(Languages.base) == spoken }) ?? plain.first(where: \.isDefault) ?? plain.first {
+        if let track = plain.first(where: { $0.language.map(Languages.base) == language }) ?? plain.first {
             return .embedded(track.streamIndex)
         }
         if let file = startSubtitleFiles.first { return .file(file) }

@@ -94,6 +94,24 @@ struct StartScreenStateTests {
         #expect(!editor.isEmbeddedSubtitlesSheetShown, "The start screen asks itself")
     }
 
+    @Test func manyLanguagesShowTheVideosOwnAndKeepTheRestInAMenu() async throws {
+        // As in a release with thirty tracks: English first, and the default flag on Croatian.
+        let tracks = [
+            EmbeddedSubtitleTrack(streamIndex: 2, codec: "subrip", language: "eng"),
+            EmbeddedSubtitleTrack(streamIndex: 3, codec: "subrip", language: "eng", isHearingImpaired: true),
+            EmbeddedSubtitleTrack(streamIndex: 4, codec: "subrip", language: "bul"),
+            EmbeddedSubtitleTrack(streamIndex: 20, codec: "subrip", language: "hrv", isDefault: true),
+            EmbeddedSubtitleTrack(streamIndex: 9, codec: "subrip", language: "ger"),
+        ]
+        let editor = makeEditor(embedded: tracks)
+        editor.open(URL(fileURLWithPath: "/tmp/feature.mkv"))
+        await settle { !editor.embeddedSubtitles.isEmpty }
+        #expect(editor.recommendedStartSubtitle == .embedded(2), "The original language, not the default flag")
+        #expect(editor.startSubtitleChoices.map(\.subtitle) == [.embedded(2), .embedded(3), .transcribe])
+        #expect(editor.otherStartSubtitleChoices.map(\.subtitle).count == 3)
+        #expect(Set(editor.otherStartSubtitleChoices.map(\.subtitle)) == [.embedded(4), .embedded(20), .embedded(9)])
+    }
+
     @Test func aVideoWithNoneRecommendsNothingUntilAFileIsDropped() async throws {
         let folder = try Folder(["Episode 1.mkv", "Elsewhere.srt"])
         let editor = makeEditor()
