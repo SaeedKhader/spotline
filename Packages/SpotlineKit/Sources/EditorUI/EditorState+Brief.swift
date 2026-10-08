@@ -18,11 +18,9 @@ extension EditorState {
         isBuildingBrief || track.brief.map { !$0.isConfirmed } == true || isReviewingScript
     }
 
-    /// The user's notes for the translator, then the confirmed brief's plot and scenes.
-    var translatorNotesWithBrief: String? {
-        let story = track.brief?.isConfirmed == true ? track.brief?.storyNotes : nil
-        let parts = [track.translatorNotes?.trimmingCharacters(in: .whitespacesAndNewlines), story].compactMap { $0 }.filter { !$0.isEmpty }
-        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    /// The confirmed brief, for the translator: its plot and scenes as notes, nil until confirmed.
+    var confirmedBrief: EpisodeBrief? {
+        track.brief?.isConfirmed == true ? track.brief : nil
     }
 
     /// Opens the brief, or builds one when there is none yet.
@@ -55,6 +53,7 @@ extension EditorState {
         let spellings = isTranslating ? glossary.entries.map { BriefRequest.Spelling(source: $0.source, target: $0.target) } : []
         var request = BriefRequest(lines: lines, sourceLanguage: source, targetLanguage: target, work: workTitle, cast: track.cast, spellings: spellings)
         request.isFromSubtitles = textIsFromSubtitles
+        request.sceneDescriptions = pendingSceneNotes ?? ""
         return request
     }
 
@@ -70,7 +69,7 @@ extension EditorState {
         }
         guard let builder else {
             if !automatically {
-                reportError("The episode brief could not start.", AIError.provider("It needs GPT-6 Luna: allow cloud AI and add an OpenAI API key in Settings › AI."))
+                reportError("The episode brief could not start.", AIError.provider(aiSettings.brief.model.setupHint))
             }
             return
         }
@@ -93,13 +92,26 @@ extension EditorState {
                 self.isBuildingBrief = false
                 guard !Task.isCancelled, self.aiTaskGeneration == generation else { return }
                 self.aiTask = nil
-                // What the video showed stays when the brief is built again; describing the scenes replaces it.
-                if brief.seen.isEmpty { brief.seen = self.track.brief?.seen ?? "" }
+                // Scenes described first went into the brief's own scene list, and stay as written.
+                if !request.sceneDescriptions.isEmpty {
+                    brief.seen = request.sceneDescriptions
+                    brief.scenesIncludeVideo = true
+                    self.pendingSceneNotes = nil
+                } else if let earlier = self.track.brief, brief.seen.isEmpty {
+                    // What the video showed stays when the brief is built again; describing the scenes replaces it.
+                    brief.seen = earlier.seen
+                    brief.scenesIncludeVideo = earlier.scenesIncludeVideo
+                }
+                // A term the glossary has already is not added again; one it translates differently
+                // shows the glossary's translation in the dialog, and ticking it replaces that.
+                for index in brief.terms.indices where self.glossary.entry(for: brief.terms[index].term) != nil {
+                    brief.terms[index].addsToGlossary = false
+                }
                 self.edit("Episode Brief") { track in track.brief = brief }
                 if self.aiFlow != nil {
                     // The plan says what is next: the scenes, or the brief to confirm.
                     self.aiFlowFinished(.brief)
-                } else if self.aiSettings.sendsVideoFrames, self.hasMedia {
+                } else if self.aiSettings.sendsVideoFrames, self.hasMedia, brief.seen.isEmpty {
                     // The brief opens once the scenes are described, or at once when they cannot be.
                     self.describeScenes(automatically: true)
                 } else {
@@ -133,16 +145,17 @@ extension EditorState {
         brief.terms.removeAll { $0.term.trimmingCharacters(in: .whitespaces).isEmpty }
         brief.mergeDuplicateTerms()
         edit("Confirm Episode Brief") { track in track.confirm(brief) }
+        // A show's names and terms go into its own glossary.
         let entries = brief.terms.filter { $0.addsToGlossary && !$0.translation.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { Glossary.Entry(source: $0.term, target: $0.translation, note: $0.note) }
+            .map { Glossary.Entry(source: $0.term, target: $0.translation, note: $0.note, show: glossaryShow) }
         if !entries.isEmpty {
             let pair = TranslationStore.pairKey(source: briefSourceLanguage, target: brief.targetLanguage)
             if pair == translationPair {
                 glossary.merge(entries)
             } else if let store = translationStore {
-                var stored = store.glossary(pair: pair)
+                var stored = store.glossary(pair: pair, show: glossaryShow)
                 stored.merge(entries)
-                try? store.save(stored, pair: pair)
+                try? store.save(stored, pair: pair, show: glossaryShow)
             }
         }
         isBriefSheetShown = false

@@ -25,7 +25,7 @@ extension EditorState {
         }
         guard let reviewer else {
             if !automatically {
-                reportError("The script review could not start.", AIError.provider("It needs GPT-6 Luna: allow cloud AI and add an OpenAI API key in Settings › AI."))
+                reportError("The script review could not start.", AIError.provider(aiSettings.scriptReview.model.setupHint))
             }
             return
         }

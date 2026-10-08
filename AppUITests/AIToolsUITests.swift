@@ -18,6 +18,7 @@ final class AIToolsUITests: XCTestCase {
         picker.click()
         let luna = app.menuItems["OpenAI GPT-6 Luna (cloud, cheapest)"]
         XCTAssertTrue(luna.waitForExistence(timeout: 10), "Luna is not offered")
+        XCTAssertTrue(app.menuItems["Claude Haiku (cloud, as cheap as Luna)"].exists, "Haiku is not offered")
         luna.click()
 
         // Cloud is off in a fresh app, so the choice says what it needs first.

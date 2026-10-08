@@ -164,6 +164,11 @@ extension EditorCommand {
         id: "view.toggleReview", title: "Show Review", category: .view,
         defaultShortcut: KeyShortcut(.character("0"), modifiers: [.command, .option])
     )
+    /// A toggle: whether frame issues (shot changes, gaps) are reviewed at all. Off by default:
+    /// they are many and mostly a matter of taste (Saeed, 2026-10-07).
+    public static let toggleFrameIssues = EditorCommand(
+        id: "review.toggleFrameIssues", title: "Show Frame Issues", category: .review
+    )
     /// A toggle: the review sidebar lists only the cues with frame issues (shot changes, gaps).
     public static let reviewFrames = EditorCommand(
         id: "review.reviewFrames", title: "Review Frame Issues", category: .review
@@ -429,7 +434,7 @@ extension EditorCommand {
         undo, redo,
         addCue, deleteCue, setIn, setOut, splitCue, mergeWithNext, togglePositionTop,
         previousCue, nextCue, deselectCue, previousShotChange, nextShotChange,
-        showAllCues, toggleIssuesPanel, reviewFrames, reviewGlossary, previousIssue, nextIssue, fixOverlaps, joinShortLines,
+        showAllCues, toggleIssuesPanel, toggleFrameIssues, reviewFrames, reviewGlossary, previousIssue, nextIssue, fixOverlaps, joinShortLines,
         zoomIn, zoomOut, toggleSnapping, toggleSpeechHighlight,
         togglePlay, shuttleBackward, pause, shuttleForward, stepBackward, stepForward, goToStart, goToEnd, nextAudioTrack,
         showTranslatePage, showEditPage, toggleMilliseconds, toggleReviewSidebar,

@@ -34,6 +34,8 @@ public struct Cue: Identifiable, Hashable, Sendable, Codable {
     /// A reading speed the user accepted for the cue (Ignore on its review card, when no fix
     /// could slow it down): it is not flagged while it reads no faster than this.
     public var acceptedReadingSpeed: Double?
+    /// Glossary terms (`Glossary.key`) the user kept this line without (Ignore on a glossary card).
+    public var acceptedGlossaryTerms: [String]?
 
     public init(
         id: UUID = UUID(), start: MediaTime, end: MediaTime, text: String, position: CuePosition = .bottom,

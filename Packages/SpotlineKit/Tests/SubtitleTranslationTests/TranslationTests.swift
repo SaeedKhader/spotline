@@ -50,6 +50,29 @@ struct GlossaryTests {
         #expect(!uses("كلمة مبطولة"))
         // A term agreed with its article is used without it too.
         #expect(uses("بحق سبعة آلهة", "By the Seven."))
+        // Endings: the accusative, "my/his/her…", the dual and plurals; ة becomes ت before an ending.
+        let squire = Glossary(entries: [.init(source: "squire", target: "مرافق")])
+        func usesSquire(_ target: String) -> Bool { squire.matches(source: "Be my squire.", target: target).allSatisfy(\.isUsed) }
+        #expect(usesSquire("لأكون مرافقًا لك يا سير") && usesSquire("كنتُ مرافقاً للسير آرلان"))
+        #expect(usesSquire("مرافقي") && usesSquire("بمرافقه") && usesSquire("مرافقان") && usesSquire("المرافقين"))
+        #expect(!usesSquire("رفيق الملك"))
+        #expect(uses("في بطولته الأولى") && uses("بطولتهم"))
+        // A name spelled another common way: ق or غ for "g", a long vowel more or less.
+        let landing = Glossary(entries: [.init(source: "King's Landing", target: "كينغز لاندينغ")])
+        func usesLanding(_ target: String) -> Bool { landing.matches(source: "To King's Landing.", target: target).allSatisfy(\.isUsed) }
+        #expect(usesLanding("إلى كينقز لايندينق") && usesLanding("في كينغز لاندنغ") && usesLanding("لكينقز لاندينق"))
+        #expect(!usesLanding("إلى العاصمة"))
+        // Short words are not heard alike: "سار" (walked) is not "سير".
+        let ser = Glossary(entries: [.init(source: "Ser", target: "سير")])
+        let walked = ser.matches(source: "Ser Arlan.", target: "سار آرلان").map(\.isUsed)
+        #expect(walked == [false])
+        #expect(MatchText.sameTranslation("لايندينق", "لاندينغ") && !MatchText.sameTranslation("دانك", "دنكن"))
+        #expect(uses("بطولتان"), "The dual")
+        // A term of several words: an adjective takes the article with its noun.
+        let hedge = Glossary(entries: [.init(source: "hedge knight", target: "فارس جوال")])
+        func usesHedge(_ target: String) -> Bool { hedge.matches(source: "A hedge knight.", target: target).allSatisfy(\.isUsed) }
+        #expect(usesHedge("الفارس الجوّال هو أصدق أنواع الفرسان") && usesHedge("كن فارسًا جوالًا") && usesHedge("للفارس الجوال"))
+        #expect(!usesHedge("الفارس النبيل الجوال"), "The words together, in order")
     }
 
     @Test func findsTermsInSourceOrderAndChecksTheTarget() {
@@ -100,6 +123,29 @@ struct GlossaryTests {
         #expect(copy.entries[1].target == "وينترفل")
         #expect(copy.entries[1].note == "Place")
     }
+
+    @Test func oneTermWhateverItsArticleOrApostrophe() {
+        #expect(Glossary.key("The Reach") == Glossary.key("Reach"))
+        #expect(Glossary.key("King’s Landing") == Glossary.key("King's Landing"))
+        let landing = Glossary(entries: [.init(source: "King's Landing", target: "كينغز لاندينغ")])
+        #expect(landing.matches(source: "To King’s Landing.", target: "").count == 1)
+        var glossary = Glossary(entries: [
+            .init(source: "the Reach", target: "الريتش", note: "Region"),
+            .init(source: "Reach", target: "الرِّيتش"),
+            .init(source: "King's Landing", target: "كينغز لاندينغ"),
+            .init(source: "King’s Landing", target: "كينقز لاندينق"),
+        ])
+        // The same translation (vowel marks and spelling of the name aside) is one entry.
+        glossary.mergeDuplicates()
+        #expect(glossary.entries.map(\.source) == ["the Reach", "King's Landing"])
+        #expect(glossary.disagreements.isEmpty)
+        var lists = Glossary(entries: [.init(source: "lists", target: "القائمة"), .init(source: "the lists", target: "حلبة المبارزة")])
+        lists.mergeDuplicates()
+        #expect(lists.disagreements[lists.entries[0].id] == "حلبة المبارزة", "Different words stay, marked")
+        // A new term replaces the one with its key.
+        glossary.merge([.init(source: "Reach", target: "ذا ريتش", show: "Dunk and Egg")])
+        #expect(glossary.entries[0].target == "ذا ريتش" && glossary.entries[0].show == "Dunk and Egg")
+    }
 }
 
 struct TranslationMemoryTests {
@@ -149,6 +195,26 @@ struct TranslationMemoryTests {
         #expect(store.memory(pair: pair).exactMatch(for: "hello")?.target == "مرحبا")
         #expect(store.glossary(pair: pair).entries.map(\.target) == ["سام"])
         #expect(store.memory(pair: "en-fr").entries.isEmpty)
+    }
+
+    @Test func eachShowHasItsOwnTermsBesideThoseForEveryShow() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = TranslationStore(directory: directory)
+        let show = "A Knight of the Seven Kingdoms"
+        try store.save(Glossary(entries: [
+            .init(source: "Seven", target: "الآلهة السبعة", show: show), .init(source: "Netflix", target: "نتفليكس"),
+        ]), pair: "en-ar", show: show)
+        #expect(FileManager.default.fileExists(atPath: directory.appending(path: "en-ar/shows/a-knight-of-the-seven-kingdoms.json").path))
+        let loaded = store.glossary(pair: "en-ar", show: show)
+        #expect(loaded.entries.map(\.source) == ["Seven", "Netflix"])
+        #expect(loaded.entries.map(\.show) == [show, nil])
+        // Another show gets only the terms for every show.
+        #expect(store.glossary(pair: "en-ar", show: "Rick and Morty").entries.map(\.source) == ["Netflix"])
+        #expect(store.glossary(pair: "en-ar").entries.map(\.source) == ["Netflix"])
+        // Saving the other show leaves this show's terms alone.
+        try store.save(Glossary(entries: [.init(source: "Netflix", target: "نتفليكس")]), pair: "en-ar", show: "Rick and Morty")
+        #expect(store.glossary(pair: "en-ar", show: show).entries.count == 2)
     }
 }
 

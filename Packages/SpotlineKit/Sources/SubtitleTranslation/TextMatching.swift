@@ -17,6 +17,8 @@ public enum MatchText {
             // Arabic letters that are commonly typed interchangeably.
             .replacing("ى", with: "ي")
             .replacing("ة", with: "ه")
+            // Curly and straight apostrophes: "King’s Landing" is "King's Landing".
+            .replacing(/[\u{2018}\u{2019}\u{02BC}\u{0060}\u{00B4}]/, with: "'")
         return folded.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
@@ -45,26 +47,94 @@ public enum MatchText {
         return prefixes
     }()
 
-    /// Whether `text` uses the translation `term`, as whole words. In Arabic the word may
-    /// take the article or a particle on its front, or leave the term's own article off:
-    /// "البطولة", "للبطولة" and "وبطولة" all use "بطولة". Both are normalized.
+    /// Whether `text` uses the translation `term`, as whole words. In Arabic each word may take
+    /// the article, the first a particle too, or leave the term's own article off, and take an
+    /// ending: "البطولة", "للبطولة" and "وبطولة" use "بطولة", and "الفارس الجوال" uses "فارس جوال"
+    /// (an adjective takes the article with its noun). A name may also be spelled another common
+    /// way (`arabicSkeleton`): "لايندينق" uses "لاندينغ". Both are normalized.
     public static func usesTranslation(_ text: String, of term: String) -> Bool {
         if contains(text, term: term) { return true }
-        guard term.unicodeScalars.contains(where: { (0x0600...0x06FF).contains($0.value) }) else { return false }
-        let bare = term.hasPrefix("ال") && term.count > 3 ? String(term.dropFirst(2)) : term
-        var searchRange = text.startIndex..<text.endIndex
-        while let range = text.range(of: bare, range: searchRange) {
-            let after = range.upperBound == text.endIndex ? nil : text[range.upperBound]
-            if !(after.map(isWordCharacter) ?? false) {
-                // The letters of the same word before it.
-                var start = range.lowerBound
-                while start > text.startIndex, isWordCharacter(text[text.index(before: start)]) { start = text.index(before: start) }
-                if arabicPrefixes.contains(String(text[start..<range.lowerBound])) { return true }
+        guard isArabic(term) else { return false }
+        let stems = term.split(separator: " ").map { word in
+            let word = String(word)
+            return word.hasPrefix("ال") && word.count > 3 ? String(word.dropFirst(2)) : word
+        }
+        let words = Self.words(text).map(String.init)
+        if usesWithAffixes(words, stems: stems, prefixes: arabicPrefixes, laterPrefixes: ["", "ال"], suffixes: arabicSuffixes, pronouns: arabicPronounSuffixes) {
+            return true
+        }
+        // Short words collide once their vowels go ("سير" and "سار" are both "سر"): only longer names are heard.
+        let skeletons = stems.map(arabicSkeleton)
+        guard skeletons.joined().count >= 3, !skeletons.contains(where: \.isEmpty) else { return false }
+        return usesWithAffixes(
+            words.map(arabicSkeleton), stems: skeletons, prefixes: Set(arabicPrefixes.map(arabicSkeleton)), laterPrefixes: ["", "ل"],
+            suffixes: Set(arabicSuffixes.map(arabicSkeleton)), pronouns: Set(arabicPronounSuffixes.map(arabicSkeleton))
+        )
+    }
+
+    /// The stems as consecutive words of `words`, each with only those letters before and after it:
+    /// the first word's prefixes, the article on later words, and an ending on any. A word ending in ة
+    /// (normalized to ه) writes it ت before a pronoun: بطولة, بطولته.
+    private static func usesWithAffixes(
+        _ words: [String], stems: [String], prefixes: Set<String>, laterPrefixes: Set<String>, suffixes: Set<String>, pronouns: Set<String>
+    ) -> Bool {
+        guard !stems.isEmpty, words.count >= stems.count else { return false }
+        func matches(_ word: String, _ stem: String, prefixes: Set<String>) -> Bool {
+            let forms = [(stem, suffixes)] + (stem.hasSuffix("ه") && stem.count > 2 ? [(String(stem.dropLast()) + "ت", pronouns)] : [])
+            for prefix in prefixes where word.hasPrefix(prefix) {
+                let rest = word.dropFirst(prefix.count)
+                for (form, endings) in forms where rest.hasPrefix(form) && endings.contains(String(rest.dropFirst(form.count))) {
+                    return true
+                }
             }
-            searchRange = text.index(after: range.lowerBound)..<text.endIndex
+            return false
+        }
+        for start in 0...(words.count - stems.count) {
+            let found = stems.indices.allSatisfy { index in
+                matches(words[start + index], stems[index], prefixes: index == 0 ? prefixes : laterPrefixes)
+            }
+            if found { return true }
         }
         return false
     }
+
+    static func isArabic(_ text: String) -> Bool {
+        text.unicodeScalars.contains { (0x0600...0x06FF).contains($0.value) }
+    }
+
+    /// Normalized Arabic as a name is heard, not spelled: without the long vowels and hamza
+    /// (ا و ي ى ء), and with the letters foreign sounds are written with in different ways
+    /// made one (غ, ق, گ and ڨ for "g"; ڤ for "v"; پ for "p"; چ for "ch"). Names transliterated
+    /// two ways then agree: "لايندينق" and "لاندينغ" are both "لندنق". Other letters stay.
+    public static func arabicSkeleton(_ normalized: String) -> String {
+        var result = ""
+        for character in normalized {
+            switch character {
+            case "ا", "و", "ي", "ى", "ء": continue
+            case "غ", "گ", "ڨ": result.append("ق")
+            case "ڤ": result.append("ف")
+            case "پ": result.append("ب")
+            case "چ": result.append("ج")
+            default: result.append(character)
+            }
+        }
+        return result.split(separator: " ").joined(separator: " ")
+    }
+
+    /// Whether two translations are the same word or name: the same once normalized, or for
+    /// Arabic, the same as heard (`arabicSkeleton`), so "كينغز لاندينغ" is "كينقز لاندينق".
+    public static func sameTranslation(_ a: String, _ b: String) -> Bool {
+        let a = normalize(a), b = normalize(b)
+        if a == b { return true }
+        guard isArabic(a), isArabic(b) else { return false }
+        let skeleton = arabicSkeleton(a)
+        return skeleton.count >= 3 && skeleton == arabicSkeleton(b)
+    }
+
+    /// What Arabic writes onto the end of a word, vowel marks removed: the accusative alif (مرافقًا),
+    /// "my", "his", "her", "your", "our", "their" (مرافقه, سيفها), the dual and the sound plurals.
+    static let arabicPronounSuffixes: Set<String> = ["ي", "ه", "ها", "هم", "هما", "هن", "ك", "كم", "كما", "كن", "نا"]
+    static let arabicSuffixes: Set<String> = arabicPronounSuffixes.union(["", "ا", "ان", "ين", "ون", "ات"])
 
     /// Where `term` occurs in `text` as whole words, in order. Both are normalized.
     static func ranges(of term: String, in text: String, limit: Int = .max) -> [Range<String.Index>] {

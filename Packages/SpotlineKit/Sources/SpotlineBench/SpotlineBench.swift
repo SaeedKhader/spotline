@@ -28,7 +28,7 @@ struct SpotlineBench {
           --source CODE          spoken language and reference source subtitles (default: en)
           --target CODE          translation language and reference (default: ar)
           --transcriber NAME     apple (default), whisper or scribe (keys from Settings › AI, else OPENAI_API_KEY, ELEVENLABS_API_KEY)
-          --translator NAME      apple (default), claude (Opus), claude-sonnet (key from Settings › AI, else ANTHROPIC_API_KEY)
+          --translator NAME      apple (default), claude (Opus), claude-sonnet, claude-haiku (key from Settings › AI, else ANTHROPIC_API_KEY)
                                  or luna (OpenAI GPT-6 Luna; else OPENAI_API_KEY)
           --effort LEVEL         reasoning effort for claude and luna: low, medium (default), high
           --preset ID            QC preset: netflix (default), netflixChildren, broadcast, basic
@@ -273,12 +273,10 @@ struct Benchmark {
     func makeTranslator() throws -> any CueTranslator {
         switch options.translator {
         case "apple": return AppleTranslator()
-        case "claude", "claude-sonnet":
+        case "claude", "claude-sonnet", "claude-haiku":
             guard let key = Self.apiKey(.anthropic, environment: "ANTHROPIC_API_KEY") else { throw AIError.missingAPIKey(provider: "Anthropic") }
-            return ClaudeTranslator(
-                apiKey: key, model: options.translator == "claude" ? ClaudeTranslator.defaultModel : ClaudeTranslator.sonnetModel,
-                effort: options.effort
-            )
+            let models = ["claude": ClaudeTranslator.defaultModel, "claude-sonnet": ClaudeTranslator.sonnetModel, "claude-haiku": ClaudeTranslator.haikuModel]
+            return ClaudeTranslator(apiKey: key, model: models[options.translator] ?? ClaudeTranslator.defaultModel, effort: options.effort)
         case "luna":
             guard let key = Self.apiKey(.openAI, environment: "OPENAI_API_KEY") else { throw AIError.missingAPIKey(provider: "OpenAI") }
             return OpenAITranslator(apiKey: key, effort: options.effort)
@@ -369,12 +367,14 @@ struct Benchmark {
         }
         // The whole episode goes along as context, as the editor sends it.
         let script = lines.map { TranslationRequest.ScriptLine(start: $0.start, voice: $0.voices?.joined(separator: " then "), text: $0.source) }
-        let request = TranslationRequest(
+        var request = TranslationRequest(
             lines: lines, sourceLanguage: options.source, targetLanguage: options.target,
             glossary: glossary.map { ($0.source, $0.target, $0.note) },
             maxCharactersPerLine: options.preset.maxCharactersPerLine, maxLines: options.preset.maxLines,
             work: sample.name, script: script
         )
+        // The bench translates the reference subtitles, whose words are right.
+        request.sourceIsSubtitles = true
 
         // Cached by position: the reference cues get new IDs every run.
         let effort = options.translator == "apple" ? "" : ".\(options.effort.rawValue)"

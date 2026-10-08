@@ -51,9 +51,10 @@ struct SceneDescriberTests {
 
             The frames follow, in time order.
             """)
-        #expect(content[1]["text"] as? String == "Frame 1, at 12:08:")
+        // Each frame says which line was being said when it was taken.
+        #expect(content[1]["text"] as? String == "Frame 1, at 12:08, while speaker_4 says “Do you?”:")
         #expect(content[2]["image_url"] as? String == "data:image/jpeg;base64," + Data([0xFF, 0xD8, 1]).base64EncodedString())
-        #expect(content[3]["text"] as? String == "Frame 2, at 12:12 (the scene's widest view):")
+        #expect(content[3]["text"] as? String == "Frame 2, at 12:12 (the scene's widest view), while someone says “Yes.”:")
         #expect(OpenAISceneDescriber.instructions.contains("Never name anyone from their face alone"))
     }
 
@@ -68,12 +69,32 @@ struct SceneDescriberTests {
         let note = try OpenAISceneDescriber.note(from: CloudProviderTests.openAIResponse(answer), request: request())
         #expect(note.start == Self.time(722))
         #expect(note.people == [
-            SceneNote.Person(description: "a tall young man in a grey tunic", name: "Dunk"),
-            SceneNote.Person(description: "an older man in black at a desk"),
+            SceneNote.Person(id: "P1", description: "a tall young man in a grey tunic", name: "Dunk"),
+            SceneNote.Person(id: "P2", description: "an older man in black at a desk"),
         ])
         #expect(note.onScreenText == ["ASHFORD"])
         #expect(note.line == "12:02 A candle-lit office. Dunk stands before a man at a desk; they talk alone. "
             + "In view: Dunk (a tall young man in a grey tunic); an older man in black at a desk. On screen: “ASHFORD”.")
+    }
+
+    @Test func peopleCarryTheirVoiceAndEachFrameSaysWhoIsInView() throws {
+        let answer = """
+            {"summary": "An office; a young man talks to a man at a desk.",
+             "people": [{"id": "A", "description": "a tall young man", "name": "", "voice": "speaker_1"},
+                        {"id": "B", "description": "an older man at a desk", "name": "", "voice": "speaker_9"}],
+             "on_screen_text": [],
+             "frames": [{"frame": 2, "in_view": ["A", "B", "Z"], "others": 3}, {"frame": 1, "in_view": ["B"], "others": 0},
+                        {"frame": 7, "in_view": ["A"], "others": 0}]}
+            """
+        let note = try OpenAISceneDescriber.note(from: CloudProviderTests.openAIResponse(answer), request: request())
+        // A voice no line of the scene has is dropped, and so are frames and ids that do not exist.
+        #expect(note.people.map(\.voice) == ["speaker_1", ""])
+        #expect(note.frames == [
+            SceneNote.InView(time: Self.time(728), people: ["B"]), SceneNote.InView(time: Self.time(732), people: ["A", "B"], others: 3),
+        ])
+        #expect(note.line == "12:02 An office; a young man talks to a man at a desk. "
+            + "In view: A: a tall young man, voice speaker_1; B: an older man at a desk. By frame: 12:08 B; 12:12 A, B and 3 others.")
+        #expect(OpenAISceneDescriber.instructions.contains("one frame is not enough"))
     }
 
     @Test func aNoteWithNobodyInViewIsJustItsSummary() {

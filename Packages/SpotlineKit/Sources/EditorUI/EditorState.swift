@@ -80,9 +80,13 @@ public final class EditorState {
             glossaryIndex = GlossaryIndex(glossary)
             updateGlossaryHits()
             updateIssues()
-            if !isLoadingTranslationResources, launchOptions.performanceReportURL == nil { try? translationStore?.save(glossary, pair: translationPair) }
+            if !isLoadingTranslationResources, launchOptions.performanceReportURL == nil {
+                try? translationStore?.save(glossary, pair: translationPair, show: glossaryShow)
+            }
         }
     }
+    /// The show the glossary's own terms belong to, from the media's file name; nil without one.
+    public internal(set) var glossaryShow: String?
     /// Translations already made for the language pair, suggested for similar lines.
     public internal(set) var memory = TranslationMemory() {
         didSet { memoryMatchCache = [:] }
@@ -203,6 +207,17 @@ public final class EditorState {
         didSet { if wantsReviewSidebar != oldValue { settings?.set(wantsReviewSidebar, forKey: Self.reviewSidebarKey) } }
     }
     static let reviewSidebarKey = "ReviewSidebarShown"
+    /// Whether frame issues (near a shot change, too short a gap) are reviewed: Review › Show Frame
+    /// Issues. Off by default; the QC still finds them, they just get no cards.
+    public internal(set) var showsFrameIssues: Bool {
+        didSet {
+            guard showsFrameIssues != oldValue else { return }
+            settings?.set(showsFrameIssues, forKey: Self.frameIssuesKey)
+            reviewDerived = ReviewDerived()
+            if !showsFrameIssues, reviewScope == .frames { reviewScope = .all }
+        }
+    }
+    static let frameIssuesKey = "ReviewShowsFrameIssues"
     /// Cards settled since the media was opened, for "Show settled".
     public internal(set) var settledReviews: [SettledReview] = []
     /// The card settled last, for the sidebar's Undo note; cleared once another edit follows.
@@ -332,6 +347,8 @@ public final class EditorState {
     @ObservationIgnored var cachedPlanFacts: (key: PlanFactsKey, facts: PlanFacts)?
     /// The frames picked for each scene (AI › Scene Frames…), nil until picked. Kept while the media is open.
     public internal(set) var sceneFrames: [SceneFramePicker.Scene]?
+    /// Scenes described before there is a brief (the Translate page describes them first): the brief reads them, then keeps them.
+    var pendingSceneNotes: String?
     /// How far reading the frames has got, nil when not reading.
     public internal(set) var sceneFramesJob: AnalysisJob?
     public internal(set) var isSceneFramesSheetShown = false
@@ -442,6 +459,7 @@ public final class EditorState {
         self.translationStore = translationStore
         self.qcPreset = settings?.string(forKey: Self.qcPresetKey).flatMap(QCPreset.named) ?? .standard
         self.wantsReviewSidebar = settings?.object(forKey: Self.reviewSidebarKey) as? Bool ?? true
+        self.showsFrameIssues = settings?.bool(forKey: Self.frameIssuesKey) ?? false
         self.aiSettings = AISettings.load(from: settings)
         self.aiProviders = launchOptions.isUITestMode ? .scripted(buildsBrief: launchOptions.buildsEpisodeBrief) : .live()
         self.undoManager = UndoManager()
@@ -590,8 +608,10 @@ public final class EditorState {
             issues.values.contains { $0.contains { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue } }
         case EditorCommand.reviewGlossary.id:
             issues.values.contains { $0.contains(where: \.kind.isGlossaryIssue) }
+        case EditorCommand.toggleFrameIssues.id:
+            true
         case EditorCommand.reviewFrames.id:
-            issues.values.contains { $0.contains(where: \.kind.isFrameIssue) }
+            showsFrameIssues && issues.values.contains { $0.contains(where: \.kind.isFrameIssue) }
         case EditorCommand.openSourceSubtitles.id:
             true
         case EditorCommand.addNamesToGlossary.id:
@@ -669,6 +689,7 @@ public final class EditorState {
         case EditorCommand.toggleMilliseconds.id: showsMilliseconds
         case EditorCommand.toggleReviewSidebar.id: isReviewSidebarVisible
         case EditorCommand.toggleIssuesPanel.id: isShowingReview(.issues)
+        case EditorCommand.toggleFrameIssues.id: showsFrameIssues
         case EditorCommand.reviewFrames.id: isShowingReview(.frames)
         case EditorCommand.reviewGlossary.id: isShowingReview(.glossary)
         case EditorCommand.reviewChanges.id: isShowingReview(.changes)
@@ -731,6 +752,8 @@ public final class EditorState {
             showsMilliseconds.toggle()
         case EditorCommand.toggleIssuesPanel.id:
             toggleReviewFilter(.issues)
+        case EditorCommand.toggleFrameIssues.id:
+            showsFrameIssues.toggle()
         case EditorCommand.reviewFrames.id:
             toggleReviewFilter(.frames)
         case EditorCommand.reviewGlossary.id:
@@ -762,7 +785,7 @@ public final class EditorState {
         case EditorCommand.addNamesToGlossary.id:
             let names = namesMissingFromGlossary
             guard !names.isEmpty else { return false }
-            glossary.merge(names.map { Glossary.Entry(source: $0.name, target: $0.translatedName ?? "", note: "Name") })
+            glossary.merge(names.map { Glossary.Entry(source: $0.name, target: $0.translatedName ?? "", note: "Name", show: glossaryShow) })
         case EditorCommand.showGlossary.id:
             showGlossaryPanel(self)
         case EditorCommand.importGlossary.id:
