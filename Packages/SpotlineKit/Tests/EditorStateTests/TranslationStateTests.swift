@@ -105,9 +105,13 @@ struct TranslationStateTests {
         #expect(glossaryIssues(editor, first).isEmpty)
         // Editing and removing terms re-checks the cues.
         var entry = editor.glossary.entries[0]
-        entry.target = "ونترفل"
+        entry.target = "فينترفيل"
         editor.updateGlossaryEntry(entry)
-        #expect(glossaryIssues(editor, first) == ["Glossary: “Winterfell” is “ونترفل”"])
+        #expect(glossaryIssues(editor, first) == ["Glossary: “Winterfell” is “فينترفيل”"])
+        // A name spelled another common way is the same name.
+        entry.target = "وينترفل"
+        editor.updateGlossaryEntry(entry)
+        #expect(glossaryIssues(editor, first).isEmpty)
         editor.removeGlossaryEntries([entry.id])
         #expect(glossaryIssues(editor, first).isEmpty)
     }
@@ -137,7 +141,7 @@ struct TranslationStateTests {
         editor.addGlossaryEntry(source: "Ser", target: "سير")
         editor.addGlossaryEntry(source: "Dunk", target: "دانك")
         let ids = editor.track.cues.map(\.id)
-        for (id, text) in zip(ids, ["ليتك لم تمت يا سيدي", "مع كامل احترامي يا سيدي", "أرجوك يا سيدي، دعني أدخل", "يا دنك، سيدي هنا"]) {
+        for (id, text) in zip(ids, ["ليتك لم تمت يا سيدي", "مع كامل احترامي يا سيدي", "أرجوك يا سيدي، دعني أدخل", "يا دانق، سيدي هنا"]) {
             editor.setText(text, forCue: id)
         }
         // Its own filter, apart from the other issues.
@@ -159,6 +163,65 @@ struct TranslationStateTests {
         // A spelling close to the agreed one is found by itself; "سيدي" there is "my lord", not the term.
         let last = try #require(editor.reviewItems.last)
         #expect(editor.glossaryReplacement(forCue: last.cueID)?.text == "يا دانك، سيدي هنا")
+    }
+
+    @Test func aGlossaryCardOffersReplaceAddAndIgnore() throws {
+        let gods = """
+            1
+            00:00:01,000 --> 00:00:02,000
+            The Seven gave you height.
+
+            2
+            00:00:03,000 --> 00:00:04,000
+            Pray to the Seven.
+
+            3
+            00:00:05,000 --> 00:00:06,000
+            I'll serve you at the tourney.
+
+            """
+        let editor = makeEditor()
+        editor.openSourceSubtitles(from: try write(gods, name: "Gods.en.srt"))
+        editor.addGlossaryEntry(source: "the Seven", target: "الآلهة السبعة")
+        let ids = editor.track.cues.map(\.id)
+        editor.setText("لقد وهبك السبعة في الأعالي طولًا", forCue: ids[0])
+        editor.setText("صلِّ للسبعة", forCue: ids[1])
+        // "السبعة" is one word of the agreed "الآلهة السبعة": it is what Replace swaps.
+        #expect(editor.glossaryOptions(forCue: ids[0]).map(\.title) == [
+            "Replace “السبعة” with “الآلهة السبعة”", "Add “السبعة” as a translation of “the Seven”", "Ignore “the Seven” in this line",
+        ])
+        #expect(editor.glossaryReplacement(forCue: ids[0])?.text == "لقد وهبك الآلهة السبعة في الأعالي طولًا")
+        let card = try #require(editor.reviewItems(in: .glossary).first { $0.cueID == ids[0] })
+        editor.decide(card, .primary)
+        #expect(editor.cue(withID: ids[0])?.text == "لقد وهبك الآلهة السبعة في الأعالي طولًا")
+        editor.perform(.undo)
+        // Ignore: this line keeps its wording and loses the card; the other line still has one.
+        editor.decide(card, .ignoreGlossaryTerms)
+        #expect(editor.cue(withID: ids[0])?.acceptedGlossaryTerms == ["seven"])
+        #expect(editor.reviewItems(in: .glossary).map(\.cueID) == [ids[1]])
+        editor.perform(.undo)
+        // Add: the word becomes another translation of the term, and every line using it is fine.
+        editor.decide(card, .addGlossaryWord)
+        #expect(editor.glossary.entries[0].alternatives == ["السبعة"])
+        #expect(editor.reviewItems(in: .glossary).isEmpty, "للسبعة uses it too")
+        // Saved and read back; glossaries saved before alternatives read as none.
+        let data = try JSONEncoder().encode(editor.glossary)
+        #expect(try JSONDecoder().decode(Glossary.self, from: data).entries[0].alternatives == ["السبعة"])
+        // With no word standing out, Add and Replace take one picked from the line.
+        editor.addGlossaryEntry(source: "tourney", target: "بطولة")
+        let tourney = editor.track.cues[2].id
+        editor.setText("سأخدمك خلال المبارزة", forCue: tourney)
+        #expect(editor.glossaryReplacement(forCue: tourney) == nil)
+        #expect(editor.glossaryWordChoices(forCue: tourney) == ["سأخدمك", "خلال", "المبارزة"])
+        let joust = try #require(editor.reviewItems(in: .glossary).first { $0.cueID == tourney })
+        editor.decide(joust, .replaceChosenGlossaryWord("المبارزة"))
+        #expect(editor.cue(withID: tourney)?.text == "سأخدمك خلال بطولة")
+        editor.perform(.undo)
+        editor.decide(joust, .addChosenGlossaryWord("المبارزة"))
+        #expect(editor.glossary.entries[1].alternatives == ["المبارزة"])
+        #expect(editor.reviewItems(in: .glossary).isEmpty)
+        let old = Data(#"{"entries": [{"id": "6F9619FF-8B86-D011-B42D-00C04FC964FF", "source": "Ser", "target": "سير", "note": ""}]}"#.utf8)
+        #expect(try JSONDecoder().decode(Glossary.self, from: old).entries[0].alternatives.isEmpty)
     }
 
     func glossaryIssues(_ editor: EditorState, _ id: Cue.ID) -> [String] {
@@ -257,6 +320,13 @@ struct TranslationStateTests {
         #expect(EditorState.workTitle(fromFileName: "Game.of.Thrones.S02E01.The.North.Remembers.2160p.TrueHD.Atmos.7.1.DV.HEVC.REMUX-FraMeSToR")
             == "Game of Thrones S02E01 The North Remembers")
         #expect(EditorState.workTitle(fromFileName: "[pseudo] Rick and Morty S01E01 Pilot [BDRip] [1080p] [h.265]") == "Rick and Morty S01E01 Pilot")
+    }
+
+    @Test func theGlossarysShowIsTheTitleWithoutTheEpisodeOrYear() {
+        #expect(EditorState.showName(fromWorkTitle: "A Knight of the Seven Kingdoms (2026) S01E01 The Hedge Knight") == "A Knight of the Seven Kingdoms")
+        #expect(EditorState.showName(fromWorkTitle: "Game of Thrones S02E01 The North Remembers") == "Game of Thrones")
+        #expect(EditorState.showName(fromWorkTitle: "Rick and Morty 1x02 Lawnmower Dog") == "Rick and Morty")
+        #expect(EditorState.showName(fromWorkTitle: "Dune (2021)") == "Dune")
     }
 
     @Test func namesTheTranslationSpelledGoToTheGlossary() throws {

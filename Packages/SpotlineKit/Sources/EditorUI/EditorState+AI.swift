@@ -35,7 +35,14 @@ public struct AIProviderFactory {
     }
 
     public static func live(keys: APIKeyStore = APIKeyStore()) -> AIProviderFactory {
-        AIProviderFactory(
+        /// The key of the helper step's provider, when the cloud is allowed.
+        func helperKey(_ model: AISettings.HelperModel, _ settings: AISettings) throws -> String {
+            guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
+            let provider = model.apiKeyProvider
+            guard let key = keys.key(for: provider) else { throw AIError.missingAPIKey(provider: provider == .anthropic ? "Anthropic" : "OpenAI") }
+            return key
+        }
+        return AIProviderFactory(
             transcriber: { settings in
                 switch settings.transcription {
                 case .appleSpeech:
@@ -54,7 +61,7 @@ public struct AIProviderFactory {
                 switch settings.translation {
                 case .appleTranslation:
                     return AppleTranslator()
-                case .claude, .claudeSonnet:
+                case .claude, .claudeSonnet, .claudeHaiku:
                     guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                     guard let key = keys.key(for: .anthropic) else { throw AIError.missingAPIKey(provider: "Anthropic") }
                     return ClaudeTranslator(
@@ -68,21 +75,25 @@ public struct AIProviderFactory {
                 }
             },
             briefBuilder: { settings in
-                // GPT-6 Luna builds it, whatever translates: it costs about 4 cents an episode.
-                guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
-                guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
-                return OpenAIBriefBuilder(apiKey: key, model: settings.brief.model.rawValue, effort: settings.brief.effort)
+                // GPT-6 Luna (or Claude Haiku) builds it, whatever translates: it costs about 4 cents an episode.
+                let (model, effort) = (settings.brief.model, settings.brief.effort)
+                let key = try helperKey(model, settings)
+                if model == .haiku { return ClaudeBriefBuilder(apiKey: key, model: model.rawValue, effort: effort) }
+                return OpenAIBriefBuilder(apiKey: key, model: model.rawValue, effort: effort)
             },
             scriptReviewer: { settings in
-                guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
-                guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
-                return OpenAIScriptReviewer(apiKey: key, model: settings.scriptReview.model.rawValue, effort: settings.scriptReview.effort)
+                let (model, effort) = (settings.scriptReview.model, settings.scriptReview.effort)
+                let key = try helperKey(model, settings)
+                if model == .haiku { return ClaudeScriptReviewer(apiKey: key, model: model.rawValue, effort: effort) }
+                return OpenAIScriptReviewer(apiKey: key, model: model.rawValue, effort: effort)
             },
             sceneDescriber: { settings in
                 guard settings.allowsCloud else { throw AIError.cloudNotAllowed }
                 guard settings.sendsVideoFrames else { throw AIError.videoFramesNotAllowed }
-                guard let key = keys.key(for: .openAI) else { throw AIError.missingAPIKey(provider: "OpenAI") }
-                return OpenAISceneDescriber(apiKey: key, model: settings.scenes.model.rawValue, effort: settings.scenes.effort)
+                let (model, effort) = (settings.scenes.model, settings.scenes.effort)
+                let key = try helperKey(model, settings)
+                if model == .haiku { return ClaudeSceneDescriber(apiKey: key, model: model.rawValue, effort: effort) }
+                return OpenAISceneDescriber(apiKey: key, model: model.rawValue, effort: effort)
             }
         )
     }
@@ -694,13 +705,16 @@ extension EditorState {
             .filter { term in
                 !term.translation.isEmpty && !glossaryEntries.contains { MatchText.normalize($0.source) == MatchText.normalize(term.term) }
             }
-        let request = TranslationRequest(
+        var request = TranslationRequest(
             lines: lines, precedingContext: context, sourceLanguage: source.languageCode, targetLanguage: track.languageCode,
             glossary: glossaryEntries.map { ($0.source, $0.target, $0.note) } + briefTerms.map { ($0.term, $0.translation, $0.note) },
             maxCharactersPerLine: qcPreset.maxCharactersPerLine, maxLines: qcPreset.maxLines, cast: track.cast,
-            work: workTitle, notes: translatorNotesWithBrief, script: script, style: aiSettings.translationStyle,
+            work: workTitle, notes: track.translatorNotes, script: script, style: aiSettings.translationStyle,
             leavesOutWalla: aiSettings.leavesOutWalla, leavesOutFictionalLanguages: aiSettings.leavesOutFictionalLanguages
         )
+        request.brief = confirmedBrief?.storyNotes
+        request.scenes = confirmedBrief?.timedScenes ?? []
+        request.sourceIsSubtitles = textIsFromSubtitles
         let fixUp = TranslationPipeline(preset: qcPreset)
         let joinsLines = aiSettings.joinsLinesAfterTranslating
         // A sentence over several cues goes as one line, and its translation is shared out again.

@@ -120,15 +120,34 @@ extension EditorState {
     }
 
     /// Loads the glossary and memory of the current language pair.
+    /// Loads the glossary and memory of the current language pair, and the show's glossary.
     func translationPairDidChange() {
         let pair = TranslationStore.pairKey(source: sourceTrack?.languageCode ?? "und", target: track.languageCode)
-        guard pair != translationPair else { return }
+        let show = workTitle.flatMap(Self.showName(fromWorkTitle:))
+        guard pair != translationPair || show != glossaryShow else { return }
+        let pairChanged = pair != translationPair
         translationPair = pair
-        guard let store = translationStore else { return }
+        glossaryShow = show
+        guard let store = translationStore else {
+            // Without a store (tests), terms already there stay; they belong to this show now.
+            return
+        }
         isLoadingTranslationResources = true
-        glossary = store.glossary(pair: pair)
-        memory = store.memory(pair: pair)
+        glossary = store.glossary(pair: pair, show: show)
+        if pairChanged { memory = store.memory(pair: pair) }
         isLoadingTranslationResources = false
+    }
+
+    /// The show of a work title: "A Knight of the Seven Kingdoms (2026) S01E01 The Hedge Knight" is
+    /// "A Knight of the Seven Kingdoms"; a film's title is its own show, without its year.
+    static func showName(fromWorkTitle title: String) -> String? {
+        var show = title
+        if let episode = show.firstMatch(of: /(?i)\b(s\d{1,2}\s?e\d{1,3}|\d{1,2}x\d{2,3}|season\s?\d+|episode\s?\d+|ep\.?\s?\d+)\b/) {
+            show = String(show[..<episode.range.lowerBound])
+        }
+        show = show.replacing(/\((19|20)\d\d\)/, with: "")
+        show = show.replacing(/\s+/, with: " ").trimmingCharacters(in: .whitespaces.union(["-", "–", ".", ":"]))
+        return show.isEmpty ? nil : show
     }
 
     // MARK: Glossary
@@ -172,7 +191,7 @@ extension EditorState {
     /// Adds an empty term (or one with text) and returns its ID.
     @discardableResult
     public func addGlossaryEntry(source: String = "", target: String = "", note: String = "") -> UUID {
-        let entry = Glossary.Entry(source: source, target: target, note: note)
+        let entry = Glossary.Entry(source: source, target: target, note: note, show: glossaryShow)
         glossary.entries.append(entry)
         return entry.id
     }
@@ -193,7 +212,12 @@ extension EditorState {
             guard !entries.isEmpty else {
                 throw SubtitleParseError(line: 1, reason: "No terms found. Each line needs a source term and its translation, separated by a comma or tab.")
             }
-            glossary.merge(entries)
+            // A file of terms is usually one show's.
+            glossary.merge(entries.map { entry in
+                var entry = entry
+                entry.show = glossaryShow
+                return entry
+            })
         } catch {
             reportError("“\(url.lastPathComponent)” could not be imported as a glossary.", error)
         }
@@ -202,9 +226,29 @@ extension EditorState {
     /// People whose translated name the glossary does not have yet.
     public var namesMissingFromGlossary: [CastMember] {
         track.cast.filter { person in
-            person.translatedName?.isEmpty == false
-                && !glossary.entries.contains { $0.source.caseInsensitiveCompare(person.name) == .orderedSame }
+            person.translatedName?.isEmpty == false && glossary.entry(for: person.name) == nil
         }
+    }
+
+    /// Moves a term between this show's glossary and the one for every show.
+    public func setGlossaryEntry(_ id: UUID, isForThisShow: Bool) {
+        guard let show = glossaryShow, let index = glossary.entries.firstIndex(where: { $0.id == id }) else { return }
+        glossary.entries[index].show = isForThisShow ? show : nil
+    }
+
+    /// Moves every term for all shows into this show's glossary: terms gathered from one show before glossaries were per show.
+    public func moveGeneralGlossaryToShow() {
+        guard let show = glossaryShow, glossary.entries.contains(where: { $0.show == nil }) else { return }
+        glossary.entries = glossary.entries.map { entry in
+            var entry = entry
+            if entry.show == nil { entry.show = show }
+            return entry
+        }
+    }
+
+    /// The glossary's translation of a brief's term, when the glossary has the term.
+    public func glossaryTranslation(of term: String) -> String? {
+        glossary.entry(for: term)?.target
     }
 
     // MARK: Notes for the translator
@@ -292,7 +336,8 @@ extension EditorState {
         if sourceHasText, let index = issues.firstIndex(where: { $0.kind == .empty }) {
             issues[index] = QCIssue(kind: .notTranslated, message: "Not translated")
         } else if !terms.isEmpty {
-            for match in glossaryMatches(for: cue, terms: terms) where !match.isUsed {
+            let accepted = Set(cue.acceptedGlossaryTerms ?? [])
+            for match in glossaryMatches(for: cue, terms: terms) where !match.isUsed && !accepted.contains(Glossary.key(match.entry.source)) {
                 issues.append(QCIssue(
                     kind: .glossaryTermNotUsed(source: match.entry.source, target: match.entry.target),
                     message: "Glossary: “\(match.entry.source)” is “\(match.entry.target)”"
@@ -306,49 +351,166 @@ extension EditorState {
 
 extension EditorState {
     /// For each glossary term the cue's translation does not use: the line with the word it
-    /// used instead swapped for the agreed one, likeliest first. The word is found two ways:
-    /// it is spelled much like the agreed translation ("دنك" for "دانك"), or it is in most of
-    /// the lines that miss this term and in few others ("سيدي" wherever the source says "ser").
-    /// No option when nothing points to a word; the line is then edited by hand.
+    /// used instead swapped for the agreed one, likeliest first (`glossaryCandidates`).
     func glossaryReplacements(for cue: Cue, issues: [QCIssue]) -> [ReviewSuggestion] {
         var result: [ReviewSuggestion] = []
         for issue in issues {
             guard case .glossaryTermNotUsed(_, let target) = issue.kind else { continue }
-            let agreed = MatchText.normalize(target)
-            // The other lines that miss this term, and how often each word is in them and in the whole translation.
-            let sets = wordSets()
-            let everywhere = track.cues.compactMap { sets[$0.id] }
-            let inMissing = track.cues.filter { other in self.issues[other.id]?.contains { $0.kind == issue.kind } == true }.compactMap { sets[$0.id] }
-            var scored: [(range: Range<String.Index>, word: String, score: Double)] = []
-            var seen = Set<String>()
-            for range in Self.wordRanges(in: cue.text) {
-                let word = String(cue.text[range])
-                let key = MatchText.normalize(word)
-                guard key.count > 1, key != agreed, seen.insert(key).inserted else { continue }
-                var score = 0.0
-                // A third of the letters at most: "سيدي" is not a spelling of "سير".
-                if TranscriptAligner.soundsAlike(key, agreed, share: 1.0 / 3) {
-                    score = 2
-                } else {
-                    let with = inMissing.count { $0.contains(key) }
-                    let total = everywhere.count { $0.contains(key) }
-                    if with >= 2, total > 0 { score = Double(with) / Double(total) }
-                }
-                if score >= 0.5 { scored.append((range, word, score)) }
-            }
-            // Every word spelled like the agreed one, and the one word that best goes with the term
-            // (the longer on a tie: "سيدي" rather than the "يا" before it).
-            let best = scored.filter { $0.score < 2 }.max { ($0.score, $0.word.count) < ($1.score, $1.word.count) }
-            let offered = scored.filter { $0.score == 2 } + [best].compactMap(\.self)
-            for candidate in offered.prefix(2) {
-                let text = cue.text.replacingCharacters(in: candidate.range, with: target)
+            for candidate in glossaryCandidates(for: cue, issue: issue) {
                 result.append(ReviewSuggestion(
-                    title: "Replace “\(candidate.word)” with “\(target)”", preview: text, action: .replaceTerm(text),
+                    title: "Replace “\(candidate.word)” with “\(target)”", preview: candidate.text, action: .replaceTerm(candidate.text),
                     fixes: "glossary term", clears: ["glossary term"]
                 ))
             }
         }
         return result
+    }
+
+    /// The words of the line that stand for a glossary term it misses, at most two, likeliest first,
+    /// each with the line as it reads with the agreed translation in its place. A word is found three
+    /// ways: it is one word of a translation of several ("السبعة" of "الآلهة السبعة"), it is spelled much
+    /// like the agreed translation ("دنك" for "دانك"), or it is in most of the lines that miss this term
+    /// and in few others ("سيدي" wherever the source says "ser"). None when nothing points to a word.
+    func glossaryCandidates(for cue: Cue, issue: QCIssue) -> [(word: String, text: String)] {
+        guard case .glossaryTermNotUsed(_, let target) = issue.kind else { return [] }
+        let agreed = MatchText.normalize(target)
+        let agreedWords = Set(agreed.split(separator: " ").map { Self.withoutArticle(String($0)) })
+        // The other lines that miss this term, and how often each word is in them and in the whole translation.
+        let sets = wordSets()
+        let everywhere = track.cues.compactMap { sets[$0.id] }
+        let inMissing = track.cues.filter { other in self.issues[other.id]?.contains { $0.kind == issue.kind } == true }.compactMap { sets[$0.id] }
+        var scored: [(range: Range<String.Index>, word: String, score: Double)] = []
+        var seen = Set<String>()
+        for range in Self.wordRanges(in: cue.text) {
+            let word = String(cue.text[range])
+            let key = MatchText.normalize(word)
+            guard key.count > 1, key != agreed, seen.insert(key).inserted else { continue }
+            var score = 0.0
+            if agreedWords.count > 1, agreedWords.contains(Self.withoutArticle(key)) {
+                score = 3
+            } else if TranscriptAligner.soundsAlike(key, agreed, share: 1.0 / 3) || MatchText.sameTranslation(key, agreed) {
+                // A third of the letters at most: "سيدي" is not a spelling of "سير".
+                score = 2
+            } else {
+                let with = inMissing.count { $0.contains(key) }
+                let total = everywhere.count { $0.contains(key) }
+                if with >= 2, total > 0 { score = Double(with) / Double(total) }
+            }
+            if score >= 0.5 { scored.append((range, word, score)) }
+        }
+        // Every word that is part of the translation or spelled like it, and the one word that best goes
+        // with the term (the longer on a tie: "سيدي" rather than the "يا" before it).
+        let best = scored.filter { $0.score < 2 }.max { ($0.score, $0.word.count) < ($1.score, $1.word.count) }
+        let offered = scored.filter { $0.score >= 2 }.sorted { $0.score > $1.score } + [best].compactMap(\.self)
+        return offered.prefix(2).map { candidate in
+            (candidate.word, cue.text.replacingCharacters(in: candidate.range, with: target))
+        }
+    }
+
+    /// An Arabic word without its article: "السبعة" is "سبعة" (normalized).
+    static func withoutArticle(_ word: String) -> String {
+        word.hasPrefix("ال") && word.count > 3 ? String(word.dropFirst(2)) : word
+    }
+
+    /// What a glossary card can do for each term the line misses: replace the word it used with the
+    /// agreed translation, add that word as another translation of the term, or keep the line without
+    /// the term. The card's buttons take the first Replace and Add (`glossaryAddition`) and every Ignore.
+    public func glossaryOptions(forCue id: Cue.ID) -> [GlossaryOption] {
+        guard let cue = cue(withID: id) else { return [] }
+        var options: [GlossaryOption] = []
+        for issue in issues[id] ?? [] {
+            guard case .glossaryTermNotUsed(let source, let target) = issue.kind else { continue }
+            let candidates = glossaryCandidates(for: cue, issue: issue)
+            for candidate in candidates {
+                options.append(GlossaryOption(title: "Replace “\(candidate.word)” with “\(target)”", action: .replace(candidate.text)))
+            }
+            for candidate in candidates {
+                options.append(GlossaryOption(
+                    title: "Add “\(candidate.word)” as a translation of “\(source)”", action: .allow(source: source, translation: candidate.word)
+                ))
+            }
+            options.append(GlossaryOption(title: "Ignore “\(source)” in this line", action: .ignore(source: source)))
+        }
+        return Array(options.prefix(9))
+    }
+
+    /// The card's Add: the first word the line used for a term it misses, as another translation of it.
+    public func glossaryAddition(forCue id: Cue.ID) -> GlossaryOption? {
+        glossaryOptions(forCue: id).first { if case .allow = $0.action { true } else { false } }
+    }
+
+    /// The words of a line a glossary card's Add and Replace menus offer: each once, in the line's order,
+    /// leaving out one- and two-letter words ("يا", "في").
+    public func glossaryWordChoices(forCue id: Cue.ID) -> [String] {
+        guard let cue = cue(withID: id) else { return [] }
+        var seen = Set<String>()
+        return Self.wordRanges(in: cue.text).map { String(cue.text[$0]) }.filter { word in
+            let key = MatchText.normalize(word)
+            return key.count > 2 && seen.insert(key).inserted
+        }
+    }
+
+    /// The first term the line misses (source, agreed translation), for Add and Replace on a picked word.
+    private func firstMissingTerm(forCue id: Cue.ID) -> (source: String, target: String)? {
+        for issue in issues[id] ?? [] {
+            if case .glossaryTermNotUsed(let source, let target) = issue.kind { return (source, target) }
+        }
+        return nil
+    }
+
+    /// Adds a word picked from the line as another translation of the first term it misses; its title, nil when nothing changed.
+    func addChosenGlossaryWord(_ word: String, forCue id: Cue.ID) -> String? {
+        guard let term = firstMissingTerm(forCue: id) else { return nil }
+        let option = GlossaryOption(title: "Add “\(word)” as a translation of “\(term.source)”", action: .allow(source: term.source, translation: word))
+        applyGlossaryOption(option, forCue: id)
+        return option.title
+    }
+
+    /// Puts the first missing term's agreed translation in place of a word picked from the line,
+    /// as one undoable edit; its title, nil when the word is not there.
+    func replaceChosenGlossaryWord(_ word: String, forCue id: Cue.ID) -> String? {
+        guard let term = firstMissingTerm(forCue: id), let cue = cue(withID: id),
+              let range = Self.wordRanges(in: cue.text).first(where: { String(cue.text[$0]) == word })
+        else { return nil }
+        let option = GlossaryOption(title: "Replace “\(word)” with “\(term.target)”", action: .replace(cue.text.replacingCharacters(in: range, with: term.target)))
+        applyGlossaryOption(option, forCue: id)
+        return option.title
+    }
+
+    /// The card's Ignore: every term the line misses is kept out of it, as one undoable edit. False when it misses none.
+    func ignoreGlossaryTerms(forCue id: Cue.ID) -> Bool {
+        let keys = glossaryOptions(forCue: id).compactMap { option -> String? in
+            if case .ignore(let source) = option.action { Glossary.key(source) } else { nil }
+        }
+        guard !keys.isEmpty, let index = track.cues.firstIndex(where: { $0.id == id }) else { return false }
+        edit("Ignore Glossary Term") { track in
+            var accepted = track.cues[index].acceptedGlossaryTerms ?? []
+            for key in keys where !accepted.contains(key) { accepted.append(key) }
+            track.cues[index].acceptedGlossaryTerms = accepted
+        }
+        return true
+    }
+
+    /// Carries out a glossary card's option. Replacing and ignoring are undoable edits of the line;
+    /// allowing changes the glossary, which every line then reads.
+    func applyGlossaryOption(_ option: GlossaryOption, forCue id: Cue.ID) {
+        guard let index = track.cues.firstIndex(where: { $0.id == id }) else { return }
+        switch option.action {
+        case .replace(let text):
+            edit(option.title) { track in track.cues[index].text = text }
+        case .allow(let source, let translation):
+            guard let entry = glossary.entries.firstIndex(where: { Glossary.key($0.source) == Glossary.key(source) }) else { return }
+            let word = SubtitleText.visibleLines(of: translation).joined(separator: " ").trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            guard !word.isEmpty, !glossary.entries[entry].alternatives.contains(word) else { return }
+            glossary.entries[entry].alternatives.append(word)
+        case .ignore(let source):
+            let key = Glossary.key(source)
+            edit("Ignore Glossary Term") { track in
+                var accepted = track.cues[index].acceptedGlossaryTerms ?? []
+                if !accepted.contains(key) { accepted.append(key) }
+                track.cues[index].acceptedGlossaryTerms = accepted
+            }
+        }
     }
 
     /// Each cue's words, normalized: worked out once for the cues as they are (`cueWordSets`).

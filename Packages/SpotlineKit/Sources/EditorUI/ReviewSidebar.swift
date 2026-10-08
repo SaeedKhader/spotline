@@ -129,6 +129,10 @@ struct ReviewSidebar: View {
             editor.editReviewItem(item)
         case "p":
             editor.playReviewItem(item)
+        case "a" where item.kind == .glossary:
+            editor.decide(item, .addGlossaryWord)
+        case "i" where item.kind == .glossary:
+            editor.decide(item, .ignoreGlossaryTerms)
         case let digit where digit.count == 1 && ("1"..."9").contains(digit):
             guard let index = Int(digit) else { return .ignored }
             switch item.kind {
@@ -748,7 +752,8 @@ private struct ReviewCard: View, Equatable {
 
     /// A glossary term the line does not use: the line as Replace would make it (the word it
     /// used struck out, the agreed one in), and Replace as the card's button. With no word to
-    /// replace, the line as it is and Edit.
+    /// replace, the line as it is and Edit. Ignore keeps the line; Add makes the word it used
+    /// another translation of the term.
     @ViewBuilder private var glossaryContent: some View {
         let issues = editor.cardIssues(item)
         VStack(alignment: .leading, spacing: 3) {
@@ -774,6 +779,7 @@ private struct ReviewCard: View, Equatable {
             .environment(\.layoutDirection, direction.layoutDirection)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        let addition = editor.glossaryAddition(forCue: item.cueID)
         buttons {
             CardButton(editor: editor, item: item, action: .play, title: "Play", key: "P") { editor.playReviewItem(item) }
                 .disabled(!editor.hasMedia || cue == nil)
@@ -781,13 +787,48 @@ private struct ReviewCard: View, Equatable {
                 editor.editReviewItem(item)
             }
             .disabled(cue == nil)
+            CardButton(editor: editor, item: item, action: .ignore, title: "Ignore", key: "I") {
+                editor.decide(item, .ignoreGlossaryTerms)
+            }
+            .help("Keep this line as it is (I)")
+            if let addition {
+                CardButton(editor: editor, item: item, action: .add, title: "Add", key: "A") {
+                    editor.decide(item, .addGlossaryWord)
+                }
+                .help("\(addition.title) (A)")
+            } else {
+                wordMenu("Add", action: .add, help: "Pick the word the line uses for the term, to add it as another translation") { word in
+                    editor.decide(item, .addChosenGlossaryWord(word))
+                }
+            }
             if let replacement {
                 CardButton(editor: editor, item: item, action: .confirm, title: "Replace", key: "Return", isPrimary: true) {
                     editor.decide(item, .primary)
                 }
                 .help("\(replacement.title) (Return)")
+            } else {
+                wordMenu("Replace", action: .confirm, help: "Pick the word the line uses for the term, to put the agreed translation in its place") { word in
+                    editor.decide(item, .replaceChosenGlossaryWord(word))
+                }
             }
         }
+    }
+
+    /// Add or Replace when no word stands out: a menu of the line's words to pick from.
+    private func wordMenu(
+        _ title: String, action: AccessibilityID.Review.Action, help: String, pick: @escaping (String) -> Void
+    ) -> some View {
+        let words = editor.glossaryWordChoices(forCue: item.cueID)
+        return Menu(title) {
+            ForEach(words, id: \.self) { word in
+                Button(word) { pick(word) }
+            }
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(words.isEmpty)
+        .help(help)
+        .accessibilityIdentifier(AccessibilityID.Review.action(item.id, action))
     }
 
     private func buttons<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

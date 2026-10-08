@@ -293,9 +293,9 @@ struct PlanStepRow: View {
         .accessibilityIdentifier(AccessibilityID.AIPlan.model(step.rawValue))
     }
 
-    private func helperPicker(_ model: Binding<AISettings.OpenAIModel>) -> some View {
+    private func helperPicker(_ model: Binding<AISettings.HelperModel>) -> some View {
         Picker("Model", selection: model) {
-            ForEach(AISettings.OpenAIModel.allCases) { Text($0.title).tag($0) }
+            ForEach(AISettings.HelperModel.allCases) { Text($0.title).tag($0) }
         }
     }
 

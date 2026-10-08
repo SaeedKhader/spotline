@@ -22,6 +22,9 @@ struct CloudProviderTests {
         #expect(body["model"] as? String == "claude-opus-5-5")
         #expect(ClaudeTranslator.body(for: request(), model: ClaudeTranslator.sonnetModel)["model"] as? String == "claude-sonnet-5-5")
         #expect(body["fallbacks"] as? String == "default")
+        let haiku = ClaudeTranslator.body(for: request(), model: ClaudeTranslator.haikuModel)
+        #expect(haiku["model"] as? String == "claude-haiku-5-5")
+        #expect(haiku["fallbacks"] == nil)
         let config = try #require(body["output_config"] as? [String: Any])
         let format = try #require(config["format"] as? [String: Any])
         #expect(format["type"] as? String == "json_schema")
@@ -29,7 +32,7 @@ struct CloudProviderTests {
         #expect((schema["required"] as? [String])?.sorted() == ["cast", "translations"])
         let user = try #require((body["messages"] as? [[String: Any]])?.first?["content"] as? String)
         #expect(user.contains("Winterfell → وينترفيل (place)"))
-        #expect(user.contains("L1 | 0.0s | speaker_1 | You are busy."))
+        #expect(user.contains("L1 | 0.0s | speaker_1 (Beth) | You are busy."))
         #expect(user.contains("L2 | 3.0s | ? | Winterfell is cold."))
         #expect(user.contains("- Beth (female, confirmed, voice speaker_1)"))
         #expect(user.contains("- Morty (male)"))
@@ -44,6 +47,39 @@ struct CloudProviderTests {
         let englishUser = ((english["messages"] as? [[String: Any]])?.first?["content"] as? String) ?? ""
         #expect(englishUser.contains("- Beth\n"), "Names without genders into English")
         #expect(try JSONSerialization.data(withJSONObject: body).count > 0)
+    }
+
+    @Test func theTranslatorKnowsASubtitleSourceTheBriefTheNamesAndTheBatchsScenes() throws {
+        let cast = [CastMember(name: "Beth", gender: .female, isConfirmed: true, voices: ["speaker_1"]), CastMember(name: "Morty", voices: ["speaker_2"])]
+        var request = request(cast: cast)
+        request.lines[1].voices = ["speaker_2"]
+        request.notes = "Egg is a boy."
+        let brief = EpisodeBrief(
+            plot: "Beth looks for Morty.", scenes: "0:00 Beth talks to Morty.\n0:03 Beth leaves.\n1:10 Morty alone.",
+            seen: "0:01 A kitchen. In view: Beth.", targetLanguage: "ar", isConfirmed: true
+        )
+        request.brief = brief.storyNotes
+        request.scenes = brief.timedScenes
+        func texts(_ request: TranslationRequest) throws -> (system: String, user: String) {
+            let body = ClaudeTranslator.body(for: request)
+            let system = try #require((body["system"] as? [[String: Any]])?.first?["text"] as? String)
+            let user = try #require((body["messages"] as? [[String: Any]])?.first?["content"] as? String)
+            return (system, user)
+        }
+        var (system, user) = try texts(request)
+        #expect(system.contains("Notes from the user about it:\nEgg is a boy."))
+        #expect(system.contains("The episode brief, written before translating and confirmed by the user:\nPlot: Beth looks for Morty."))
+        #expect(system.contains("sometimes misheard"), "A transcript may be misheard")
+        // Only the scenes under way during these lines (0 to 4 s), of the dialogue and of the video.
+        #expect(user.contains("The scenes these lines are in, from the brief:\n- 0:00 Beth talks to Morty.\n- Seen: 0:01 A kitchen. In view: Beth.\n- 0:03 Beth leaves.\n\n"))
+        #expect(!user.contains("Morty alone"))
+        // A confirmed owner is named; a guessed one carries a question mark.
+        #expect(user.contains("L1 | 0.0s | speaker_1 (Beth) | You are busy."))
+        #expect(user.contains("L2 | 3.0s | speaker_2 (Morty?) | Winterfell is cold."))
+        request.sourceIsSubtitles = true
+        (system, user) = try texts(request)
+        #expect(system.contains("The source is a subtitle file: its words and names are right."))
+        #expect(!system.contains("sometimes misheard"))
     }
 
     @Test func claudeGetsTheEpisodeTheStyleAndDoubtfulWords() throws {
@@ -267,6 +303,8 @@ struct CloudProviderTests {
     @Test func eachCloudTranslatorNeedsItsOwnKey() {
         #expect(AISettings.TranslationProvider.openAILuna.apiKeyProvider == .openAI)
         #expect(AISettings.TranslationProvider.claudeSonnet.apiKeyProvider == .anthropic)
+        #expect(AISettings.TranslationProvider.claudeHaiku.apiKeyProvider == .anthropic)
+        #expect(AISettings.TranslationProvider.claudeHaiku.claudeModel == "claude-haiku-5-5")
         #expect(AISettings.TranslationProvider.appleTranslation.apiKeyProvider == nil)
         #expect(AISettings.TranslationProvider.openAILuna.isCloud)
     }

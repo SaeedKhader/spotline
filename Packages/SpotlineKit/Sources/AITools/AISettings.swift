@@ -31,6 +31,8 @@ public struct AISettings: Sendable, Equatable {
         case claude
         /// The same with Claude Sonnet, at half the price.
         case claudeSonnet
+        /// The same with Claude Haiku, at GPT-6 Luna's price.
+        case claudeHaiku
         /// The same prompt and output with OpenAI's GPT-6 Luna, far cheaper still.
         case openAILuna
 
@@ -41,6 +43,7 @@ public struct AISettings: Sendable, Equatable {
             case .appleTranslation: "On this Mac (Apple Translation)"
             case .claude: "Claude Opus (cloud)"
             case .claudeSonnet: "Claude Sonnet (cloud, half the price)"
+            case .claudeHaiku: "Claude Haiku (cloud, as cheap as Luna)"
             case .openAILuna: "OpenAI GPT-6 Luna (cloud, cheapest)"
             }
         }
@@ -49,7 +52,7 @@ public struct AISettings: Sendable, Equatable {
         public var providerName: String {
             switch self {
             case .appleTranslation: "Apple Translation"
-            case .claude, .claudeSonnet: "Claude"
+            case .claude, .claudeSonnet, .claudeHaiku: "Claude"
             case .openAILuna: "OpenAI GPT-6 Luna"
             }
         }
@@ -58,7 +61,7 @@ public struct AISettings: Sendable, Equatable {
         public var apiKeyProvider: APIKeyStore.Provider? {
             switch self {
             case .appleTranslation: nil
-            case .claude, .claudeSonnet: .anthropic
+            case .claude, .claudeSonnet, .claudeHaiku: .anthropic
             case .openAILuna: .openAI
             }
         }
@@ -69,6 +72,7 @@ public struct AISettings: Sendable, Equatable {
             case .appleTranslation, .openAILuna: nil
             case .claude: ClaudeTranslator.defaultModel
             case .claudeSonnet: ClaudeTranslator.sonnetModel
+            case .claudeHaiku: ClaudeTranslator.haikuModel
             }
         }
     }
@@ -90,29 +94,48 @@ public struct AISettings: Sendable, Equatable {
         }
     }
 
-    /// The OpenAI model a helper step uses: the episode brief, the scene descriptions, the script review.
-    public enum OpenAIModel: String, Sendable, CaseIterable, Identifiable {
+    /// The model a helper step uses: the episode brief, the scene descriptions, the script review.
+    public enum HelperModel: String, Sendable, CaseIterable, Identifiable {
         case luna = "gpt-6-luna"
+        case haiku = "claude-haiku-5-5"
         case sol = "gpt-6.1-sol"
 
         public var id: String { rawValue }
         public var title: String {
             switch self {
             case .luna: "GPT-6 Luna (cheapest)"
+            case .haiku: "Claude Haiku (as cheap as Luna)"
             case .sol: "GPT-6.1 Sol (20× the price)"
             }
         }
 
+        /// "GPT-6 Luna", for messages.
+        public var name: String {
+            switch self {
+            case .luna: "GPT-6 Luna"
+            case .haiku: "Claude Haiku"
+            case .sol: "GPT-6.1 Sol"
+            }
+        }
+
+        /// What the step needs before it can run.
+        public var setupHint: String {
+            "It needs \(name): allow cloud AI and add \(self == .haiku ? "an Anthropic" : "an OpenAI") API key in Settings › AI."
+        }
+
+        /// Whose API key the step needs.
+        public var apiKeyProvider: APIKeyStore.Provider { self == .haiku ? .anthropic : .openAI }
+
         /// List price next to Luna's, for the plan's rough costs.
-        public var priceFactor: Double { self == .luna ? 1 : 20 }
+        public var priceFactor: Double { self == .sol ? 20 : 1 }
     }
 
     /// The model and effort of one helper step, chosen in the Translate with AI plan.
     public struct Step: Sendable, Equatable {
-        public var model: OpenAIModel
+        public var model: HelperModel
         public var effort: ReasoningEffort
 
-        public init(model: OpenAIModel = .luna, effort: ReasoningEffort = .medium) {
+        public init(model: HelperModel = .luna, effort: ReasoningEffort = .medium) {
             self.model = model
             self.effort = effort
         }
@@ -168,7 +191,7 @@ public struct AISettings: Sendable, Equatable {
     /// A step as "gpt-6-luna/medium" in the defaults.
     static func step(_ stored: String?, default fallback: Step) -> Step {
         let parts = stored?.split(separator: "/").map(String.init) ?? []
-        guard parts.count == 2, let model = OpenAIModel(rawValue: parts[0]), let effort = ReasoningEffort(rawValue: parts[1]) else { return fallback }
+        guard parts.count == 2, let model = HelperModel(rawValue: parts[0]), let effort = ReasoningEffort(rawValue: parts[1]) else { return fallback }
         return Step(model: model, effort: effort)
     }
 

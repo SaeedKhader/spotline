@@ -7,9 +7,9 @@ import SubtitleCore
 public enum AIFlowStep: String, CaseIterable, Identifiable, Sendable {
     /// Transcribing the audio, or matching a subtitle file's cues to it (speakers, timing).
     case listen
-    case brief
-    /// Describing each scene from a few frames of it, into the brief.
+    /// Describing each scene from a few frames of it, without names: the brief reads them next.
     case scenes
+    case brief
     case scriptReview
     case translate
     /// Joining short lines after translating.
@@ -177,17 +177,18 @@ extension EditorState {
         var transcripts: Int
         var media: URL?
         var settings: AISettings
+        var pendingScenes: Bool
     }
 
     var planFacts: PlanFacts {
-        let key = PlanFactsKey(track: track, source: sourceTrack, transcripts: storedTranscripts.count, media: status.mediaURL, settings: aiSettings)
+        let key = PlanFactsKey(track: track, source: sourceTrack, transcripts: storedTranscripts.count, media: status.mediaURL, settings: aiSettings, pendingScenes: pendingSceneNotes != nil)
         if let cached = cachedPlanFacts, cached.key == key { return cached.facts }
         let facts = PlanFacts(
             lines: sceneFrameLines.count, hasMedia: hasMedia, isTranslating: isTranslating,
             matches: !isTranslating && !cuesOfTheirOwn.isEmpty, textIsFromSubtitles: textIsFromSubtitles,
             listened: !storedTranscripts.isEmpty,
             translated: isTranslating && untranslatedCues.isEmpty && track.cues.contains { !$0.text.isEmpty },
-            hasBrief: track.brief != nil, isBriefConfirmed: track.brief?.isConfirmed == true, described: track.brief?.seen.isEmpty == false,
+            hasBrief: track.brief != nil, isBriefConfirmed: track.brief?.isConfirmed == true, described: track.brief?.seen.isEmpty == false || pendingSceneNotes != nil,
             settings: aiSettings
         )
         cachedPlanFacts = (key, facts)
@@ -215,19 +216,20 @@ extension EditorState {
                 isDone: facts.listened, isAvailable: hasMedia, cost: nil
             ),
             AIPlanRow(
+                step: .scenes, title: "Describe the scenes from the video",
+                detail: !hasMedia ? "Needs the video" : !hasLines ? needsLines
+                    : facts.described ? "Done: the brief says who is in view"
+                    : "Sends a few small frames of each scene; says who is in view, for the brief to read",
+                isDone: facts.described, isAvailable: hasMedia && hasLines,
+                cost: lines == 0 ? nil : cost(0.03 * Double(lines) / 500 * settings.scenes.model.priceFactor)
+            ),
+            AIPlanRow(
                 step: .brief, title: "Episode brief",
                 detail: !hasLines ? needsLines
                     : facts.isBriefConfirmed ? "Done and confirmed" : facts.hasBrief ? "Done, not confirmed yet"
+                    :  ticked.contains(.scenes) ? "Who is who, names, terms and scenes, from the lines, the scene descriptions and a web lookup"
                     : "Who is who, names and terms, from the lines and a web lookup",
                 isDone: facts.hasBrief, isAvailable: hasLines, cost: cost(0.04 * settings.brief.model.priceFactor)
-            ),
-            AIPlanRow(
-                step: .scenes, title: "Describe the scenes from the video",
-                detail: !hasMedia ? "Needs the video" : !hasLines ? needsLines : !hasBrief ? "Needs the episode brief"
-                    : facts.described ? "Done: the brief says who is in view"
-                    : "Sends a few small frames of each scene; says who is in view",
-                isDone: facts.described, isAvailable: hasMedia && hasLines && hasBrief,
-                cost: lines == 0 ? nil : cost(0.03 * Double(lines) / 500 * settings.scenes.model.priceFactor)
             ),
             AIPlanRow(
                 step: .scriptReview, title: "Review the script",
@@ -297,7 +299,7 @@ extension EditorState {
         case .appleTranslation: 0
         case .claude: 0.0049
         case .claudeSonnet: 0.0024
-        case .openAILuna: 0.00014
+        case .openAILuna, .claudeHaiku: 0.00014
         }
     }
 

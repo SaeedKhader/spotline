@@ -25,9 +25,12 @@ public struct SceneRequest: Sendable, Equatable {
         /// Who the brief says that is, when it does.
         public var name: String?
         public var text: String
+        /// When it ends; nil to take the next line's start.
+        public var end: MediaTime?
 
-        public init(start: MediaTime, voices: [String] = [], name: String? = nil, text: String) {
+        public init(start: MediaTime, end: MediaTime? = nil, voices: [String] = [], name: String? = nil, text: String) {
             self.start = start
+            self.end = end
             self.voices = voices
             self.name = name
             self.text = text
@@ -64,14 +67,35 @@ public struct SceneRequest: Sendable, Equatable {
 /// What the frames of one scene show.
 public struct SceneNote: Sendable, Equatable {
     public struct Person: Sendable, Equatable {
+        /// "A": how the frames refer to them.
+        public var id: String
         /// "a tall young man in a grey tunic".
         public var description: String
         /// Who that is, when the lines make it clear; else empty.
         public var name: String
+        /// The voice label they speak with ("speaker_1"), when the frames show it; else empty.
+        public var voice: String
 
-        public init(description: String, name: String = "") {
+        public init(id: String = "", description: String, name: String = "", voice: String = "") {
+            self.id = id
             self.description = description
             self.name = name
+            self.voice = voice
+        }
+    }
+
+    /// Who one frame shows.
+    public struct InView: Sendable, Equatable {
+        public var time: MediaTime
+        /// The people in view, by id.
+        public var people: [String]
+        /// How many others are in view (a crowd, roughly).
+        public var others: Int
+
+        public init(time: MediaTime, people: [String], others: Int = 0) {
+            self.time = time
+            self.people = people
+            self.others = others
         }
     }
 
@@ -80,28 +104,49 @@ public struct SceneNote: Sendable, Equatable {
     public var summary: String
     public var people: [Person]
     public var onScreenText: [String]
+    /// Who each frame shows, in time order: people come and go within a scene.
+    public var frames: [InView]
 
-    public init(start: MediaTime, summary: String, people: [Person] = [], onScreenText: [String] = []) {
+    public init(start: MediaTime, summary: String, people: [Person] = [], onScreenText: [String] = [], frames: [InView] = []) {
         self.start = start
         self.summary = summary
         self.people = people
         self.onScreenText = onScreenText
+        self.frames = frames
     }
 
     /// The note as one line of the brief: "12:02 Dunk stands before the steward's desk. In view: Dunk (a tall young man), …".
+    /// With who each frame shows, the people carry their ids: "In view: A: Dunk (a tall young man), voice speaker_1; …
+    /// By frame: 12:08 A, B; 12:12 A, B and 3 others."
     public var line: String {
-        let seconds = max(0, Int(start.seconds))
-        var text = String(format: "%d:%02d ", seconds / 60, seconds % 60) + summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = Self.clock(start) + " " + summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let byFrame = !frames.isEmpty
         let seen = people.compactMap { person -> String? in
             let description = person.description.trimmingCharacters(in: .whitespaces)
             let name = person.name.trimmingCharacters(in: .whitespaces)
-            if name.isEmpty { return description.isEmpty ? nil : description }
-            return description.isEmpty ? name : "\(name) (\(description))"
+            var said = name.isEmpty ? description : description.isEmpty ? name : "\(name) (\(description))"
+            guard !said.isEmpty else { return nil }
+            if !person.voice.isEmpty { said += ", voice \(person.voice)" }
+            return byFrame && !person.id.isEmpty ? "\(person.id): \(said)" : said
         }
         if !seen.isEmpty { text += " In view: " + seen.joined(separator: "; ") + "." }
+        if byFrame {
+            let shown = frames.map { frame -> String in
+                var who = frame.people.joined(separator: ", ")
+                if frame.others > 0 { who += (who.isEmpty ? "" : " and ") + (frame.others == 1 ? "1 other" : "\(frame.others) others") }
+                return Self.clock(frame.time) + " " + (who.isEmpty ? "nobody" : who)
+            }
+            text += " By frame: " + shown.joined(separator: "; ") + "."
+        }
         let written = onScreenText.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         if !written.isEmpty { text += " On screen: " + written.map { "“\($0)”" }.joined(separator: ", ") + "." }
         return text.replacing(/\s*\n\s*/, with: " ")
+    }
+
+    static func clock(_ time: MediaTime) -> String {
+        let seconds = max(0, Int(time.seconds))
+        return seconds >= 3600 ? String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+            : String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 
@@ -198,28 +243,39 @@ public struct OpenAISceneDescriber: SceneDescriber {
 
     static var outputSchema: [String: Any] {
         let string: [String: Any] = ["type": "string"]
-        let person = object(["description": string, "name": string])
+        let person = object(["id": string, "description": string, "name": string, "voice": string])
+        let frame = object(["frame": ["type": "integer"], "in_view": ["type": "array", "items": string], "others": ["type": "integer"]])
         return object([
             "summary": string, "people": ["type": "array", "items": person], "on_screen_text": ["type": "array", "items": string],
+            "frames": ["type": "array", "items": frame],
         ])
     }
 
     static let instructions = """
         You help the subtitle translators of a film or TV episode. You get a few frames from one scene, each with \
-        the time it was taken, and the scene's lines with their times and who says each. The translators cannot \
+        the time it was taken and the line being said then, and the scene's lines with their times and who says \
+        each (a voice label like "speaker_1" from automatic speaker detection, or a name). The translators cannot \
         see the picture: tell them what it shows that the lines do not say. Their language changes "you" and verbs \
         with the gender and number of the person spoken to, so who is there matters most.
 
         Report only what the frames show. When something cannot be told, say so instead of guessing.
 
         In "people", list each person in view once, across the frames:
+        - id: a capital letter, "A" for the first, "B" for the next, used in "frames".
         - description: what they look like in a few words, starting with man, woman, boy or girl when that is \
         clear ("a tall young man in a grey tunic", "a bald boy", "a figure in armour, face hidden").
+        - voice: the voice label this person speaks with, when the frames show it: they are the one in view, or \
+        plainly the one talking, in two or more frames taken while that voice speaks, or the lines name them. A frame \
+        taken while someone speaks often shows the listener instead, so one frame is not enough. Empty when unsure.
         - name: who it is, from the list of people, only when the lines make it clear: a frame taken while a line \
         is spoken often shows who says it, but it may show who listens instead, so use a name when the frames and \
         lines agree (the same person in view each time that voice speaks, or someone addressed by name). Never name \
         anyone from their face alone. Empty when unsure.
         A crowd or a group in the background is one entry ("about a dozen onlookers, men and women").
+
+        In "frames", go through every frame: its number (frame), the ids of the people in view in it (in_view), and \
+        how many others are in view that you did not list (others; a crowd roughly). People come and go within a \
+        scene, so this says who was there when each line was said.
 
         In "summary", say in one or two plain sentences where the scene is and who is with whom: how many people \
         take part in the talk, who faces or speaks to whom when the frames show it, and whether others are present \
@@ -251,7 +307,15 @@ public struct OpenAISceneDescriber: SceneDescriber {
         text += "\nThe frames follow, in time order."
         var content: [[String: Any]] = [["type": "input_text", "text": text]]
         for (index, frame) in request.frames.enumerated() {
-            let label = "Frame \(index + 1), at \(clock(frame.time))" + (frame.isWidest ? " (the scene's widest view):" : ":")
+            var label = "Frame \(index + 1), at \(clock(frame.time))" + (frame.isWidest ? " (the scene's widest view)" : "")
+            if let line = spoken(at: frame.time, in: request.lines) {
+                let voice = line.voices.isEmpty ? "someone" : line.voices.joined(separator: " then ")
+                let speaker = line.name.map { "\($0) (\(voice))" } ?? voice
+                let words = ClaudeTranslator.sourceLine(line.text)
+                label += ", while \(speaker) says “\(words.count > 80 ? words.prefix(79) + "…" : words)”:"
+            } else {
+                label += ", while nobody speaks:"
+            }
             content.append(["type": "input_text", "text": label])
             content.append(["type": "input_image", "image_url": "data:image/jpeg;base64," + frame.jpeg.base64EncodedString()])
         }
@@ -263,15 +327,35 @@ public struct OpenAISceneDescriber: SceneDescriber {
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
+    /// The line being said at `time`: one that has started and not ended (without an end, until the next starts, at most 5 s).
+    static func spoken(at time: MediaTime, in lines: [SceneRequest.Line]) -> SceneRequest.Line? {
+        let sorted = lines.sorted { $0.start < $1.start }
+        for (index, line) in sorted.enumerated().reversed() where line.start <= time {
+            let next = index + 1 < sorted.count ? sorted[index + 1].start.seconds : .infinity
+            let end = line.end?.seconds ?? min(next, line.start.seconds + 5)
+            return time.seconds < end ? line : nil
+        }
+        return nil
+    }
+
     struct Output: Decodable {
         struct Person: Decodable {
+            var id: String?
             var description: String?
             var name: String?
+            var voice: String?
+        }
+
+        struct Frame: Decodable {
+            var frame: Int?
+            var in_view: [String]?
+            var others: Int?
         }
 
         var summary: String?
         var people: [Person]?
         var on_screen_text: [String]?
+        var frames: [Frame]?
     }
 
     static func note(from data: Data, request: SceneRequest) throws -> SceneNote {
@@ -288,18 +372,32 @@ public struct OpenAISceneDescriber: SceneDescriber {
         return note(from: output, request: request)
     }
 
-    /// The answer as a note: a name the brief does not have is dropped, since it was made up or read off a face.
+    /// The answer as a note: a name the brief does not have is dropped, since it was made up or read off a face,
+    /// and so is a voice no line of the scene has. Frames are matched by number; ids that name nobody are dropped.
     static func note(from output: Output, request: SceneRequest) -> SceneNote {
-        let people = (output.people ?? []).compactMap { person -> SceneNote.Person? in
+        let voices = Set(request.lines.flatMap(\.voices))
+        var ids: Set<String> = []
+        let people = (output.people ?? []).enumerated().compactMap { index, person -> SceneNote.Person? in
             let description = (person.description ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let said = (person.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let name = request.people.first { $0.name.caseInsensitiveCompare(said) == .orderedSame }?.name ?? ""
             guard !description.isEmpty || !name.isEmpty else { return nil }
-            return SceneNote.Person(description: description, name: name)
+            let voice = (person.voice ?? "").trimmingCharacters(in: .whitespaces)
+            var id = (person.id ?? "").trimmingCharacters(in: .whitespaces)
+            if id.isEmpty || ids.contains(id) { id = "P\(index + 1)" }
+            ids.insert(id)
+            return SceneNote.Person(id: id, description: description, name: name, voice: voices.contains(voice) ? voice : "")
         }
+        let frames = (output.frames ?? []).compactMap { frame -> SceneNote.InView? in
+            guard let number = frame.frame, request.frames.indices.contains(number - 1) else { return nil }
+            var shown: [String] = []
+            for id in frame.in_view ?? [] where ids.contains(id) && !shown.contains(id) { shown.append(id) }
+            return SceneNote.InView(time: request.frames[number - 1].time, people: shown, others: max(frame.others ?? 0, 0))
+        }
+        .sorted { $0.time < $1.time }
         return SceneNote(
             start: request.start, summary: (output.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines), people: people,
-            onScreenText: (output.on_screen_text ?? []).filter { !$0.allSatisfy(\.isWhitespace) }
+            onScreenText: (output.on_screen_text ?? []).filter { !$0.allSatisfy(\.isWhitespace) }, frames: frames
         )
     }
 }

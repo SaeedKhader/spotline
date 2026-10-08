@@ -96,6 +96,8 @@ extension EditorState {
     func mediaDidOpen() {
         guard let url = status.mediaURL else { return }
         missingMediaName = nil
+        // Another show's media brings its own glossary.
+        defer { translationPairDidChange() }
         if let expected = projectMediaURL, expected.standardizedFileURL == url.standardizedFileURL {
             projectMediaURL = nil
             if let playhead = projectPlayhead, playhead > .zero {
