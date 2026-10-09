@@ -10,18 +10,21 @@ import SubtitleCore
 /// AI › Describe Scenes from Video. Luna only reports what it sees; it never words a line.
 extension EditorState {
     /// What the describer gets for each scene: its picked frames, its lines with who the brief says speaks them, and the brief's people.
-    func sceneRequests(for scenes: [SceneFramePicker.Scene], brief: EpisodeBrief) -> [SceneRequest] {
-        let named = brief.people.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// Before the brief, the people are those the project already knows (often nobody), so the scenes go undescribed by name.
+    func sceneRequests(for scenes: [SceneFramePicker.Scene], brief: EpisodeBrief?) -> [SceneRequest] {
+        let known = brief?.people.map { (name: $0.name, gender: $0.gender, voices: $0.voices) }
+            ?? track.cast.map { (name: $0.name, gender: $0.gender, voices: $0.voices) }
+        let named = known.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
         let people = named.map { SceneRequest.Person(name: $0.name, gender: $0.gender) }
         return scenes.filter { !$0.picks.isEmpty }.map { scene in
             let lines = sceneFrameCues(scene.lines).map { cue -> SceneRequest.Line in
                 let voices = cue.speaker.map { [$0] } ?? voices(for: cue) ?? []
                 let speaker = named.first { !Set($0.voices).isDisjoint(with: voices) }?.name
-                return SceneRequest.Line(start: cue.start, voices: voices, name: speaker, text: SubtitleText.visibleLines(of: cue.text).joined(separator: " "))
+                return SceneRequest.Line(start: cue.start, end: cue.end, voices: voices, name: speaker, text: SubtitleText.visibleLines(of: cue.text).joined(separator: " "))
             }
             return SceneRequest(
                 start: scene.start, frames: scene.picks.map { SceneRequest.Frame(time: $0.frame.time, jpeg: $0.frame.jpeg, isWidest: $0.isWidest) },
-                lines: lines, people: people, work: brief.work
+                lines: lines, people: people, work: brief?.work ?? workTitle
             )
         }
     }
@@ -43,12 +46,13 @@ extension EditorState {
         func skip(_ error: any Error) {
             if automatically { isBriefSheetShown = true } else { reportError("The scenes could not be described.", error) }
         }
-        guard let url = status.mediaURL, track.brief != nil, !sceneFrameLines.isEmpty else {
+        // The Translate page describes them before the brief; the commands, once there is one.
+        guard let url = status.mediaURL, track.brief != nil || aiFlow != nil, !sceneFrameLines.isEmpty else {
             return skip(AIError.nothingToDo("It needs the video, its lines and an episode brief."))
         }
         let describer: (any SceneDescriber)?
         do { describer = try aiProviders.sceneDescriber(aiSettings) } catch { return skip(error) }
-        guard let describer else { return skip(AIError.provider("It needs GPT-6 Luna: allow cloud AI and add an OpenAI API key in Settings › AI.")) }
+        guard let describer else { return skip(AIError.provider(aiSettings.scenes.model.setupHint)) }
 
         aiSummary = nil
         aiTask = AITaskStatus(title: "Scene Descriptions", provider: describer.name, stages: ["Picking frames", "Describing scenes"])
@@ -76,12 +80,12 @@ extension EditorState {
                 }
                 guard let self, !Task.isCancelled, self.aiTaskGeneration == generation else { return }
                 // Other media, or the brief undone, meanwhile: there is nothing to describe any more.
-                guard self.status.mediaURL == url, let brief = self.track.brief else {
+                guard self.status.mediaURL == url, self.track.brief != nil || self.aiFlow != nil else {
                     self.aiTask = nil
                     return
                 }
                 self.sceneFrames = scenes
-                let requests = self.sceneRequests(for: scenes, brief: brief)
+                let requests = self.sceneRequests(for: scenes, brief: self.track.brief)
                 self.aiTask?.stage = 1
                 self.aiTask?.fraction = 0
                 self.aiTask?.detail = "0 of \(requests.count) scenes"
@@ -95,7 +99,15 @@ extension EditorState {
                 guard !Task.isCancelled, self.aiTaskGeneration == generation else { return }
                 self.aiTask = nil
                 let seen = notes.sorted { $0.start < $1.start }.map(\.line).joined(separator: "\n")
-                self.edit("Describe Scenes") { track in track.brief?.seen = seen }
+                if self.track.brief != nil {
+                    self.edit("Describe Scenes") { track in
+                        track.brief?.seen = seen
+                        track.brief?.scenesIncludeVideo = false
+                    }
+                } else {
+                    // No brief yet: the brief, next, reads them.
+                    self.pendingSceneNotes = seen
+                }
                 // In the plan, the brief opens when it is next to be confirmed.
                 if self.aiFlow != nil { self.aiFlowFinished(.scenes) } else { self.isBriefSheetShown = true }
                 self.onAITaskEnd?(AITaskEnd(

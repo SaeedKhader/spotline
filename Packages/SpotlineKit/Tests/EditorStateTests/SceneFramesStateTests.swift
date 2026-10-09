@@ -205,9 +205,10 @@ struct SceneSheetStateTests {
         #expect(editor.isBriefSheetShown)
         #expect(editor.track.brief?.isConfirmed == false)
         // The translator gets it once the brief is confirmed.
-        #expect(editor.translatorNotesWithBrief == nil)
+        #expect(editor.confirmedBrief == nil)
         editor.confirmEpisodeBrief(try #require(editor.track.brief))
-        #expect(editor.translatorNotesWithBrief?.contains("What the video shows") == true)
+        #expect(editor.confirmedBrief?.storyNotes?.contains("What the video shows") == true)
+        #expect(editor.confirmedBrief?.timedScenes.first?.isFromVideo == true)
         // One undoable edit.
         editor.perform(.undo)
         editor.perform(.undo)

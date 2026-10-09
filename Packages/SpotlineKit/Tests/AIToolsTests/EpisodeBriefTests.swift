@@ -43,6 +43,24 @@ struct EpisodeBriefBuilderTests {
         #expect((untitled["instructions"] as? String)?.contains("search the web") == false)
     }
 
+    @Test func sceneDescriptionsGoAlongAndTheBriefWritesTheOnlySceneList() throws {
+        var request = request()
+        #expect(OpenAIBriefBuilder.instructions(for: request).contains("Below the transcript are descriptions") == false)
+        request.sceneDescriptions = "0:00 A man and a boy by a lame horse. In view: a tall young man, a bald boy."
+        let instructions = OpenAIBriefBuilder.instructions(for: request)
+        #expect(instructions.contains("Your \"scenes\" is the only scene list the subtitlers get"))
+        #expect(instructions.contains("Never name someone from the descriptions alone."))
+        let input = OpenAIBriefBuilder.input(for: request)
+        #expect(input.contains("What the video shows, scene by scene (time, from a few frames of each, without names):\n0:00 A man and a boy"))
+        // The translator then gets the brief's scenes alone.
+        var brief = EpisodeBrief(scenes: "0:00 Dunk and Egg by the lame horse.", seen: request.sceneDescriptions, targetLanguage: "ar")
+        brief.scenesIncludeVideo = true
+        #expect(brief.storyNotes?.contains("What the video shows") == false)
+        #expect(brief.timedScenes.map(\.text) == ["0:00 Dunk and Egg by the lame horse."])
+        let saved = try JSONDecoder().decode(EpisodeBrief.self, from: JSONEncoder().encode(brief))
+        #expect(saved.scenesIncludeVideo)
+    }
+
     @Test func aSubtitleFilesWordsAreSaidToBeRight() throws {
         var subtitled = request()
         subtitled.isFromSubtitles = true
@@ -63,7 +81,8 @@ struct EpisodeBriefBuilderTests {
               {"voices": ["speaker_7"], "name": "", "gender": "unknown", "translation": "", "confidence": 0.1, "note": ""}
             ],
             "terms": [
-              {"term": "Ashford Meadow", "heard_as": ["Ash for Meadow", "ashford meadow"], "translation": "مرج آشفورد", "note": "The tourney ground", "confidence": 0.8},
+              {"term": "Ashford Meadow", "heard_as": ["Ash for Meadow", "ashford meadow"], "translation": "مرج آشفورد", "note": "The tourney ground", "confidence": 0.8, "glossary": true},
+              {"term": "squire", "heard_as": [], "translation": "مرافق", "note": "Egg asks to be one", "confidence": 0.9, "glossary": false},
               {"term": " ", "heard_as": [], "translation": "", "note": "", "confidence": 0.5}
             ],
             "plot": " Dunk buries his knight and rides to Ashford. ",
@@ -83,9 +102,11 @@ struct EpisodeBriefBuilderTests {
         #expect(brief.people[0].translatedName == "دانك")
         #expect(brief.people[1].confidence == 1)
         #expect(brief.people[3].confidence == 0)
-        #expect(brief.terms.map(\.term) == ["Ashford Meadow"])
+        #expect(brief.terms.map(\.term) == ["Ashford Meadow", "squire"])
         #expect(brief.terms[0].heardAs == ["Ash for Meadow"])
-        #expect(brief.terms[0].addsToGlossary)
+        // Names go to the glossary; an everyday word in a special sense only to this episode's translator.
+        #expect(brief.terms.map(\.addsToGlossary) == [true, false])
+        #expect(OpenAIBriefBuilder.instructions(for: request()).contains("Set \"glossary\" to true for names"))
         #expect(brief.plot == "Dunk buries his knight and rides to Ashford.")
         #expect(brief.scenes == "0:00 Dunk talks to his dead knight.\n1:05 Egg asks Dunk to take him on.")
     }

@@ -123,6 +123,12 @@ public struct TranslationRequest: Sendable, Equatable {
     public var work: String?
     /// The user's notes for the translator: the show, the setting, who is who.
     public var notes: String?
+    /// The episode brief the user confirmed: the plot, the scenes and what the video shows.
+    public var brief: String?
+    /// The brief's scenes by time, so each batch also gets the scenes its lines are in.
+    public var scenes: [EpisodeBrief.TimedScene] = []
+    /// True when the source is a subtitle file, whose words are right; false for a transcript, which may be misheard.
+    public var sourceIsSubtitles = false
     /// The whole episode's source lines, for context: names, callbacks, what a reply answers.
     public var script: [ScriptLine]
     public var style: TranslationStyle

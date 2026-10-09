@@ -166,8 +166,9 @@ struct EpisodeBriefStateTests {
         let request = try #require(recorder.requests.first)
         #expect(request.glossary.map(\.source).contains("Citadel"))
         #expect(request.cast.first?.name == "Rick" && request.cast.first?.isConfirmed == true)
-        #expect(request.notes?.contains("Plot: Rick wakes Morty to go on an adventure.") == true)
-        #expect(request.notes?.contains("0:00 Rick greets Morty") == true)
+        #expect(request.brief?.contains("Plot: Rick wakes Morty to go on an adventure.") == true)
+        #expect(request.scenes.map(\.text) == ["0:00 Rick greets Morty, who says he is fine."])
+        #expect(request.notes == nil, "The brief is not the user's notes")
     }
 }
 

@@ -66,11 +66,13 @@ struct AIFlowStateTests {
 
     @Test func untickingAStepUnticksWhatNeedsIt() {
         let editor = makeEditor()
-        #expect(editor.availableAIPlanTicks([.listen, .scenes, .scriptReview, .translate, .join]) == [.listen, .translate, .join], "No brief: no scenes, no review")
+        #expect(editor.availableAIPlanTicks([.listen, .scenes, .scriptReview, .translate, .join]) == [.listen, .scenes, .translate, .join], "No brief: no review; the scenes come before it")
         #expect(editor.availableAIPlanTicks([.listen, .brief, .join]) == [.listen, .brief], "Joining goes with translating")
         #expect(editor.availableAIPlanTicks([.brief, .translate]).isEmpty, "Nothing to work on without listening")
         let rows = editor.aiPlanRows(ticked: [.listen])
-        #expect(rows.first { $0.step == .scenes }?.detail == "Needs the episode brief")
+        #expect(rows.first { $0.step == .scenes }?.isAvailable == true)
+        #expect(rows.first { $0.step == .scriptReview }?.detail == "Needs the episode brief")
+        #expect(rows.map(\.step) == [.listen, .scenes, .brief, .scriptReview, .translate, .join])
     }
 
     @Test func costsAreRoughAndFollowTheModel() {
@@ -172,9 +174,12 @@ struct AIFlowStateTests {
         editor.startAIFlow(ticked)
         #expect(editor.aiSettings.sendsVideoFrames, "Ticking the step allows frames")
         await settle(editor)
-        #expect(editor.aiFlow?.finished == [.listen, .brief, .scenes])
+        #expect(editor.aiFlow?.finished == [.listen, .scenes, .brief])
         #expect(editor.aiFlow?.stop == .confirmBrief)
-        #expect(editor.track.brief?.seen.contains("In view: Rick") == true)
+        // Described before the brief, so without names; the brief read them into its own scene list.
+        #expect(editor.track.brief?.seen.contains("In view: a man in a lab coat") == true)
+        #expect(editor.track.brief?.scenesIncludeVideo == true)
+        #expect(editor.pendingSceneNotes == nil)
         #expect(editor.isBriefSheetShown)
 
         editor.confirmEpisodeBrief(editor.track.brief!)

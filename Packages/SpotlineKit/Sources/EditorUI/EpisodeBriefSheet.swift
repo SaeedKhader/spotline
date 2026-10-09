@@ -123,7 +123,7 @@ struct EpisodeBriefSheet: View {
             ForEach(brief.terms) { term in
                 TermRow(
                     term: termBinding(term.id), translationLabel: targetName, isRightToLeft: targetIsRightToLeft,
-                    remove: { draft?.terms.removeAll { $0.id == term.id } }
+                    glossaryTranslation: editor.glossaryTranslation(of: term.term), remove: { draft?.terms.removeAll { $0.id == term.id } }
                 )
             }
             Button("Add Term") { draft?.terms.append(EpisodeBrief.Term(term: "", addsToGlossary: true)) }
@@ -166,12 +166,12 @@ struct EpisodeBriefSheet: View {
                 }
                 .controlSize(.small)
                 .disabled(!editor.canPerform(.describeScenes))
-                .help("Sends a few frames of each scene to GPT-6 Luna. A few cents an episode.")
+                .help("Sends a few frames of each scene to \(editor.aiSettings.scenes.model.name). A few cents an episode.")
                 .accessibilityIdentifier(AccessibilityID.command(EditorCommand.describeScenes.id))
             }
             Text(editor.aiSettings.sendsVideoFrames
                 ? "Who is in view in each scene, from a few frames of it. The translator uses this to tell how many people a line is spoken to, and who they are."
-                : "Send video frames is off (Settings › AI), so the scenes were not described from the video. Turning it on sends a few small frames of each scene to GPT-6 Luna, which says who is in view.")
+                : "Send video frames is off (Settings › AI), so the scenes were not described from the video. Turning it on sends a few small frames of each scene to \(editor.aiSettings.scenes.model.name), which says who is in view.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -297,9 +297,29 @@ private struct TermRow: View {
     @Binding var term: EpisodeBrief.Term
     let translationLabel: String
     let isRightToLeft: Bool
+    /// What the glossary has for the term, when it has it.
+    let glossaryTranslation: String?
     let remove: () -> Void
 
+    /// The glossary's translation when it differs from the brief's.
+    private var disagreement: String? {
+        guard let glossaryTranslation, !MatchText.sameTranslation(glossaryTranslation, term.translation) else { return nil }
+        return glossaryTranslation
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            row
+            if let disagreement {
+                Text("The glossary has “\(disagreement)”. Tick to replace it with this translation.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier(AccessibilityID.Brief.termGlossaryDisagrees(term.id))
+            }
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 8) {
             Toggle("Add to glossary", isOn: $term.addsToGlossary)
                 .toggleStyle(.checkbox)

@@ -34,6 +34,9 @@ public struct BriefRequest: Sendable, Equatable {
     /// True when the lines are a subtitle file's (their words are right) and only the
     /// voice labels come from a transcriber.
     public var isFromSubtitles = false
+    /// What the video shows, scene by scene, described from a few frames of each before the brief
+    /// ("12:02 A man stands before a desk. In view: …"), without names; empty when not described.
+    public var sceneDescriptions = ""
 
     public struct Spelling: Sendable, Equatable {
         public var source: String
@@ -148,7 +151,7 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
         ])
         let term = object([
             "term": string, "heard_as": ["type": "array", "items": string], "translation": string, "note": string,
-            "confidence": ["type": "number"],
+            "confidence": ["type": "number"], "glossary": ["type": "boolean"],
         ])
         let scene = object(["start_seconds": ["type": "number"], "summary": string])
         return object([
@@ -157,7 +160,8 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
         ])
     }
 
-    static func instructions(for request: BriefRequest) -> String {
+    /// `searches` false when the brief is written without a web search tool (Claude's searches go first, as notes).
+    static func instructions(for request: BriefRequest, searches: Bool = true) -> String {
         let source = Languages.name(request.sourceLanguage)
         let target = Languages.name(request.targetLanguage)
         let opening = request.isFromSubtitles
@@ -189,20 +193,25 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             may have misheard, with the show's spelling (term), how the transcript heard it when differently (heard_as), \
             its \(target) spelling (translation), a short note and your confidence. Leave out everyday words. \
             List each term once, without a leading "the" ("Seven Kingdoms", not also "the Seven Kingdoms"); a shorter \
-            name that means something else ("the Seven", the gods) is its own term.
+            name that means something else ("the Seven", the gods) is its own term. Set "glossary" to true for names \
+            (people, places, houses, ships, horses), titles and made-up words, which keep one translation across the \
+            whole show; set it to false for an everyday word with a special sense in this episode ("squire", "dragon", \
+            "apple tree", "lists" for the jousting field), which the translator should know about but which can mean \
+            something else in another line.
 
             In "plot", say what happens in the episode in 3 to 5 plain sentences, using the names.
 
             In "scenes", go scene by scene in time order: when it starts (start_seconds) and one line on who is \
             there, who talks to whom and about what, e.g. "Egg asks Dunk to take him on as his squire." A new scene \
             starts when the place or the people change. This tells the subtitlers who "you" is in each line.
+            \(sceneRule(request))
 
             Write the plot, the scenes and every note in English, whatever the languages of the transcript and \
             the subtitles: only "translation" is in \(target).
 
             Keep every spelling the project already agreed (listed below the transcript). Do not invent people or terms.
             """
-        if request.work != nil {
+        if searches, request.work != nil {
             text += """
 
 
@@ -211,6 +220,21 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
                 """
         }
         return text
+    }
+
+    /// With scene descriptions from the video: how to use them, and that "scenes" is the one list.
+    static func sceneRule(_ request: BriefRequest) -> String {
+        guard !request.sceneDescriptions.isEmpty else { return "" }
+        return """
+            Below the transcript are descriptions of what the video shows in each scene, from a few frames of it, \
+            written without knowing anyone's name. Use them for who is there, how many are listening, who is a man or a \
+            woman, and where the scene is, and name the people in them from the dialogue. Your "scenes" is the only \
+            scene list the subtitlers get: start a scene where a description starts one, and say in each line who is in \
+            view and who talks to whom ("Dunk and Egg at the inn's table; Dunk asks the innkeeper, a woman, for a room"). \
+            Never name someone from the descriptions alone. A person in a description may say which voice they speak \
+            with ("voice speaker_1"): use how they look (man, woman, boy, girl) for that voice's gender when the \
+            dialogue does not settle it. "By frame" says who was in view when, which tells how many were listening.
+            """
     }
 
     static func input(for request: BriefRequest) -> String {
@@ -222,6 +246,10 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             let voice = line.voices.isEmpty ? "?" : line.voices.joined(separator: " then ")
             text += String(format: "[%d:%02d] ", seconds / 60, seconds % 60)
                 + "\(voice): \(ClaudeTranslator.sourceLine(marking: line.unsureWords, in: line.text))\n"
+        }
+        if !request.sceneDescriptions.isEmpty {
+            text += "\nWhat the video shows, scene by scene (time, from a few frames of each, without names):\n"
+            text += request.sceneDescriptions.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
         }
         if !request.cast.isEmpty {
             text += "\nPeople the project already knows:\n"
@@ -256,6 +284,7 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             var translation: String?
             var note: String?
             var confidence: Double?
+            var glossary: Bool?
         }
 
         struct Scene: Decodable {
@@ -307,7 +336,7 @@ public struct OpenAIBriefBuilder: EpisodeBriefBuilder {
             return EpisodeBrief.Term(
                 term: text, heardAs: (term.heard_as ?? []).filter { $0.caseInsensitiveCompare(text) != .orderedSame },
                 translation: (term.translation ?? "").trimmingCharacters(in: .whitespaces), note: term.note ?? "",
-                confidence: clamp(term.confidence)
+                confidence: clamp(term.confidence), addsToGlossary: term.glossary ?? true
             )
         }
         let scenes = (output.scenes ?? []).compactMap { scene -> String? in

@@ -118,11 +118,17 @@ public enum AccessibilityID {
         public static let removeEntries = "glossary.remove"
         /// The notes for the AI translator under the terms.
         public static let translatorNotes = "glossary.translatorNotes"
+        /// Moves the terms for every show into this show's glossary.
+        public static let moveToShow = "glossary.moveToShow"
+        /// One term's "This show" tick.
+        public static func isForShow(_ entryID: UUID) -> String { "glossary.entry.\(entryID.uuidString).show" }
+        /// The mark on a term another entry translates differently.
+        public static func disagrees(_ entryID: UUID) -> String { "glossary.entry.\(entryID.uuidString).disagrees" }
         /// One term's field: `glossary.entry.<id>.source`, `.target` or `.note`.
         public static func field(_ entryID: UUID, _ field: Field) -> String { "glossary.entry.\(entryID.uuidString).\(field.rawValue)" }
 
         public enum Field: String, CaseIterable, Sendable {
-            case source, target, note
+            case source, target, note, alternatives
         }
     }
 
@@ -165,7 +171,7 @@ public enum AccessibilityID {
         public static func settled(_ itemID: String) -> String { "review.settled.\(itemID)" }
 
         public enum Action: String, CaseIterable, Sendable {
-            case accept, reject, confirm, keep, edit, play, done, ignore
+            case accept, reject, confirm, keep, edit, play, done, ignore, add
         }
     }
 
@@ -229,6 +235,7 @@ public enum AccessibilityID {
         public static func termNote(_ id: UUID) -> String { "\(term(id)).note" }
         /// The term's Add to glossary checkbox.
         public static func termGlossary(_ id: UUID) -> String { "\(term(id)).glossary" }
+        public static func termGlossaryDisagrees(_ id: UUID) -> String { "\(term(id)).glossaryDisagrees" }
         public static func removeTerm(_ id: UUID) -> String { "\(term(id)).remove" }
         public static let addTerm = "brief.addTerm"
         /// The plot, as editable text.

@@ -458,9 +458,10 @@ extension BatchedCueTranslator {
 /// It also names the people it recognizes, which builds the cast.
 public struct ClaudeTranslator: BatchedCueTranslator {
     public var name: String { model == Self.defaultModel ? "Claude (cloud)" : "Claude \(model) (cloud)" }
-    /// Opus by default; Sonnet, at half the price, is a setting.
+    /// Opus by default; Sonnet, at half the price, and Haiku, at GPT-6 Luna's price, are settings.
     public static let defaultModel = "claude-opus-5-5"
     public static let sonnetModel = "claude-sonnet-5-5"
+    public static let haikuModel = "claude-haiku-5-5"
     let model: String
     let effort: AISettings.ReasoningEffort
     let apiKey: String
@@ -523,14 +524,16 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         var system: [[String: Any]] = [["type": "text", "text": systemPrompt(for: request)]]
         if let script = scriptText(for: request) { system.append(["type": "text", "text": script]) }
         system[system.count - 1]["cache_control"] = ["type": "ephemeral"]
-        return [
+        var body: [String: Any] = [
             "model": model,
             "max_tokens": 32000,
-            "fallbacks": "default",
             "output_config": ["effort": effort.rawValue, "format": ["type": "json_schema", "schema": outputSchema(for: request)]],
             "system": system,
             "messages": [["role": "user", "content": userPrompt(for: request)]],
         ]
+        // Haiku has no model to fall back to: a declined batch is split and asked again instead.
+        if model != haikuModel { body["fallbacks"] = "default" }
+        return body
     }
 
     /// The JSON schema of the answer: the translations with their flags and
@@ -564,6 +567,9 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         if let notes = request.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty {
             prompt += "\n\nNotes from the user about it:\n\(notes)"
         }
+        if let brief = request.brief?.trimmingCharacters(in: .whitespacesAndNewlines), !brief.isEmpty {
+            prompt += "\n\nThe episode brief, written before translating and confirmed by the user:\n\(brief)"
+        }
         prompt += """
 
 
@@ -580,14 +586,7 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             or different ("Stop raping" is never "stop joking"). \(registerRule(request.style.register))
             - Names: spell each person's and place's name the same way in every line, as the known people and the glossary \
             give it. Transliterate names; never translate them (a horse called Thunder keeps its name).
-            - The source is an automatic transcript and is sometimes misheard. Words in [brackets?] are ones the transcriber \
-            was unsure of. When a line is ungrammatical or garbled, or does not fit the scene (a reply that answers nothing, \
-            a name nobody has), do not smooth it over: flag it with the reason "source", and give one variant for what you \
-            think was said, with "source" set to that line in \(Languages.name(request.sourceLanguage)), and one for the line \
-            as heard, with "source" set to the line as heard. Recommend the likelier one first, and say in "note" what you \
-            think was said. A misheard name the script or the known people make clear ("Aryan" for Aerion, "Dawn" for \
-            Dorne) is not a doubt: translate the right name and do not flag the line. Flag "source" only when you cannot \
-            tell which reading is meant.
+            \(sourceRule(request))
             - For a flagged line, "confidence" (0 to 1) is how sure you are of the recommendation, and "note" says why in \
             a few words. Leave "reasons", "note" and "variants" empty for lines that read one way only.
             - In "cast", list the people you can identify in these lines and the context: their name as the dialogue uses \
@@ -659,6 +658,26 @@ public struct ClaudeTranslator: BatchedCueTranslator {
         return prompt
     }
 
+    /// How far to trust the source: a subtitle file's words are right; a transcript is sometimes misheard.
+    static func sourceRule(_ request: TranslationRequest) -> String {
+        if request.sourceIsSubtitles {
+            return """
+                - The source is a subtitle file: its words and names are right. Translate them as written, and never flag \
+                a line with the reason "source".
+                """
+        }
+        return """
+                - The source is an automatic transcript and is sometimes misheard. Words in [brackets?] are ones the transcriber \
+                was unsure of. When a line is ungrammatical or garbled, or does not fit the scene (a reply that answers nothing, \
+                a name nobody has), do not smooth it over: flag it with the reason "source", and give one variant for what you \
+                think was said, with "source" set to that line in \(Languages.name(request.sourceLanguage)), and one for the line \
+                as heard, with "source" set to the line as heard. Recommend the likelier one first, and say in "note" what you \
+                think was said. A misheard name the script or the known people make clear ("Aryan" for Aerion, "Dawn" for \
+                Dorne) is not a doubt: translate the right name and do not flag the line. Flag "source" only when you cannot \
+                tell which reading is meant.
+                """
+    }
+
     static func registerRule(_ register: TranslationStyle.Register) -> String {
         switch register {
         case .faithful:
@@ -713,9 +732,15 @@ public struct ClaudeTranslator: BatchedCueTranslator {
             for line in request.precedingContext { text += "- \(sourceLine(line.source)) → \(sourceLine(line.target))\n" }
             text += "\n"
         }
+        let scenes = scenes(around: request)
+        if !scenes.isEmpty {
+            text += "The scenes these lines are in, from the brief:\n"
+            for scene in scenes { text += "- \(scene.isFromVideo ? "Seen: " : "")\(scene.text)\n" }
+            text += "\n"
+        }
         text += "Lines to translate (id | time | voice | text):\n"
         for (index, line) in request.lines.enumerated() {
-            var voice = line.voices.map { $0.joined(separator: " then ") } ?? "?"
+            var voice = line.voices.map { $0.map { named($0, in: request.cast) }.joined(separator: " then ") } ?? "?"
             if let name = line.speakerName { voice += " (\(name))" }
             if request.leavesOutWalla, let quieter = line.quieterBy, quieter >= Self.wallaHintDecibels {
                 voice += ", \(Int(quieter)) dB under the dialogue"
@@ -727,6 +752,26 @@ public struct ClaudeTranslator: BatchedCueTranslator {
     }
 
     static func lineID(_ index: Int) -> String { "L\(index + 1)" }
+
+    /// A voice label with the name of the person it belongs to: "speaker_1 (Dunk)" when
+    /// the user confirmed it, "speaker_1 (Dunk?)" when the cast only guesses.
+    static func named(_ voice: String, in cast: [CastMember]) -> String {
+        let owners = cast.filter { $0.voices.contains(voice) && !$0.name.isEmpty }
+        guard let person = owners.first(where: \.isConfirmed) ?? (owners.count == 1 ? owners.first : nil) else { return voice }
+        return "\(voice) (\(person.name)\(person.isConfirmed ? "" : "?"))"
+    }
+
+    /// The brief's scenes the lines fall in: of the dialogue's and of the video's, the
+    /// one under way at the first line and those starting before the last line ends.
+    static func scenes(around request: TranslationRequest) -> [EpisodeBrief.TimedScene] {
+        guard let first = request.lines.map(\.start).min(), let last = request.lines.map(\.end).max() else { return [] }
+        return [false, true].flatMap { fromVideo in
+            let list = request.scenes.filter { $0.isFromVideo == fromVideo }
+            let current = list.last { $0.start <= first }
+            return list.filter { $0 == current || ($0.start > first && $0.start < last) }
+        }
+        .sorted { $0.start < $1.start }
+    }
 
     /// Lines this far (dB) under the dialogue around them are marked for the translator as background voices.
     static let wallaHintDecibels: Float = 10

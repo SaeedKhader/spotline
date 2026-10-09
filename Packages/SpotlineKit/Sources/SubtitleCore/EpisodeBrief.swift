@@ -72,6 +72,9 @@ public struct EpisodeBrief: Hashable, Sendable, Codable {
     /// What the video shows, scene by scene: one line each, "12:40 Dunk stands before the steward's desk. In view: …".
     /// Written from a few frames of each scene (`SceneDescriber`), when sending frames is allowed; else empty.
     public var seen: String
+    /// True when the scenes were described before the brief, which wrote them into `scenes`:
+    /// then `seen` is what it read, and the translator gets `scenes` alone.
+    public var scenesIncludeVideo = false
     /// The language the brief spells names in (BCP 47), the translation's target.
     public var targetLanguage: String
     /// What the brief is about, from the file name: "A Knight of the Seven Kingdoms S01E01".
@@ -94,7 +97,7 @@ public struct EpisodeBrief: Hashable, Sendable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case people, terms, plot, scenes, seen, targetLanguage, work, isConfirmed
+        case people, terms, plot, scenes, seen, scenesIncludeVideo, targetLanguage, work, isConfirmed
     }
 
     /// Briefs saved before the plot and scenes, or before what the video shows, have none.
@@ -105,6 +108,7 @@ public struct EpisodeBrief: Hashable, Sendable, Codable {
         plot = try container.decodeIfPresent(String.self, forKey: .plot) ?? ""
         scenes = try container.decodeIfPresent(String.self, forKey: .scenes) ?? ""
         seen = try container.decodeIfPresent(String.self, forKey: .seen) ?? ""
+        scenesIncludeVideo = try container.decodeIfPresent(Bool.self, forKey: .scenesIncludeVideo) ?? false
         targetLanguage = try container.decode(String.self, forKey: .targetLanguage)
         work = try container.decodeIfPresent(String.self, forKey: .work)
         isConfirmed = try container.decode(Bool.self, forKey: .isConfirmed)
@@ -116,10 +120,43 @@ public struct EpisodeBrief: Hashable, Sendable, Codable {
         let plot = plot.trimmingCharacters(in: .whitespacesAndNewlines)
         let scenes = scenes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !plot.isEmpty { parts.append("Plot: \(plot)") }
-        if !scenes.isEmpty { parts.append("Scenes (time, who talks to whom):\n\(scenes)") }
-        let seen = seen.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !scenes.isEmpty {
+            parts.append(scenesIncludeVideo ? "Scenes (time, who is there and who talks to whom, from the lines and the video):\n\(scenes)"
+                : "Scenes (time, who talks to whom):\n\(scenes)")
+        }
+        let seen = scenesIncludeVideo ? "" : seen.trimmingCharacters(in: .whitespacesAndNewlines)
         if !seen.isEmpty { parts.append("What the video shows (time, who is there, from a few frames of each scene):\n\(seen)") }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
+    /// One scene line of `scenes` or `seen`, by its start: "12:40 Dunk asks Egg…".
+    public struct TimedScene: Hashable, Sendable {
+        public var start: MediaTime
+        public var text: String
+        /// From the video's frames (`seen`) rather than the dialogue (`scenes`).
+        public var isFromVideo: Bool
+
+        public init(start: MediaTime, text: String, isFromVideo: Bool) {
+            self.start = start
+            self.text = text
+            self.isFromVideo = isFromVideo
+        }
+    }
+
+    /// Every scene line of `scenes` and `seen` that starts with its time ("12:40 …", or "1:02:40 …"), in time order.
+    public var timedScenes: [TimedScene] {
+        func parse(_ text: String, isFromVideo: Bool) -> [TimedScene] {
+            text.split(whereSeparator: \.isNewline).compactMap { row in
+                let row = row.trimmingCharacters(in: .whitespaces)
+                guard let space = row.firstIndex(of: " ") else { return nil }
+                let parts = row[..<space].split(separator: ":").map { Int($0) }
+                guard (2...3).contains(parts.count), parts.allSatisfy({ $0 != nil }) else { return nil }
+                let seconds = parts.compactMap { $0 }.reduce(0) { $0 * 60 + $1 }
+                return TimedScene(start: MediaTime(value: Int64(seconds), timescale: 1), text: row, isFromVideo: isFromVideo)
+            }
+        }
+        let video = scenesIncludeVideo ? [] : parse(seen, isFromVideo: true)
+        return (parse(scenes, isFromVideo: false) + video).sorted { $0.start < $1.start }
     }
 
     /// Adds a row for every voice no person has, so each speaker can be named.

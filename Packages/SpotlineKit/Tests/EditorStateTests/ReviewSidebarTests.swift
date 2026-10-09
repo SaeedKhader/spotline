@@ -374,6 +374,11 @@ struct ReviewSidebarTests {
             Cue(start: f(100), end: f(160), text: "Next"),
         ])
         let cue = editor.track.cues[0]
+        // Hidden until Review › Show Frame Issues is on.
+        #expect(editor.isOn(.toggleFrameIssues) == false)
+        #expect(editor.reviewItems(in: .all).filter { $0.cueID == cue.id }.map(\.kind) == [.issues])
+        #expect(!editor.canPerform(.reviewFrames))
+        #expect(editor.perform(.toggleFrameIssues))
         #expect(editor.reviewItems(in: .all).filter { $0.cueID == cue.id }.map(\.kind) == [.issues, .frames])
         #expect(editor.reviewCount(in: .frames) == 1)
         let frames = ReviewItem(cueID: cue.id, kind: .frames, start: cue.start)
@@ -383,6 +388,9 @@ struct ReviewSidebarTests {
         #expect(editor.reviewSuggestions(for: issues).allSatisfy { !$0.clears.contains("gap") || $0.clears.count > 1 })
         #expect(editor.perform(.reviewFrames))
         #expect(editor.reviewItems.map(\.kind) == [.frames])
+        // Hiding them again leaves their filter.
+        #expect(editor.perform(.toggleFrameIssues))
+        #expect(editor.reviewScope == .all && editor.reviewCount(in: .frames) == 0)
     }
 
     @Test func aReadingSpeedNoFixCanLowerCanBeIgnoredUntilItGetsFaster() {

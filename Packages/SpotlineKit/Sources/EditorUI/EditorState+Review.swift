@@ -143,6 +143,13 @@ public enum ReviewDecision: Equatable, Sendable {
     case suggestion(Int)
     /// Accept a reading speed no fix can bring down (an issue card's Ignore).
     case ignoreReadingSpeed
+    /// A glossary card's Add: the word the line used becomes another translation of the term.
+    case addGlossaryWord
+    /// A glossary card's Ignore: the line keeps its wording without the terms it misses.
+    case ignoreGlossaryTerms
+    /// A glossary card's Add or Replace on a word picked from the line, when none stood out.
+    case addChosenGlossaryWord(String)
+    case replaceChosenGlossaryWord(String)
 }
 
 /// A card whose options are being tried: what they were when the first was
@@ -159,6 +166,21 @@ public struct ReviewTrial: Equatable, Sendable {
 }
 
 /// A one-click fix on an issue card: "Extend to 00:00:02:20", "Rebalance lines".
+/// One thing a glossary card offers (`EditorState.glossaryOptions`).
+public struct GlossaryOption: Hashable, Sendable {
+    public enum Action: Hashable, Sendable {
+        /// The line with the agreed translation in place of the word it used.
+        case replace(String)
+        /// The word the line used, as another translation of the term.
+        case allow(source: String, translation: String)
+        /// The line stays without the term.
+        case ignore(source: String)
+    }
+
+    public var title: String
+    public var action: Action
+}
+
 public struct ReviewSuggestion: Hashable, Sendable {
     public enum Action: Hashable, Sendable {
         case fix(QCFix)
@@ -262,7 +284,7 @@ extension EditorState {
             if cueIssues.contains(where: { !$0.kind.isFrameIssue && !$0.kind.isGlossaryIssue }) {
                 items.append(ReviewItem(cueID: cue.id, kind: .issues, start: cue.start))
             }
-            if cueIssues.contains(where: \.kind.isFrameIssue) {
+            if showsFrameIssues, cueIssues.contains(where: \.kind.isFrameIssue) {
                 items.append(ReviewItem(cueID: cue.id, kind: .frames, start: cue.start))
             }
         }
@@ -396,6 +418,19 @@ extension EditorState {
             let original = reviewTrials[item.id].map { $0.before.first { $0.id == item.cueID }?.flag?.chosen } ?? flag.chosen
             if !flag.isResolved { chooseVariant(flag.chosen, forCue: item.cueID) }
             outcome = original == flag.chosen ? "Reading kept" : "Other reading used"
+        case (.glossary, .addGlossaryWord):
+            guard let option = glossaryAddition(forCue: item.cueID) else { return }
+            applyGlossaryOption(option, forCue: item.cueID)
+            outcome = option.title.replacing("Add ", with: "Added ", maxReplacements: 1)
+        case (.glossary, .addChosenGlossaryWord(let word)):
+            guard let title = addChosenGlossaryWord(word, forCue: item.cueID) else { return }
+            outcome = title.replacing("Add ", with: "Added ", maxReplacements: 1)
+        case (.glossary, .replaceChosenGlossaryWord(let word)):
+            guard let title = replaceChosenGlossaryWord(word, forCue: item.cueID) else { return }
+            outcome = title.replacing("Replace ", with: "Replaced ", maxReplacements: 1)
+        case (.glossary, .ignoreGlossaryTerms):
+            guard ignoreGlossaryTerms(forCue: item.cueID) else { return }
+            outcome = "Line kept as it is"
         case (.glossary, .primary):
             // Replace: the agreed term goes in and the card is settled, in one step.
             guard let replacement = glossaryReplacement(forCue: item.cueID), let index = track.cues.firstIndex(where: { $0.id == item.cueID })
