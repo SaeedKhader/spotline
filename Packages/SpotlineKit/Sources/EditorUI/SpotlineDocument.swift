@@ -68,6 +68,8 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
         window.identifier = NSUserInterfaceItemIdentifier("main")
+        // UI tests run the same app; a test's project left open would come back on the next normal launch.
+        window.isRestorable = !editor.launchOptions.isUITestMode
         // Wide enough for the cue list (source and target when translating), the video and the review sidebar.
         window.setContentSize(NSSize(width: 1440, height: 860))
         window.center()
