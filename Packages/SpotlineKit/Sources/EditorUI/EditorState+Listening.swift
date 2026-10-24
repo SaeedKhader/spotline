@@ -135,10 +135,22 @@ extension EditorState {
         } else if alignment.coversAudio {
             reportError("The subtitles are on the audio.", AIError.nothingToDo("No shift or change of speed would bring them closer to when the lines are said."))
         } else {
-            reportError(
-                "The subtitles can't be synced to the audio.",
-                AIError.nothingToDo("Too few of their words were heard in it: they may be another video's, or in another language than the transcript.")
-            )
+            reportError("The subtitles can't be synced to the audio.", AIError.nothingToDo(Self.subtitlesNotHeardReason))
+        }
+    }
+
+    /// Why a subtitle file's cues were not matched to the audio.
+    static let subtitlesNotHeardReason = "Too few of their words were heard in it: they may be another video's, or in another language than the audio."
+
+    /// Listening heard too few of the subtitle file's words, and there was no gap to transcribe
+    /// into. Translate with AI waits for the user to go on with them as they are (or import the
+    /// right file); by itself, it says so and builds no brief.
+    func subtitlesNotHeard() {
+        if aiFlow != nil {
+            aiFlow?.current = nil
+            aiFlow?.stop = .subtitlesNotHeard
+        } else {
+            reportError("The subtitles don't match the audio.", AIError.nothingToDo(Self.subtitlesNotHeardReason))
         }
     }
 
