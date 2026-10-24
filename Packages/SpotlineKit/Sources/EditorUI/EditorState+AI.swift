@@ -391,13 +391,21 @@ extension EditorState {
         if selectedCueID == nil, let first = changes.min(by: { $0.cue.start < $1.cue.start }) { select(first.cueID) }
     }
 
+    /// What a tool that had cues of the user's to work with did instead of writing cues.
+    enum InsteadOfCues {
+        /// It worked on them: what it did.
+        case done(AITaskSummary)
+        /// It could not, and has said why itself.
+        case stopped(String)
+    }
+
     /// Runs `work` in the background with its progress over the cue list. Results it
     /// passes to `propose` go into the track at once; its final result adds the rest.
     /// `summary` says what the tool did, from the cues it wrote.
     private func startAITask(
         _ status: AITaskStatus,
         afterward: (@MainActor () -> Void)? = nil,
-        whenNothingWritten: (@MainActor () -> AITaskSummary?)? = nil,
+        whenNothingWritten: (@MainActor () -> InsteadOfCues?)? = nil,
         summary: @escaping @MainActor (_ written: [Cue]) -> AITaskSummary,
         _ work: @escaping @MainActor (
             _ report: @escaping @Sendable (AITaskStep) -> Void, _ propose: @escaping @Sendable (ProposedChangeSet) -> Void
@@ -440,10 +448,15 @@ extension EditorState {
                 let written = self.track.cues.filter { self.appliedAIChanges.contains($0.id) }
                 self.aiTask = nil
                 // A tool that had cues of the user's to work with wrote none, and says what it did instead.
-                if written.isEmpty, let done = whenNothingWritten?() {
-                    self.show(done)
-                    if !self.reviewItems(in: .all).isEmpty { self.wantsReviewSidebar = true }
-                    self.onAITaskEnd?(AITaskEnd(title: "\(title) finished", message: done.fullText, succeeded: true))
+                if written.isEmpty, let instead = whenNothingWritten?() {
+                    switch instead {
+                    case .done(let done):
+                        self.show(done)
+                        if !self.reviewItems(in: .all).isEmpty { self.wantsReviewSidebar = true }
+                        self.onAITaskEnd?(AITaskEnd(title: "\(title) finished", message: done.fullText, succeeded: true))
+                    case .stopped(let reason):
+                        self.onAITaskEnd?(AITaskEnd(title: "\(title) stopped", message: reason, succeeded: false))
+                    }
                     return
                 }
                 if written.isEmpty {
@@ -526,6 +539,8 @@ extension EditorState {
         // already: then the transcript adds no cues, and is matched to them instead.
         let own = isTranslating ? [] : cuesOfTheirOwn
         let listened = Mutex<TranscriptAlignment?>(nil)
+        // Or the cues are not what was heard: another video's subtitles, or another language's.
+        let notHeard = Mutex(false)
         let prepare = prepareAudio
         let provider = aiSettings.transcription
         // Words this project already got from the provider are used again, not paid for and uploaded again.
@@ -547,7 +562,11 @@ extension EditorState {
         startAITask(
             status, afterward: { [weak self] in self?.afterListening() },
             whenNothingWritten: { [weak self] in
-                listened.withLock { $0 }.flatMap { self?.addTranscript($0, thenBrief: true) }
+                guard let self else { return nil }
+                if let alignment = listened.withLock({ $0 }) { return .done(self.addTranscript(alignment, thenBrief: true)) }
+                guard notHeard.withLock({ $0 }) else { return nil }
+                self.subtitlesNotHeard()
+                return .stopped(Self.subtitlesNotHeardReason)
             }, summary: Self.transcriptionSummary
         ) { [weak self] report, propose in
             let words: [TranscribedWord]
@@ -594,6 +613,9 @@ extension EditorState {
                     listened.withLock { $0 = alignment }
                     return ProposedChangeSet(title: "Transcription", changes: [])
                 }
+                // Not this audio's words: a few typed cues still get the rest transcribed around
+                // them; a file that leaves no gap to fill is said not to be heard.
+                notHeard.withLock { $0 = true }
             }
             let cues = try await Self.runDetached { accumulator.finish(with: words) }
             return Proposals.transcription(cues, existing: existing)
