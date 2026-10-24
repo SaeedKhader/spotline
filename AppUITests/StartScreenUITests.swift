@@ -36,6 +36,8 @@ final class StartScreenUITests: XCTestCase {
     @MainActor
     func testTranslateShowsTheTranslatePageAndStarts() throws {
         let app = launchOnTheQuestion(["-UITestEpisodeBrief"])
+        // The clip's subtitle file is not what its audio says, so listening would find nothing to match: transcribe instead.
+        app.buttons[AccessibilityID.Start.choice("transcribe")].click()
         app.buttons[AccessibilityID.Start.translateButton].click()
         let page = app.descendants(matching: .any)[AccessibilityID.TranslatePage.root]
         XCTAssertTrue(page.waitForExistence(timeout: 10), "Translate did not show the Translate page")
