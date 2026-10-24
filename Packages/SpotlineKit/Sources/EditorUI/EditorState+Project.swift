@@ -60,6 +60,7 @@ extension EditorState {
         if let preset = project.qcPresetID.flatMap(QCPreset.named) { selectQCPreset(id: preset.id) }
         agentWrittenCues = Set(project.agentWrittenCueIDs)
         page = project.page.flatMap(EditorPage.init) ?? .edit
+        startPhase = nil
         storedAnalysis = project.analysis
         storedTranscripts = project.transcripts
         mediaReference = project.media

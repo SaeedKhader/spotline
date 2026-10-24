@@ -179,6 +179,12 @@ private struct StageScreen: View {
         case .waiting:
             waiting
         default:
+            if stage == .source, let heard = editor.listeningSummary {
+                Label(heard, systemImage: "waveform")
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
+            }
             if stage == .choices, !editor.cuesToChoose.isEmpty {
                 box("\((overview.summaries[.choices] ?? "")). For now they are reviewed on the Edit page, beside the lines.") {
                     Button("Review Choices") {
@@ -207,7 +213,13 @@ private struct StageScreen: View {
                     .accessibilityIdentifier(AccessibilityID.command(EditorCommand.continueAIFlow.id))
             }
         case .syncQuestion:
-            box("The subtitle is off the audio. Answer the question to go on.") { EmptyView() }
+            box("\(editor.subtitleSyncSummary ?? "The subtitle is off the audio.") Move every line onto when it is said? You can undo it.") {
+                Button("Leave as It Is") { editor.dismissSubtitleSync() }
+                    .accessibilityIdentifier(AccessibilityID.Sync.leave)
+                Button(EditorCommand.applySubtitleSync.title) { editor.perform(.applySubtitleSync) }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(AccessibilityID.Sync.apply)
+            }
         case nil:
             EmptyView()
         }

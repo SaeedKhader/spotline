@@ -27,6 +27,12 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
         editor.projectActions = self
         editor.projectDidChange = { [weak self] change in self?.editorDidChange(change) }
         editor.aiToolWillStart = { [weak self] in self?.saveNextToVideoIfUntitled() }
+        // A project picked on the start screen opens in its own window; this empty one goes.
+        editor.openProjectFromStart = { [weak self] url in
+            guard let self else { return }
+            self.workspace.openProject(at: url)
+            if self.fileURL == nil, !self.editor.hasMedia { self.close() }
+        }
         let window = ObjectIdentifier(self)
         editor.onAITaskChange = { task in AIActivity.shared.update(task, for: window) }
         if !editor.launchOptions.isUITestMode { editor.onAITaskEnd = { end in AIActivity.shared.ended(end) } }
@@ -62,6 +68,8 @@ public final class SpotlineDocument: NSDocument, ProjectActions {
         window.toolbar = toolbar
         window.toolbarStyle = .unifiedCompact
         window.identifier = NSUserInterfaceItemIdentifier("main")
+        // UI tests run the same app; a test's project left open would come back on the next normal launch.
+        window.isRestorable = !editor.launchOptions.isUITestMode
         // Wide enough for the cue list (source and target when translating), the video and the review sidebar.
         window.setContentSize(NSSize(width: 1440, height: 860))
         window.center()

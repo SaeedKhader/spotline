@@ -335,6 +335,15 @@ public final class EditorState {
     public internal(set) var isReviewingScript = false
     /// The run of Translate with AI in progress or waiting for the user, nil when none (`EditorState+AIFlow`).
     public internal(set) var aiFlow: AIFlowRun?
+    /// The start screen while it shows: choosing a video, then its subtitle. Nil once the project has
+    /// what it works on (`EditorState+Start`).
+    public internal(set) var startPhase: StartPhase?
+    /// Subtitle files beside the video, and files the user added on the start screen.
+    public internal(set) var startSubtitleFiles: [URL] = []
+    /// What listening to the audio found, for the Source stage: "Heard 449 of 451 cues in the audio · 3 lines differ".
+    public internal(set) var listeningSummary: String?
+    /// Opens a project from the start screen in its own window and closes this one. The document sets it.
+    @ObservationIgnored public var openProjectFromStart: (@MainActor (URL) -> Void)?
     /// Which page the window shows: the Translate page (the AI flow) or the Edit page (the subtitle editor).
     public internal(set) var page: EditorPage = .edit {
         didSet { if page != oldValue, !isLoadingProject { projectDidChange?(.other) } }
@@ -484,6 +493,10 @@ public final class EditorState {
             undoManager.removeAllActions()
             refreshUndoState()
             hasUnsavedChanges = false
+        }
+        let opensFiles = launchOptions.subtitlesURL != nil || launchOptions.sourceSubtitlesURL != nil || launchOptions.projectURL != nil
+        if launchOptions.showsStartScreen, !opensFiles, launchOptions.mediaURL == nil || launchOptions.isUITestMode {
+            startPhase = .chooseVideo
         }
     }
 
@@ -931,6 +944,8 @@ public final class EditorState {
 
     /// Replaces the cues with the file's. Undoable; reports errors through `reportError`.
     public func importSubtitles(from url: URL) {
+        // Subtitles brought in from the menus or a drop on the editor: the start screen is done.
+        startPhase = nil
         do {
             let (format, imported) = try SubtitleFile.read(from: url)
             replaceTrack(with: imported)
@@ -1580,6 +1595,7 @@ public final class EditorState {
         // Analyze again when the player switches to another audio track than the waveform shows.
         let audioTrackChanged = status.audioStreamIndex.map { $0 != analyzedAudioStream } ?? false
         if mediaChanged {
+            if status.mediaURL != nil, startPhase == .chooseVideo { startSubtitleQuestion() }
             mediaDidOpen()
             findEmbeddedSubtitles()
             startWaveformAnalysis()
@@ -1603,8 +1619,9 @@ public final class EditorState {
             let tracks = ((try? await list(url)) ?? []).filter(\.isText)
             guard let self, !Task.isCancelled, self.status.mediaURL == url else { return }
             self.embeddedSubtitles = tracks
-            // A project that has cues already has its subtitles.
-            if !tracks.isEmpty, self.track.cues.isEmpty || self.projectURL == nil, self.markEmbeddedSubtitlesOffered(for: url) {
+            // A project that has cues already has its subtitles; the start screen offers them itself.
+            if !tracks.isEmpty, self.startPhase == nil, self.track.cues.isEmpty || self.projectURL == nil,
+               self.markEmbeddedSubtitlesOffered(for: url) {
                 self.isEmbeddedSubtitlesSheetShown = true
             }
         }
@@ -1623,6 +1640,11 @@ public final class EditorState {
     /// Replaces the cues with an embedded track's (undoable), then closes the
     /// sheet. With `savesCopy`, asks where to save them as a file next.
     public func importEmbeddedSubtitles(streamIndex: Int, savesCopy: Bool) {
+        importEmbeddedSubtitles(streamIndex: streamIndex, savesCopy: savesCopy, then: nil)
+    }
+
+    /// The same, then `done` with whether the track came in.
+    func importEmbeddedSubtitles(streamIndex: Int, savesCopy: Bool, then done: (@MainActor (Bool) -> Void)?) {
         guard let url = status.mediaURL, embeddedSubtitlesJob == nil,
               let embedded = embeddedSubtitles.first(where: { $0.streamIndex == streamIndex }), embedded.isText
         else { return }
@@ -1656,6 +1678,7 @@ public final class EditorState {
             case .failure(let error):
                 self.reportError("“\(embedded.displayName)” could not be imported.", error)
             }
+            done?((try? result.get()) != nil)
         }
     }
 

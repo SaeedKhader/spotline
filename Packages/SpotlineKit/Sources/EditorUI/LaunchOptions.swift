@@ -25,11 +25,14 @@ public struct LaunchOptions: Sendable {
     public var performanceReportURL: URL?
     /// Quits once the performance run is done, from `-PerfQuit`.
     public var quitsAfterPerformanceRun: Bool
+    /// A new window shows the start screen. Off in UI tests unless `-UITestStartScreen`, where it
+    /// also shows with `-OpenMedia` (asking about the subtitle), so the tests can reach it.
+    public var showsStartScreen: Bool
 
     public init(
         isUITestMode: Bool = false, mediaURL: URL? = nil, subtitlesURL: URL? = nil, sourceSubtitlesURL: URL? = nil,
         projectURL: URL? = nil, usesAnalysisCache: Bool? = nil, enablesAgentAccess: Bool = false, buildsEpisodeBrief: Bool = false,
-        performanceReportURL: URL? = nil, quitsAfterPerformanceRun: Bool = false
+        performanceReportURL: URL? = nil, quitsAfterPerformanceRun: Bool = false, showsStartScreen: Bool? = nil
     ) {
         self.isUITestMode = isUITestMode
         self.mediaURL = mediaURL
@@ -41,6 +44,7 @@ public struct LaunchOptions: Sendable {
         self.buildsEpisodeBrief = buildsEpisodeBrief
         self.performanceReportURL = performanceReportURL
         self.quitsAfterPerformanceRun = quitsAfterPerformanceRun
+        self.showsStartScreen = showsStartScreen ?? !isUITestMode
     }
 
     /// The same switches without the files to open, for every window after the first.
@@ -69,7 +73,8 @@ public struct LaunchOptions: Sendable {
             enablesAgentAccess: arguments.contains("-EnableAgentAccess"),
             buildsEpisodeBrief: arguments.contains("-UITestEpisodeBrief"),
             performanceReportURL: path(after: "-PerfReport"),
-            quitsAfterPerformanceRun: arguments.contains("-PerfQuit")
+            quitsAfterPerformanceRun: arguments.contains("-PerfQuit"),
+            showsStartScreen: arguments.contains("-UITestMode") ? arguments.contains("-UITestStartScreen") : nil
         )
     }
 }
