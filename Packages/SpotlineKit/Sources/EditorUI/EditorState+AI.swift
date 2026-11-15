@@ -567,7 +567,11 @@ extension EditorState {
                 guard notHeard.withLock({ $0 }) else { return nil }
                 self.subtitlesNotHeard()
                 return .stopped(Self.subtitlesNotHeardReason)
-            }, summary: Self.transcriptionSummary
+            }, summary: { [weak self] written in
+                let summary = Self.transcriptionSummary(written)
+                self?.listeningSummary = summary.fullText
+                return summary
+            }
         ) { [weak self] report, propose in
             let words: [TranscribedWord]
             let accumulator: TranscriptAccumulator

@@ -73,10 +73,12 @@ extension EditorState {
             afterListening()
         }
         let total = alignment.cues.count
-        return AITaskSummary(
+        let summary = AITaskSummary(
             text: "Heard \(heard) of \(total == 1 ? "1 cue" : "\(total) cues") in the audio",
             followUp: differing == 0 ? nil : differing == 1 ? "1 line differs" : "\(differing) lines differ"
         )
+        listeningSummary = summary.fullText
+        return summary
     }
 
     /// After a subtitle file is imported into a project that has a transcript already:

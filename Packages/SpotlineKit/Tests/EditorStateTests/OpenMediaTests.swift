@@ -21,7 +21,8 @@ struct OpenMediaTests {
     }
 
     func makeEditor() -> EditorState {
-        let editor = EditorState(launchOptions: LaunchOptions(), playback: SimulatedPlaybackEngine(frameRate: rate))
+        // The editor itself, without the start screen a new window shows.
+        let editor = EditorState(launchOptions: LaunchOptions(showsStartScreen: false), playback: SimulatedPlaybackEngine(frameRate: rate))
         editor.analyzeWaveform = { _, _, _ in AudioAnalysis(waveform: Waveform(peaks: [1, 2]), audioStreamIndex: 1) }
         editor.analyzeSpeech = { _, _, _ in [] }
         editor.analyzeShotChanges = { _, _ in [MediaTime(value: 1, timescale: 1)] }
