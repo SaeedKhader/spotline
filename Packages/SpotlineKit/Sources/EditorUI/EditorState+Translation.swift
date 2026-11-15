@@ -29,6 +29,7 @@ extension EditorState {
     /// copy of the source's timing with no text (one undoable edit); cues already
     /// there are paired with the source cues they overlap.
     public func openSourceSubtitles(from url: URL) {
+        startPhase = nil
         do {
             var (format, source) = try SubtitleFile.read(from: url)
             if source.languageCode == "und" { source.languageCode = Self.detectLanguage(of: source.cues) ?? "und" }
