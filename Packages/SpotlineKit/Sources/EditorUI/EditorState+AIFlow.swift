@@ -99,6 +99,8 @@ public struct AIFlowRun: Equatable, Sendable {
     public enum Stop: Equatable, Sendable {
         /// The question whether to move the subtitles onto the audio is open.
         case syncQuestion
+        /// Too few of the subtitle file's words were heard in the audio: go on with them as they are?
+        case subtitlesNotHeard
         /// The episode brief is to be confirmed before anything reads it.
         case confirmBrief
         /// Lines with words to check or an AI Review card, to fix before they are translated.
@@ -340,7 +342,7 @@ extension EditorState {
         if let run = aiFlow {
             if let current = run.current, stage.steps.contains(current) { return .running }
             switch (run.stop, stage) {
-            case (.syncQuestion, .source), (.confirmBrief, .brief), (.checkLines, .check): return .waiting
+            case (.syncQuestion, .source), (.subtitlesNotHeard, .source), (.confirmBrief, .brief), (.checkLines, .check): return .waiting
             default: break
             }
         }
@@ -367,7 +369,7 @@ extension EditorState {
         if state == .running, let task = aiTask { return task.detail }
         switch stage {
         case .source:
-            if state == .waiting { return "Decide on the timing" }
+            if state == .waiting { return aiFlow?.stop == .subtitlesNotHeard ? "The subtitles were not heard in it" : "Decide on the timing" }
             if state == .done { return !isTranslating && !cuesOfTheirOwn.isEmpty ? "Matched to the audio" : "Listened to the audio" }
             return state == .off ? "Not ticked" : hasMedia ? "To do" : "Needs the video"
         case .brief:
@@ -521,6 +523,8 @@ extension EditorState {
             advanceAIFlow()
         case .confirmBrief:
             isBriefSheetShown = true
+        case .subtitlesNotHeard:
+            aiFlowFinished(.listen)
         case .syncQuestion, nil:
             advanceAIFlow()
         }
@@ -531,14 +535,18 @@ extension EditorState {
         switch aiFlow?.stop {
         case .confirmBrief: "Confirm the episode brief to go on"
         case .checkLines(let count): count == 1 ? "1 line to check before translating" : "\(count) lines to check before translating"
+        case .subtitlesNotHeard: "The subtitles were not heard in the audio"
         case .syncQuestion, nil: nil
         }
     }
 
     /// The stopped flow's button title.
     public var aiFlowContinueTitle: String {
-        if case .confirmBrief = aiFlow?.stop { return "Open Brief" }
-        return "Translate Anyway"
+        switch aiFlow?.stop {
+        case .confirmBrief: "Open Brief"
+        case .subtitlesNotHeard: "Go On Anyway"
+        default: "Translate Anyway"
+        }
     }
 
     func canPerformAIFlow(_ command: EditorCommand) -> Bool {

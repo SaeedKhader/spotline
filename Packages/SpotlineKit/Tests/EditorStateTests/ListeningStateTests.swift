@@ -95,6 +95,50 @@ struct ListeningStateTests {
         #expect(editor.track.cues.dropFirst(2).allSatisfy { $0.isAIGenerated == true })
     }
 
+    /// Another video's subtitles at the same times: none of their words are heard, and no gap is left to transcribe.
+    func otherSubtitles() -> [Cue] {
+        subtitles().map { Cue(start: $0.start, end: $0.end, text: "Oranges and lemons, say bells of St Clement's.") }
+    }
+
+    @Test func subtitlesThatAreNotTheAudiosAreSaidToBeSo() async {
+        let other = otherSubtitles()
+        let editor = makeEditor(cues: other, briefBuilder: ScriptedBriefBuilder())
+        var errors: [String] = []
+        editor.reportError = { title, error in errors.append("\(title) \(error.localizedDescription)") }
+        #expect(editor.perform(.transcribe))
+        await tests.finish(editor)
+        #expect(errors == ["The subtitles don't match the audio. \(EditorState.subtitlesNotHeardReason)"], "Not that every cue is as the tool would make it")
+        #expect(editor.track.cues == other, "Nothing is added to them")
+        #expect(!editor.isBuildingBrief && editor.track.brief == nil, "No brief is built over subtitles that may be another video's")
+    }
+
+    @Test func translateWithAIWaitsWhenTheSubtitlesAreNotTheAudios() async throws {
+        let editor = makeEditor(cues: otherSubtitles(), briefBuilder: ScriptedBriefBuilder())
+        editor.startAIFlow([.listen, .brief, .translate])
+        for _ in 0..<600 where editor.aiTask != nil || (editor.aiFlow != nil && editor.aiFlow?.stop == nil) {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        // No alert over the window (the editor records one as an issue): the run waits, and says why.
+        #expect(editor.aiFlow?.stop == .subtitlesNotHeard)
+        #expect(editor.aiFlow?.current == nil)
+        #expect(editor.aiFlowStopText == "The subtitles were not heard in the audio")
+        #expect(editor.aiFlowContinueTitle == "Go On Anyway")
+        #expect(editor.stageState(.source) == .waiting)
+        #expect(editor.stageSummary(.source) == "The subtitles were not heard in it")
+        #expect(!editor.isBriefSheetShown && editor.track.brief == nil)
+        #expect(editor.track.cues.allSatisfy { $0.isAIGenerated == nil && $0.voices == nil })
+
+        // Going on builds the brief from the cues as they are, and the run stops for it.
+        #expect(editor.perform(.continueAIFlow))
+        for _ in 0..<600 where editor.aiTask != nil || editor.aiFlow?.stop == .subtitlesNotHeard {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(editor.aiFlow?.finished == [.listen, .brief])
+        #expect(editor.aiFlow?.stop == .confirmBrief)
+        #expect(editor.isBriefSheetShown)
+        #expect(editor.track.brief != nil)
+    }
+
     @Test func lateSubtitlesAreAskedAboutAndTheBriefWaitsForTheAnswer() async throws {
         let editor = makeEditor(cues: subtitles(late: 1.5), briefBuilder: ScriptedBriefBuilder())
         #expect(!editor.canPerform(.syncSubtitlesToAudio), "Nothing was heard yet")

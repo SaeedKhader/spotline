@@ -220,6 +220,11 @@ private struct StageScreen: View {
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier(AccessibilityID.Sync.apply)
             }
+        case .subtitlesNotHeard:
+            box("Too few of the subtitle's words were heard in the audio: it may be another video's, or in another language. Import the right file and start again, or go on without knowing who says each line.") {
+                Button(editor.aiFlowContinueTitle) { editor.perform(.continueAIFlow) }
+                    .accessibilityIdentifier(AccessibilityID.command(EditorCommand.continueAIFlow.id))
+            }
         case nil:
             EmptyView()
         }
